@@ -1,0 +1,511 @@
+/* thread.js · gateway v0.5
+ *
+ * 永久 chat thread + @引用系统。
+ * 任何外部代码（journal.js / ritual.js / korok.js）调
+ *   window.gateway.thread.addRef({kind, label, payload})
+ * 把一个 ref 加进 pending area。
+ * 用户输入 message + ⏎ 发送 → /api/chat with history + refs as context。
+ * AI 回复落进 thread 持续累积。
+ *
+ * 也暴露 window.gateway.whisper(text) ——AI 偶尔说一句话，不需要打开 thread。
+ */
+
+(function () {
+  const THREAD_KEY = "gateway.thread.history.v1";
+  const MODEL_KEY = "gateway.thread.model_id.v1";
+  const MAX_HISTORY = 100;      // 发给 server 的总条数;server 取最近 20 原文,更早的做摘要
+  const PERSIST_LIMIT = 200;    // localStorage 最多存 N 条
+
+  // ── state ────────────────────────────────────────────
+  const state = {
+    history: loadHistory(),   // [{role: 'user'|'assistant', content, refs?: [...]}]
+    pending: [],              // [{kind, label, payload}]
+    open: false,
+    apiOk: null,
+  };
+
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem(THREAD_KEY);
+      if (!raw) return [];
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.slice(-PERSIST_LIMIT) : [];
+    } catch { return []; }
+  }
+  function saveHistory() {
+    try {
+      localStorage.setItem(
+        THREAD_KEY,
+        JSON.stringify(state.history.slice(-PERSIST_LIMIT))
+      );
+    } catch {}
+  }
+
+  // ── DOM ──────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const thread = $("thread");
+  const tab = $("threadTab");
+  const stream = $("threadStream");
+  const pendingBox = $("threadPending");
+  const input = $("threadInput");
+  const statusEl = $("threadStatus");
+  const closeBtn = $("threadClose");
+  const toggleBtn = $("threadToggleTop");
+  const whisperEl = $("whisper");
+  const hintLeft = $("threadHintLeft");
+  const modelSel = $("threadModel");
+
+  // ── model picker (multi-provider 切换) ─────────────────
+  let activeModelId = (() => { try { return localStorage.getItem(MODEL_KEY) || ""; } catch { return ""; } })();
+  async function loadModels() {
+    if (!modelSel) return;
+    try {
+      const r = await fetch("/api/models");
+      const d = await r.json();
+      const opts = d.models || [];
+      modelSel.innerHTML = "";
+      if (!opts.length) {
+        modelSel.innerHTML = `<option value="">(no models)</option>`;
+        modelSel.disabled = true;
+        return;
+      }
+      const initial = opts.find(o => o.id === activeModelId) ? activeModelId : (d.default_id || opts[0].id);
+      activeModelId = initial;
+      for (const o of opts) {
+        const op = document.createElement("option");
+        op.value = o.id;
+        op.textContent = o.label || o.id;
+        if (o.id === initial) op.selected = true;
+        modelSel.appendChild(op);
+      }
+      modelSel.addEventListener("change", () => {
+        activeModelId = modelSel.value;
+        try { localStorage.setItem(MODEL_KEY, activeModelId); } catch {}
+        whisper(`已切换到 ${modelSel.options[modelSel.selectedIndex].text}`);
+      });
+    } catch (e) {
+      modelSel.innerHTML = `<option value="">⚠</option>`;
+      modelSel.disabled = true;
+    }
+  }
+
+  // ── open / close ─────────────────────────────────────
+  function setOpen(v) {
+    state.open = v;
+    thread.classList.toggle("on", v);
+    document.body.classList.toggle("thread-open", v);
+    if (v) {
+      setTimeout(() => input.focus({ preventScroll: true }), 350);
+      scrollToBottom();
+    }
+  }
+  function toggle() { setOpen(!state.open); }
+  tab.addEventListener("click", toggle);
+  toggleBtn.addEventListener("click", toggle);
+  closeBtn.addEventListener("click", () => setOpen(false));
+
+  // ── pending refs ─────────────────────────────────────
+  function renderPending() {
+    pendingBox.innerHTML = "";
+    for (const r of state.pending) {
+      const chip = document.createElement("span");
+      chip.className = r.kind === "image" ? "pending-ref pending-image" : "pending-ref";
+      if (r.kind === "image" && r.payload?.url) {
+        chip.innerHTML = `<img class="pending-thumb" alt=""><span class="ref-label"></span><span class="x">×</span>`;
+        chip.querySelector(".pending-thumb").src = r.payload.url;
+      } else {
+        chip.innerHTML = `<span class="ref-label"></span><span class="x">×</span>`;
+      }
+      chip.querySelector(".ref-label").textContent = r.label;
+      chip.querySelector(".x").addEventListener("click", (e) => {
+        e.stopPropagation();
+        state.pending = state.pending.filter(p => p !== r);
+        renderPending();
+        if (state.pending.length === 0) hintLeft.textContent = "点页面上任意东西 → 把它带进对话";
+      });
+      pendingBox.appendChild(chip);
+    }
+  }
+
+  function addRef(ref) {
+    // dedupe by (kind, label)
+    if (state.pending.find(p => p.kind === ref.kind && p.label === ref.label)) {
+      flash(ref.label);
+      return;
+    }
+    state.pending.push(ref);
+    renderPending();
+    setOpen(true);
+    hintLeft.textContent = `已捎上 ${state.pending.length} 处 · 跟它说`;
+    flash(ref.label);
+  }
+
+  // ── image drop & upload ──────────────────────────────
+  async function uploadImage(file) {
+    const fd = new FormData();
+    fd.append("file", file);
+    statusEl.textContent = "上传中…";
+    try {
+      const r = await fetch("/api/chat/upload-image", { method: "POST", body: fd });
+      const data = await r.json();
+      if (!r.ok) {
+        statusEl.textContent = data.detail || "上传失败";
+        statusEl.className = "thread-status err";
+        setTimeout(() => fetch("/api/config-status").then(x=>x.json()).then(s=>{
+          statusEl.textContent = s.ok ? (s.model||"ok") : (s.reason||"off");
+          statusEl.className = s.ok ? "thread-status ok" : "thread-status err";
+        }), 2200);
+        return null;
+      }
+      statusEl.textContent = "图已存";
+      statusEl.className = "thread-status ok";
+      addRef({
+        kind: "image",
+        label: data.original || data.filename,
+        payload: { url: data.url, filename: data.filename, original: data.original, size: data.size },
+      });
+      return data;
+    } catch (e) {
+      statusEl.textContent = "上传报错";
+      statusEl.className = "thread-status err";
+      return null;
+    }
+  }
+
+  // 全文档级拖图:拖进任何位置自动弹开侧栏 + 高亮 dropzone
+  let dragDepth = 0;
+  function isFileDrag(e) {
+    return e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+  }
+  document.addEventListener("dragenter", (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth++;
+    if (dragDepth === 1) {
+      setOpen(true);
+      thread.classList.add("drag-over");
+    }
+  });
+  document.addEventListener("dragleave", (e) => {
+    if (!isFileDrag(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) thread.classList.remove("drag-over");
+  });
+  document.addEventListener("dragover", (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  });
+  document.addEventListener("drop", async (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    thread.classList.remove("drag-over");
+    const files = [...(e.dataTransfer?.files || [])].filter(f => f.type.startsWith("image/"));
+    if (files.length === 0) return;
+    setOpen(true);
+    for (const f of files) await uploadImage(f);
+  });
+
+  // 点 📎 按钮 → 选文件
+  const attachBtn = document.getElementById("threadAttachBtn");
+  const fileInput = document.getElementById("threadFileInput");
+  if (attachBtn && fileInput) {
+    attachBtn.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", async () => {
+      const files = [...(fileInput.files || [])].filter(f => f.type.startsWith("image/"));
+      for (const f of files) await uploadImage(f);
+      fileInput.value = ""; // 允许重选同一张
+    });
+  }
+
+  // also allow paste image into textarea
+  input.addEventListener("paste", async (e) => {
+    const items = [...(e.clipboardData?.items || [])];
+    const imgs = items.filter(it => it.kind === "file" && it.type.startsWith("image/"));
+    if (imgs.length === 0) return;
+    e.preventDefault();
+    for (const it of imgs) {
+      const f = it.getAsFile();
+      if (f) await uploadImage(f);
+    }
+  });
+
+  let flashTimer = null;
+  function flash(label) {
+    hintLeft.textContent = `← ${label}`;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => {
+      hintLeft.textContent = state.pending.length
+        ? `已捎上 ${state.pending.length} 处 · 跟它说`
+        : "点页面上任意东西 → 把它带进对话";
+    }, 1400);
+  }
+
+  // ── rendering messages ───────────────────────────────
+  function escapeHtml(s) {
+    return String(s || "").replace(/[&<>"]/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])
+    );
+  }
+  function renderText(t) {
+    // 走全局 gatewayMd (marked + DOMPurify);fallback 到纯 escape
+    return window.gatewayMd ? window.gatewayMd(t) : escapeHtml(t).replace(/\n/g, "<br>");
+  }
+
+  function renderRefsCard(refs) {
+    if (!refs || !refs.length) return "";
+    return refs.map(r => {
+      if (r.kind === "image" && r.payload?.url) {
+        return `<div class="t-ref t-ref-image">
+          <img class="ref-thumb" src="${escapeHtml(r.payload.url)}" alt="">
+          <span class="ref-text">${escapeHtml(r.label)}</span>
+        </div>`;
+      }
+      return `<div class="t-ref">
+        <span class="ref-kind">${escapeHtml(r.kind)}</span>
+        <span class="ref-text">${escapeHtml(r.label)}</span>
+      </div>`;
+    }).join("");
+  }
+
+  function appendMsg(m) {
+    const el = document.createElement("div");
+    el.className = `t-msg ${m.role === "user" ? "user" : "ai"}`;
+    el.innerHTML = `
+      <span class="who">${m.role === "user" ? "你" : "AI"}</span>
+      ${renderRefsCard(m.refs)}
+      <div class="body">${renderText(m.content)}</div>
+    `;
+    stream.appendChild(el);
+    scrollToBottom();
+  }
+  function appendAction(text) {
+    const el = document.createElement("div");
+    el.className = "t-action";
+    el.textContent = text;
+    stream.appendChild(el);
+    scrollToBottom();
+  }
+  function scrollToBottom() {
+    requestAnimationFrame(() => { stream.scrollTop = stream.scrollHeight; });
+  }
+
+  // initial render of history
+  for (const m of state.history) appendMsg(m);
+
+  // ── model picker init ────────────────────────────────
+  loadModels();
+
+  // ── API check ────────────────────────────────────────
+  fetch("/api/config-status")
+    .then(r => r.json())
+    .then(s => {
+      if (s.ok) {
+        state.apiOk = true;
+        statusEl.textContent = s.model || "ok";
+        statusEl.className = "thread-status ok";
+      } else {
+        state.apiOk = false;
+        statusEl.textContent = s.reason || "off";
+        statusEl.className = "thread-status err";
+      }
+    })
+    .catch(e => {
+      state.apiOk = false;
+      statusEl.textContent = "server?";
+      statusEl.className = "thread-status err";
+    });
+
+  // ── sending ──────────────────────────────────────────
+  async function send() {
+    const msg = input.value.trim();
+    if (!msg && state.pending.length === 0) return;
+
+    const userMsg = {
+      role: "user",
+      content: msg || "(看这里)",
+      refs: state.pending.slice(),
+    };
+    state.history.push(userMsg);
+    appendMsg(userMsg);
+    saveHistory();
+
+    const sentRefs = state.pending.slice();
+    state.pending = [];
+    renderPending();
+    input.value = "";
+    input.style.height = "auto";
+    hintLeft.textContent = "⋯";
+
+    if (state.apiOk === false) {
+      const aiMsg = { role: "assistant", content: "（AI 没接上 — 起 server / 设 api key 后再来）" };
+      state.history.push(aiMsg);
+      appendMsg(aiMsg);
+      saveHistory();
+      hintLeft.textContent = "点页面上任意东西 → 把它带进对话";
+      return;
+    }
+
+    try {
+      const context = {
+        type: "thread",
+        refs: sentRefs.map(r => ({ kind: r.kind, label: r.label, payload: r.payload })),
+      };
+      // last N messages as conversation history
+      const history = state.history.slice(-MAX_HISTORY - 1, -1).map(m => ({
+        role: m.role,
+        content: m.refs && m.refs.length
+          ? `(用户指着这些):\n${m.refs.map(r => `[${r.kind}] ${r.label}`).join("\n")}\n\n${m.content}`
+          : m.content,
+      }));
+      const r = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ context, message: msg || "看这里", history, model_id: activeModelId || undefined }),
+      });
+      const data = await r.json();
+      if (data.reply) {
+        const aiMsg = { role: "assistant", content: data.reply };
+        state.history.push(aiMsg);
+        appendMsg(aiMsg);
+      }
+      // tool 调用产生 side effect 后,联动刷新对应 UI(否则 AI 加了任务 / 改了 schedule, 用户得手刷)
+      const TASK_MUTATING = /^(manage_daily_task|check_daily_task|set_daily_task_image|set_water_cup_image|set_daily_task_meta)$/;
+      const SCHEDULE_MUTATING = /^(patch_journal_block|insert_journal_block)$/;
+      const SCRAPBOOK_MUTATING = /^place_scrapbook_image$/;
+      let needTaskRefresh = false, needScheduleRefresh = false, needScrapbookRefresh = false;
+      for (const a of data.actions || []) {
+        const summary = `tool · ${a.name} → ${JSON.stringify(a.result).slice(0, 140)}`;
+        appendAction(summary);
+        if (/^(add|patch)_widget$/.test(a.name) && !a.result?.error) {
+          appendAction("widget 已落盘 · 刷新页面看效果");
+        }
+        if (TASK_MUTATING.test(a.name) && !a.result?.error) needTaskRefresh = true;
+        if (SCHEDULE_MUTATING.test(a.name) && !a.result?.error) needScheduleRefresh = true;
+        if (SCRAPBOOK_MUTATING.test(a.name) && !a.result?.error) needScrapbookRefresh = true;
+      }
+      if (needTaskRefresh) window.gateway.ritual?.refreshTasks?.();
+      if (needScheduleRefresh) window.gateway.journal?.refresh?.();
+      if (needScrapbookRefresh) window.gateway.scrapbook?.refresh?.();
+      saveHistory();
+    } catch (e) {
+      appendAction(`请求失败 · ${e.message}`);
+    } finally {
+      hintLeft.textContent = "点页面上任意东西 → 把它带进对话";
+      // 强 focus 在 macOS 上偶尔会 reset IME(切回英文)。先聚一下,IME 状态由用户控制
+      try { input.focus({ preventScroll: true }); } catch {}
+    }
+  }
+
+  // 输入法 composition 状态(macOS / Win 切中文 / 拼音候选期)。
+  // 多处都需要 check:Enter 不发、Esc 不关、auto-resize 跳过。
+  // 双保险:isComposing 字段 + 自维护 composing flag(部分浏览器 isComposing 不准)。
+  let composing = false;
+  input.addEventListener("compositionstart", () => { composing = true; });
+  input.addEventListener("compositionend", () => {
+    // composition 刚结束的极短窗口里有的浏览器还在 IME 状态,留 30ms buffer
+    setTimeout(() => {
+      composing = false;
+      // composition 结束才 resize 一次,合成中频繁改 height 会干扰 macOS IME 状态
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 120) + "px";
+    }, 30);
+  });
+
+  // auto-resize:composition 期间跳过(改 height 触发 reflow → macOS IME 偶尔失效)
+  input.addEventListener("input", () => {
+    if (composing) return;
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 120) + "px";
+  });
+
+  input.addEventListener("keydown", (e) => {
+    const isIME = composing || e.isComposing || e.keyCode === 229;
+    if (e.key === "Enter" && !e.shiftKey) {
+      if (isIME) return;  // 输入法中按 Enter 是确认候选,放过
+      e.preventDefault();
+      send();
+    } else if (e.key === "Escape") {
+      if (isIME) return;  // 输入法中 Esc 是取消候选,不关侧栏
+      setOpen(false);
+    }
+  });
+
+  // ── whisper (ambient AI utterance, no thread anchor) ─
+  let whisperTimer = null;
+  function whisper(text, dur = 3800) {
+    if (!whisperEl) return;
+    whisperEl.textContent = text;
+    whisperEl.classList.add("on");
+    clearTimeout(whisperTimer);
+    whisperTimer = setTimeout(() => whisperEl.classList.remove("on"), dur);
+  }
+
+  // ── public API ───────────────────────────────────────
+  window.gateway = window.gateway || {};
+  window.gateway.thread = {
+    addRef,
+    open: () => setOpen(true),
+    close: () => setOpen(false),
+    toggle,
+    isOpen: () => state.open,
+    pushAI: (text) => {
+      const m = { role: "assistant", content: text };
+      state.history.push(m);
+      appendMsg(m);
+      saveHistory();
+    },
+    history: () => state.history.slice(),
+    clear: () => {
+      state.history = [];
+      saveHistory();
+      stream.innerHTML = "";
+    },
+  };
+  window.gateway.whisper = whisper;
+  window.gatewayToast = whisper; // back-compat shim for old code
+
+  // ── resizer:拖左边缘改 sidebar 宽度,持久化到 localStorage ──
+  (function wireResizer() {
+    const handle = document.getElementById("threadResizer");
+    if (!handle) return;
+    const KEY = "gateway.thread.width.v1";
+    const MIN = 280, MAX_RATIO = 0.7;
+    // 初始化:读上次保存的宽度
+    const saved = parseInt(localStorage.getItem(KEY), 10);
+    if (Number.isFinite(saved) && saved >= MIN) {
+      document.documentElement.style.setProperty("--thread-w", saved + "px");
+    }
+    let dragging = false;
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      dragging = true;
+      document.body.classList.add("thread-resizing");
+      thread.classList.add("resizing");
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const w = window.innerWidth - e.clientX;
+      const max = window.innerWidth * MAX_RATIO;
+      const clamped = Math.max(MIN, Math.min(max, w));
+      document.documentElement.style.setProperty("--thread-w", clamped + "px");
+    });
+    window.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove("thread-resizing");
+      thread.classList.remove("resizing");
+      const cur = getComputedStyle(document.documentElement).getPropertyValue("--thread-w").trim();
+      const px = parseInt(cur, 10);
+      if (Number.isFinite(px)) localStorage.setItem(KEY, String(px));
+    });
+  })();
+
+  // small greeting on first ever load
+  if (state.history.length === 0) {
+    setTimeout(() => {
+      whisper("在听。点任意一段、一杯水、一颗药 — 就指给我看。");
+    }, 1800);
+  }
+})();

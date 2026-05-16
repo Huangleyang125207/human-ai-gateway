@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gateway · 葱鸭 · 半时辰复盘</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./shared/style.css?v=20260515f">
+</head>
+<body>
+<div id="app">
+
+  <div class="breath" aria-hidden="true"></div>
+  <div class="aura" id="aura" aria-hidden="true"></div>
+
+  <header class="top">
+    <div class="brand">Gateway</div>
+    <nav class="days" id="days" aria-label="days"></nav>
+    <button class="new-day" id="newDayBtn" aria-label="create today's journal" title="新一天">+</button>
+    <button class="market" id="marketBtn" aria-label="open plugin marketplace" title="插件市场">⚙</button>
+    <button class="market" id="aggregateBtn" aria-label="open tag aggregate" title="标签聚合页">⌘</button>
+    <button class="sound" id="soundBtn" aria-label="ambient sound" title="AI 的呼吸声">
+      <span class="sound-wave"></span>
+    </button>
+    <button class="thread-toggle" id="threadToggleTop" aria-label="open thread" title="跟它说点别的">
+      <span class="tt-dot"></span>
+    </button>
+  </header>
+
+  <main class="page">
+    <section class="head" id="head">
+      <div class="ord">载入中⋯</div>
+    </section>
+    <section class="care" id="care" data-slot="top-strip"></section>
+    <section class="project-panel" id="projectPanel" data-slot="project-panel"></section>
+    <section class="stream" id="stream"></section>
+  </main>
+
+  <!-- permanent chat thread (default collapsed to edge tab) -->
+  <aside class="thread" id="thread" aria-hidden="true">
+    <div class="thread-resizer" id="threadResizer" aria-label="drag to resize" title="拖拽改宽度"></div>
+    <div class="thread-tab" id="threadTab" role="button" aria-label="toggle thread">
+      <span class="tab-dot"></span>
+      <span class="tab-label">AI</span>
+    </div>
+    <header class="thread-head">
+      <span class="thread-title">在听</span>
+      <select class="thread-model" id="threadModel" aria-label="切换模型" title="切换模型">
+        <option value="">⋯</option>
+      </select>
+      <span class="thread-status" id="threadStatus">⋯</span>
+      <button class="thread-close" id="threadClose" aria-label="close">×</button>
+    </header>
+    <div class="thread-stream" id="threadStream"></div>
+    <div class="thread-pending" id="threadPending"></div>
+    <div class="thread-input-row">
+      <button class="thread-attach" id="threadAttachBtn" aria-label="upload image" title="上传图片(也可粘贴/拖入)">📎</button>
+      <input type="file" id="threadFileInput" accept="image/*" multiple hidden>
+      <textarea
+        class="thread-input"
+        id="threadInput"
+        rows="1"
+        placeholder="跟它说点什么⋯  ⏎ 发送 · shift+⏎ 换行"
+      ></textarea>
+      <div class="thread-hint">
+        <span id="threadHintLeft">点页面上任意东西 → 把它带进对话</span>
+        <span>⏎</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ambient overlays -->
+  <div class="whisper" id="whisper" aria-hidden="true"></div>
+  <div class="shrine-ornament" id="shrineOrnament" aria-hidden="true">⌘</div>
+</div>
+
+<script src="./vendor/marked.min.js" defer></script>
+<script src="./vendor/dompurify.min.js" defer></script>
+<script src="./shared/md.js?v=20260515f" defer></script>
+<script src="./shared/context-menu.js?v=20260515f" defer></script>
+<script src="./shared/thread.js?v=20260515f" defer></script>
+<script src="./shared/journal.js?v=20260515f" defer></script>
+<script src="./shared/scrapbook.js?v=20260516a" defer></script>
+<script src="./shared/ritual.js?v=20260515f" defer></script>
+<script src="./shared/korok.js?v=20260515f" defer></script>
+<script src="./shared/marketplace.js?v=20260515f" defer></script>
+<script src="./shared/aggregate.js?v=20260515f" defer></script>
+<script src="./shared/vault-setup.js?v=20260516a" defer></script>
+<script src="./shared/setup.js?v=20260515f" defer></script>
+<script src="./shared/widget-loader.js?v=20260515f" defer></script>
+</body>
+</html>

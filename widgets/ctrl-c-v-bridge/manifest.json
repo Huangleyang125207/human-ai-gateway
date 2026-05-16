@@ -1,0 +1,15 @@
+{
+  "name": "ctrl-c-v-bridge",
+  "title": "ctrl-c-v 闭环",
+  "description": "gateway ↔ Claude Code / Codex 协作桥。装机引导 + 项目 PULSE 看板。M1: 仅装机卡;M2: 加 4 项目并列 dashboard。",
+  "audience": "项目管理者(写日记 + 用 CC/Codex 写代码 + 想看 PULSE 的人)",
+  "category": "project-mgmt",
+  "default_loaded": false,
+  "slot": "project-panel",
+  "script": true,
+  "data_source": {
+    "type": "md-glob",
+    "file_glob": "数据库/valut/PULSE/*.md",
+    "note": "M2 才用 — 读 PULSE 镜像渲染 dashboard"
+  }
+}

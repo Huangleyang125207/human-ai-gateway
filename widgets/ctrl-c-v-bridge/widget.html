@@ -1,0 +1,35 @@
+<div class="ccvb">
+  <div class="ccvb-head">
+    <div class="ccvb-title">ctrl-c-v 闭环</div>
+    <button class="ccvb-dismiss" id="ccvbDismissSetup" title="装好了,收起这张卡">✕</button>
+  </div>
+
+  <div class="ccvb-setup" id="ccvbSetup">
+    <div class="ccvb-setup-hint">
+      要让 Claude Code / Codex 跟这本日记真的连起来,在你的 CC 里跑下面两条:
+    </div>
+    <div class="ccvb-setup-cmds">
+      <div class="ccvb-cmd-row">
+        <code class="ccvb-cmd" id="ccvbCmd1">/plugin marketplace add Huangleyang125207/ctrl-c-v-code-skills</code>
+        <button class="ccvb-copy" data-copy="#ccvbCmd1">复制</button>
+      </div>
+      <div class="ccvb-cmd-row">
+        <code class="ccvb-cmd" id="ccvbCmd2">/plugin install ctrl-c-v-code-skills@ctrl-c-v-code-skills</code>
+        <button class="ccvb-copy" data-copy="#ccvbCmd2">复制</button>
+      </div>
+    </div>
+    <div class="ccvb-setup-foot">
+      装好后 CC 自动激活三件套:<b>ctrl-c-v</b>(代码风格) · <b>ctrl-c-v-tdd</b>(测试边界) · <b>human-ai-schedule</b>(写本日记的协议)。
+    </div>
+  </div>
+
+  <div class="ccvb-pulse" id="ccvbPulse">
+    <div class="ccvb-pulse-head">
+      <div class="ccvb-pulse-title">项目 PULSE</div>
+      <button class="ccvb-pulse-refresh" id="ccvbPulseRefresh" title="重新拉取">↻</button>
+    </div>
+    <div class="ccvb-pulse-grid" id="ccvbPulseGrid">
+      <div class="ccvb-pulse-loading">载入中⋯</div>
+    </div>
+  </div>
+</div>

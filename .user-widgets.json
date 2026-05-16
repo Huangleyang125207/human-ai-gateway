@@ -1,0 +1,7 @@
+{
+  "_comment": "User's active widgets. v1 marketplace 上线: 默认空,用户在 ⚙ 插件市场里 opt-in。diary-core 类 widget (supplements/steps/mood) 目前仍由 ritual.js 渲染 — 等 widget 化重构后再迁。",
+  "active": [
+    "ctrl-c-v-bridge"
+  ],
+  "available_but_inactive": []
+}

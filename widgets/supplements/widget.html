@@ -1,0 +1,37 @@
+<style>
+  .widget-supplements { display:flex; align-items:baseline; gap:1.25rem; flex-wrap:wrap; font-size:0.875rem; color:var(--ink-soft); }
+  .widget-supplements .lede {
+    font-variant: small-caps; letter-spacing: 0.32em;
+    color: var(--ink-whisper); font-size: 0.7rem;
+  }
+  .widget-supplements .supp { display:inline-flex; align-items:baseline; gap:0.42rem; cursor:pointer; user-select:none; transition:color 0.18s; }
+  .widget-supplements .supp .check {
+    display:inline-block; width:0.7em; height:0.7em;
+    border:1px solid var(--ink-soft); position:relative; top:0.05em;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .widget-supplements .supp.on .check { background:var(--vermillion); border-color:var(--vermillion); }
+  .widget-supplements .supp.on .check::after {
+    content:""; position:absolute; inset:-1px;
+    border:1px solid var(--vermillion);
+    transform: rotate(8deg) translate(2px, -1px);
+    opacity: 0.55;
+  }
+  .widget-supplements .supp:hover { color: var(--ink); }
+  .widget-supplements .supp input { display:none; }
+  .widget-supplements .streak {
+    margin-left:auto; font-variant:small-caps; letter-spacing:0.18em;
+    font-size:0.74rem; color:var(--ink-whisper);
+  }
+  .widget-supplements .streak b { color:var(--vermillion); font-weight:600; font-size:0.95rem; margin-right:0.4em; font-variant:normal; }
+  .widget-supplements .streak .dots { display:inline-block; margin-left:0.6em; color:var(--ink-soft); font-family:'Times New Roman',serif; letter-spacing:0.1em; }
+</style>
+
+<div class="widget-supplements">
+  <span class="lede">补剂</span>
+  <label class="supp on"><input type="checkbox" checked data-name="鱼油"> 鱼油</label>
+  <label class="supp on"><input type="checkbox" checked data-name="Mg-LT"> Mg-LT</label>
+  <label class="supp on"><input type="checkbox" checked data-name="KSM-66"> KSM-66</label>
+  <label class="supp on"><input type="checkbox" checked data-name="D3+K2"> D3+K2</label>
+  <span class="streak">streak <b>10d</b><span class="dots">●●●●●●●●●●</span></span>
+</div>

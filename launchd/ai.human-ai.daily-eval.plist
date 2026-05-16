@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.human-ai.daily-eval</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>21</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/curl</string>
+    <string>-sS</string>
+    <string>-X</string>
+    <string>POST</string>
+    <string>http://127.0.0.1:4321/api/eval/run</string>
+    <string>-H</string>
+    <string>Content-Type: application/json</string>
+    <string>-d</string>
+    <string>{"model_id":"deepseek-v4-pro"}</string>
+    <string>--max-time</string>
+    <string>120</string>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/Users/claudecodedezhuanshumac/.human-ai/logs/daily-eval.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/claudecodedezhuanshumac/.human-ai/logs/daily-eval.err.log</string>
+</dict>
+</plist>

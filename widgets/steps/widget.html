@@ -1,0 +1,28 @@
+<style>
+  .widget-steps { color: var(--ink-soft); }
+  .widget-steps .slot-label {
+    font-family: 'Times New Roman', serif; font-size:0.68rem;
+    color:var(--ink-whisper); letter-spacing:0.12em; text-transform:uppercase;
+    margin-bottom: 0.25rem;
+  }
+  .widget-steps .big {
+    font-size: 1.6rem; color: var(--ink); font-weight:500; line-height: 1.1;
+    font-variant-numeric: oldstyle-nums;
+  }
+  .widget-steps .vs {
+    font-size: 0.72rem; color: var(--ink-whisper); margin-top: 0.2rem;
+    font-variant: small-caps; letter-spacing: 0.12em;
+  }
+  .widget-steps .spark {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 1.2rem; letter-spacing: -0.04em;
+    line-height: 1; margin-top: 0.55rem; color: var(--vermillion);
+  }
+</style>
+
+<div class="widget-steps">
+  <div class="slot-label">今日步数</div>
+  <div class="big" data-field="today">—</div>
+  <div class="vs">日均 <span data-field="avg">—</span></div>
+  <div class="spark" data-field="spark">▁▂▃▄▅▆▇█▆</div>
+</div>

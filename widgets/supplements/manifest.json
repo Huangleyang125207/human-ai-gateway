@@ -1,0 +1,20 @@
+{
+  "name": "supplements",
+  "title": "补剂打卡",
+  "description": "每日补剂 4 项 checklist + 连续天数 streak。从日记顶部 `- [x] <name>` 模式抽取。",
+  "audience": "anyone (default core)",
+  "category": "diary-core",
+  "default_loaded": true,
+  "slot": "top-strip",
+  "script": true,
+  "data_source": {
+    "type": "md-pattern",
+    "file_glob": "数据库/valut/半小时复盘/*.md",
+    "pattern": "^- \\[(x| )\\] (.+?)（.*?）$",
+    "extract": "{checked, name}"
+  },
+  "writeback": {
+    "v0.3": "demo-only (toast)",
+    "v0.5_planned": "POST /api/checkbox → patch source md"
+  }
+}

@@ -1,0 +1,48 @@
+<style>
+  .widget-mood .slot-label {
+    font-family: 'Times New Roman', serif; font-size:0.68rem;
+    color:var(--ink-whisper); letter-spacing:0.12em; text-transform:uppercase;
+    margin-bottom: 0.4rem;
+  }
+  .widget-mood .picker { display:flex; gap:0.55rem; }
+  .widget-mood .opt {
+    display:inline-block; width:1.7rem; height:1.7rem; line-height:1.7rem;
+    text-align:center; font-size:0.85rem; cursor:pointer; user-select:none;
+    color: var(--ink-soft); border: 1px solid transparent;
+    transition: all 0.18s ease;
+  }
+  .widget-mood .opt:hover { color: var(--ink); border-color: var(--rule); }
+  .widget-mood .opt.picked { color: var(--paper); background: var(--vermillion); border-color: var(--vermillion); }
+
+  .widget-mood .band {
+    margin-top: 0.75rem;
+    display: flex; gap: 2px;
+    font-family: ui-monospace, monospace;
+    font-size: 0.65rem;
+  }
+  .widget-mood .band .cell {
+    flex: 1; padding: 0.2rem 0; text-align: center;
+    color: var(--paper);
+    opacity: 0.6;
+  }
+  .widget-mood .legend {
+    margin-top: 0.4rem;
+    font-size: 0.62rem;
+    color: var(--ink-whisper);
+    font-variant: small-caps;
+    letter-spacing: 0.1em;
+  }
+</style>
+
+<div class="widget-mood">
+  <div class="slot-label">今日心情</div>
+  <div class="picker" data-picker>
+    <span class="opt" data-val="糟">糟</span>
+    <span class="opt" data-val="差">差</span>
+    <span class="opt picked" data-val="平">平</span>
+    <span class="opt" data-val="好">好</span>
+    <span class="opt" data-val="棒">棒</span>
+  </div>
+  <div class="band" data-band></div>
+  <div class="legend">近 9 日</div>
+</div>

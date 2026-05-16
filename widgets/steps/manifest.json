@@ -1,0 +1,20 @@
+{
+  "name": "steps",
+  "title": "步数",
+  "description": "今日步数 + 9 日 sparkline。从日记内联 `vivo 步数 ~XXX` 模式抽取。",
+  "audience": "运动追踪需求者",
+  "category": "diary-core",
+  "default_loaded": false,
+  "slot": "sidebar",
+  "script": true,
+  "data_source": {
+    "type": "md-pattern",
+    "file_glob": "数据库/valut/半小时复盘/*.md",
+    "pattern": "vivo 步数 ~([\\d,]+)",
+    "extract": "{steps_int}"
+  },
+  "writeback": {
+    "v0.3": "n/a (read-only)",
+    "v0.5_planned": "frontmatter steps field + manual input form"
+  }
+}

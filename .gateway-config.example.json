@@ -1,0 +1,6 @@
+{
+  "_comment": "Copy this to .gateway-config.json and fill in your DeepSeek api_key. The real file is gitignored.",
+  "api_key": "YOUR_DEEPSEEK_API_KEY",
+  "base_url": "https://api.deepseek.com/v1",
+  "model": "deepseek-chat"
+}
