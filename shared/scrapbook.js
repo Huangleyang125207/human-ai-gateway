@@ -90,6 +90,8 @@
     for (const it of items) {
       placeWrap(it, layer);
     }
+    // 图重新 render 之后,触发文字 re-wrap(pretext)
+    window.gateway?.entryWrap?.rewrap?.();
   }
 
   function placeWrap(it, layer) {
@@ -181,6 +183,8 @@
       const newAnchor = inferAnchorByY(it.y_px);
       if (newAnchor) it.anchor_time = newAnchor;
       scheduleSave(it);
+      // bug 2:触发 pretext re-wrap,文字绕图重排
+      window.gateway?.entryWrap?.rewrap?.();
     });
   }
 

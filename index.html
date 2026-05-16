@@ -90,5 +90,12 @@
 <script src="./shared/vault-setup.js?v=20260516a" defer></script>
 <script src="./shared/setup.js?v=20260515f" defer></script>
 <script src="./shared/widget-loader.js?v=20260515f" defer></script>
+<!-- pretext (ESM) — 文字绕图,bug 2 用 -->
+<script type="module">
+  import * as pretext from "https://esm.sh/@chenglou/pretext@0.0.7";
+  window.pretext = pretext;
+  document.dispatchEvent(new Event("pretext-ready"));
+</script>
+<script src="./shared/entry-pretext-wrap.js?v=20260516b" defer></script>
 </body>
 </html>
