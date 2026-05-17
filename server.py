@@ -147,15 +147,21 @@ def _wants_widget_skill(context: dict) -> bool:
     return False
 
 # ── system prompt builder ────────────────────────────────────────────
-def build_system_prompt(context: dict = None) -> str:
+def build_system_prompt(context: dict = None, model_id: str = None) -> str:
+    """构造 system prompt。model_id 用于替换 prompt 模板里的 {model_id} 占位符
+    (signature / inline disclosure 用),让 AI 用自己的真实模型 id 署名,
+    而不是模板里 hard-code 的某个示例。
+    """
     parts = ["You are the Gateway AI for a personal diary system. "
              "Stay terse, action-oriented. Default mode = co-author the user's 半小时复盘 diary. "
              "When the user explicitly works on widgets, the widget skill is appended below."]
 
     # schedule skill — 默认装载(90% 场景受益)
     if SCHEDULE_PROMPT_PATH.exists():
-        parts.append(f"\n\n=== Schedule co-author skill (always loaded) ===\n"
-                     f"{SCHEDULE_PROMPT_PATH.read_text(encoding='utf-8')}")
+        schedule_md = SCHEDULE_PROMPT_PATH.read_text(encoding='utf-8')
+        if model_id:
+            schedule_md = schedule_md.replace("{model_id}", model_id)
+        parts.append(f"\n\n=== Schedule co-author skill (always loaded) ===\n{schedule_md}")
 
     # widget skill — 按需装载(省 6.7K tokens / 普通对话)
     if _wants_widget_skill(context):
@@ -1329,7 +1335,7 @@ async def chat(req: Request):
         cleaned_history.append({"role": role, "content": content})
 
     active_model = get_model(profile)
-    sys_prompt = build_system_prompt(context)
+    sys_prompt = build_system_prompt(context, model_id=active_model)
 
     # split: 旧 + 最近 RECENT_KEEP 条原文
     if len(cleaned_history) > RECENT_KEEP + SUMMARY_MIN_OLD:
@@ -2322,11 +2328,12 @@ _EVAL_INJECTION = """
 """
 
 
-def _eval_build_messages(target: datetime) -> list:
+def _eval_build_messages(target: datetime, model_id: str = None) -> list:
     """构造给 LLM 的 messages。系统提示 = base co-writer + evaluator inject。
-    user payload = 维度料。
+    user payload = 维度料。model_id 用于 prompt 里 {model_id} signature 占位符
+    替换 — 让 AI 用自己的真实模型 id 署名。
     """
-    base_sys = build_system_prompt({})  # 保留原本身份
+    base_sys = build_system_prompt({}, model_id=model_id)  # 保留原本身份
     sys_prompt = base_sys + _EVAL_INJECTION
 
     today_f = find_today_journal(target)
@@ -2431,7 +2438,7 @@ async def eval_test(req: Request):
             return text, None
 
     # call 1: 主 eval
-    eval_raw, eval_parsed = _call_json(_eval_build_messages(target))
+    eval_raw, eval_parsed = _call_json(_eval_build_messages(target, model_id=active_model))
 
     # call 2: feature_intro 单独
     fi_raw, fi_parsed = _call_json(_eval_build_feature_intro_messages(target))
@@ -2584,7 +2591,7 @@ async def eval_run(req: Request):
         except Exception:
             return text, None
 
-    _, eval_parsed = _call_json(_eval_build_messages(target))
+    _, eval_parsed = _call_json(_eval_build_messages(target, model_id=active_model))
     _, fi_parsed = _call_json(_eval_build_feature_intro_messages(target))
 
     merged = dict(eval_parsed) if eval_parsed else {}
