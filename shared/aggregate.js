@@ -53,8 +53,21 @@
         <header class="agg-head">
           <div class="agg-title">标签聚合</div>
           <div class="agg-tabs" id="aggTabs"></div>
+          <button class="agg-refresh" id="aggRefresh" title="AI 扫 schedule 同步新行(只 append 不 delete)">⟳ 刷新</button>
+          <button class="agg-rules-btn" id="aggRulesBtn" title="聚合规则" aria-label="rules">规则</button>
           <button class="market-close" id="aggClose" aria-label="close">×</button>
         </header>
+        <details class="agg-rules" id="aggRules">
+          <summary>聚合规则(点开看)</summary>
+          <div class="agg-rules-body">
+            <p><strong>视图关系</strong>:schedule 按时间线索;本页按项目主题。两套视图必须一致。</p>
+            <p><strong>什么会进聚合</strong>:H2 的 tag 命中已注册 project tag(<code>#yanpai #ESP32 #配置系统</code>)的 entry。
+              <code>#parent/child</code> sub-tag roll-up 到 parent 段、Sub 列填 <code>/child</code>。</p>
+            <p><strong>什么不进</strong>:generic tag(<code>#运动 #饮食 #娱乐</code>) / 单挂 <code>#协作</code> 没项目 tag / 没注册的新 tag(出现 ≥ 3 次再入聚合)。</p>
+            <p><strong>表格列</strong>:Date(<code>M.D</code>) / Time(全角冒号<code>：</code>跟源 H1 一致) / Link(<code>file#anchor</code>) / Content(一句话提示词)/ Sub(可选)。一时间块 = 一行,不合并。</p>
+            <p><strong>本页刷新做什么</strong>:扫 <code>半小时复盘/*.md</code> → diff 现有行 → append 缺失。<strong>只增不删</strong> — 删 / 改 / 重命名要手工处理(避免误杀)。</p>
+          </div>
+        </details>
         <div class="agg-meta" id="aggMeta"></div>
         <div class="agg-subtags" id="aggSubTags"></div>
         <div class="agg-body" id="aggBody"></div>
@@ -62,11 +75,58 @@
     `;
     document.body.appendChild(overlay);
     document.getElementById("aggClose").addEventListener("click", close);
+    document.getElementById("aggRefresh").addEventListener("click", refresh);
+    document.getElementById("aggRulesBtn").addEventListener("click", () => {
+      const det = document.getElementById("aggRules");
+      det.open = !det.open;
+    });
     overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
     document.addEventListener("keydown", onKey);
 
     renderTabs(sections);
     renderActiveSection();
+  }
+
+  async function refresh() {
+    const btn = document.getElementById("aggRefresh");
+    if (!btn) return;
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "⟳ 扫描中⋯";
+    try {
+      const r = await fetch("/api/tag-aggregate/refresh", { method: "POST" });
+      const data = await r.json();
+      if (!data.ok) {
+        btn.textContent = "× " + (data.error || "失败");
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+        return;
+      }
+      // 重新拉数据 + 重渲
+      dataCache = null;
+      try {
+        const r2 = await fetch("/api/tag-aggregate");
+        dataCache = await r2.json();
+      } catch (e) {
+        btn.textContent = "× 重载失败";
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+        return;
+      }
+      // 关 + 重开 — 简单粗暴(避免 partial DOM 更新出 bug)
+      close();
+      await open();
+      // 提示加多少行
+      const toast = data.added > 0
+        ? `✓ 同步 ${data.added} 行(${Object.entries(data.per_tag || {}).map(([t,n])=>`#${t} +${n}`).join("  ")})`
+        : `✓ 已是最新(扫到 ${data.scanned} 条)`;
+      if (window.gateway?.whisper) {
+        window.gateway.whisper(toast, 2800);
+      } else {
+        console.log(toast);
+      }
+    } catch (e) {
+      btn.textContent = "× " + e.message;
+      setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+    }
   }
 
   function renderTabs(sections) {

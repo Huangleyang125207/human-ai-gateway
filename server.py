@@ -2968,6 +2968,211 @@ def list_models():
     return {"models": profiles, "default_id": default_id}
 
 
+_SCHEDULE_FILE_RE = re.compile(r"^26\.(\d{1,2})\.(\d{1,2})")
+_H1_TIME_RE = re.compile(r"^#\s+(\d{1,2}：\d{2})\s*$")
+_H2_RE = re.compile(r"^##\s+(.+)$")
+_HASH_TAG_RE = re.compile(r"#([A-Za-z0-9_\-/一-鿿]+)")
+
+
+def _scan_schedule_for_project_tags(project_tags: set) -> dict:
+    """Walk 半小时复盘/*.md, 抽 project-tagged H2 entries。
+    返:{tag: [{iso_date, date_short, time, sub_tag, content, link_target}, ...]}
+
+    规则:
+    - H1 行 `# 13：30` 是当前时间块
+    - H2 行 `## #tagA #tagB title` 是一条 entry
+      - tag 包括可能的 #parent/child 形式 → roll-up 到 parent section,sub_tag = /child
+      - title = H2 去掉所有 #tag token 后剩下的文本
+    - 只收 project_tags 命中的;generic tag(#运动 #饮食)等忽略
+    """
+    out = {tag: [] for tag in project_tags}
+    if not JOURNAL_DIR.exists():
+        return out
+
+    for f in sorted(JOURNAL_DIR.glob("26.*.md")):
+        m = _SCHEDULE_FILE_RE.match(f.name)
+        if not m:
+            continue
+        mo, dd = int(m.group(1)), int(m.group(2))
+        iso_date = f"2026-{mo:02d}-{dd:02d}"
+        date_short = f"{mo}.{dd}"
+
+        cur_time = None
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            continue
+
+        for line in lines:
+            m1 = _H1_TIME_RE.match(line)
+            if m1:
+                cur_time = m1.group(1)
+                continue
+            m2 = _H2_RE.match(line)
+            if not m2 or not cur_time:
+                continue
+            h2 = m2.group(1).strip()
+            tag_tokens = _HASH_TAG_RE.findall(h2)
+            if not tag_tokens:
+                continue
+            title = _HASH_TAG_RE.sub("", h2).strip()
+            if not title:
+                continue
+            for tag_full in tag_tokens:
+                if "/" in tag_full:
+                    parent, child = tag_full.split("/", 1)
+                    sub = f"/{child}"
+                else:
+                    parent, sub = tag_full, None
+                if parent not in project_tags:
+                    continue
+                out[parent].append({
+                    "iso_date":    iso_date,
+                    "date_short":  date_short,
+                    "time":        cur_time,
+                    "sub_tag":     sub,
+                    "content":     title,
+                    "link_target": f"半小时复盘/{f.name}#{cur_time}",
+                })
+    return out
+
+
+def _refresh_tag_aggregate() -> dict:
+    """扫所有 schedule files,跟 标签聚合.md 比对,append 缺失行。
+
+    安全方向:只 append,不 delete。删除/重命名留给手工(避免误杀 user 写的)。
+    返:{added: N, total_scanned: N, per_tag: {tag: added_count}}
+    """
+    if not TAG_AGGREGATE_PATH.exists():
+        return {"error": "标签聚合.md 不存在", "added": 0}
+
+    text = TAG_AGGREGATE_PATH.read_text(encoding="utf-8")
+    sections = _parse_tag_aggregate(text)
+    project_tags = {s["tag"] for s in sections}
+    if not project_tags:
+        return {"error": "没找到任何 project tag section", "added": 0}
+
+    scanned = _scan_schedule_for_project_tags(project_tags)
+
+    # 现有 rows 的 key = (iso_date, time, sub_tag)
+    existing_keys = {tag: set() for tag in project_tags}
+    for s in sections:
+        for r in s["rows"]:
+            key = (r.get("iso_date"), r.get("time"), r.get("sub_tag"))
+            existing_keys[s["tag"]].add(key)
+
+    # 算出每个 tag 要 append 的 rows
+    new_rows = {tag: [] for tag in project_tags}
+    for tag, rows in scanned.items():
+        seen_in_scan = set()
+        for r in rows:
+            key = (r["iso_date"], r["time"], r["sub_tag"])
+            if key in existing_keys[tag]:
+                continue
+            if key in seen_in_scan:
+                continue  # 同 scan 里重复(同一 entry 多 tag)
+            seen_in_scan.add(key)
+            new_rows[tag].append(r)
+
+    total_added = sum(len(v) for v in new_rows.values())
+    if total_added == 0:
+        return {"added": 0, "per_tag": {}, "scanned": sum(len(v) for v in scanned.values())}
+
+    # 把新行 append 进对应 section。策略:找 `## #tag` 下的最后一个 table 行,
+    # 在它之后插入新行(无表则不动 — 这种情况不常见)。
+    new_text = _append_rows_to_aggregate(text, new_rows)
+    TAG_AGGREGATE_PATH.write_text(new_text, encoding="utf-8")
+
+    return {
+        "added": total_added,
+        "per_tag": {tag: len(rows) for tag, rows in new_rows.items() if rows},
+        "scanned": sum(len(v) for v in scanned.values()),
+    }
+
+
+def _format_row(row: dict, with_sub: bool) -> str:
+    """单行 markdown table 行(链接锚点保留全角冒号)。"""
+    link = f"[26.{row['date_short']}#{row['time']}]({row['link_target']})"
+    base = f"| {row['date_short']} | {row['time']} | {link} | {row['content']} |"
+    if with_sub:
+        base += f" {row['sub_tag'] or '—'} |"
+    return base
+
+
+def _append_rows_to_aggregate(text: str, new_rows: dict) -> str:
+    """对每个 tag,定位 `## #tag` 段落,在该段最后一个 table 行后插入新行。
+    保留段内其他内容(description / 末尾 note 行)不动。
+    """
+    lines = text.splitlines()
+    out_lines = []
+    i = 0
+    cur_tag = None
+    pending_rows = []  # 当前段累积要 append 的行
+    table_last_idx = -1  # 当前段最后一个 table 行在 out_lines 里的 index
+
+    def flush_section():
+        """段尾(下个 `## ` 或 `---` 或文件结束) → 在 table_last_idx 后插行。"""
+        nonlocal pending_rows, table_last_idx
+        if pending_rows and table_last_idx >= 0:
+            # 判断是否带 sub 列(看 cur_tag 现有 row 有没有 sub)
+            with_sub = any(r["sub_tag"] for r in pending_rows)
+            # 也看 table header 决定(更准):看 last table 行的 cell 数量
+            last_line = out_lines[table_last_idx]
+            if last_line.count("|") >= 6:  # | a | b | c | d | e | → 5 cell = sub 列
+                with_sub = True
+            insertion = [_format_row(r, with_sub) for r in pending_rows]
+            # 按 iso_date asc 排序新行(跟现有 row 排序一致)
+            pending_rows_sorted = sorted(pending_rows, key=lambda r: (r["iso_date"], r["time"]))
+            insertion = [_format_row(r, with_sub) for r in pending_rows_sorted]
+            for offset, ln in enumerate(insertion, 1):
+                out_lines.insert(table_last_idx + offset, ln)
+        pending_rows = []
+        table_last_idx = -1
+
+    while i < len(lines):
+        line = lines[i]
+        # 新 section 开始
+        m = re.match(r"^##\s+#(\S+)\s*$", line)
+        if m:
+            flush_section()
+            cur_tag = m.group(1)
+            pending_rows = list(new_rows.get(cur_tag, []))
+            out_lines.append(line)
+            i += 1
+            continue
+        # 段尾分隔(横线或下个 H2/H1)
+        if line.strip() == "---":
+            flush_section()
+            cur_tag = None
+            out_lines.append(line)
+            i += 1
+            continue
+        # table 行(以 | 开头,排除 separator |---|---|)
+        if line.startswith("|") and cur_tag:
+            is_separator = all((not c.strip()) or set(c.strip()) <= set("-:") for c in line.strip().strip("|").split("|"))
+            out_lines.append(line)
+            if not is_separator:
+                table_last_idx = len(out_lines) - 1
+            i += 1
+            continue
+        out_lines.append(line)
+        i += 1
+    flush_section()
+    return "\n".join(out_lines) + ("\n" if text.endswith("\n") else "")
+
+
+@app.post("/api/tag-aggregate/refresh")
+def tag_aggregate_refresh():
+    """扫 schedule files → diff 现有 标签聚合.md → append 缺失行。
+    只 append,不 delete,不动 description。"""
+    try:
+        result = _refresh_tag_aggregate()
+        return {"ok": True, **result}
+    except Exception as e:
+        log.exception("tag aggregate refresh failed")
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
 @app.get("/api/tag-aggregate")
 def tag_aggregate():
     """解析 数据库/valut/标签聚合.md, 返回按 tag 分组的 rows。

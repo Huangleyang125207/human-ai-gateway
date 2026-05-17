@@ -2116,6 +2116,60 @@ body.thread-resizing { transition: none; }
   padding: 16px 22px 10px;
   border-bottom: 1px solid rgba(58, 52, 44, 0.08);
 }
+.agg-refresh, .agg-rules-btn {
+  appearance: none;
+  background: rgba(168, 110, 70, 0.08);
+  color: var(--ink-3);
+  border: 1px solid rgba(168, 110, 70, 0.15);
+  font: 12px var(--sans);
+  padding: 5px 11px;
+  border-radius: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+  transition: background 0.18s, color 0.18s, border-color 0.18s;
+}
+.agg-refresh:hover, .agg-rules-btn:hover {
+  background: rgba(168, 110, 70, 0.16);
+  color: var(--ink);
+  border-color: rgba(168, 110, 70, 0.3);
+}
+.agg-refresh:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.agg-rules {
+  padding: 8px 22px 0;
+  font: 12.5px var(--sans);
+  color: var(--ink-3);
+  line-height: 1.7;
+}
+.agg-rules > summary {
+  cursor: pointer;
+  color: var(--ink-4);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  padding: 6px 0;
+  outline: none;
+  user-select: none;
+}
+.agg-rules > summary:hover { color: var(--ink-3); }
+.agg-rules-body {
+  padding: 8px 14px 12px;
+  background: rgba(168, 110, 70, 0.04);
+  border-radius: 6px;
+  margin-top: 4px;
+}
+.agg-rules-body p { margin: 0 0 8px; }
+.agg-rules-body p:last-child { margin-bottom: 0; }
+.agg-rules-body code {
+  font: 11.5px ui-monospace, "SF Mono", Menlo, monospace;
+  background: rgba(58, 52, 44, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--ink-2);
+}
+.agg-rules-body strong { color: var(--ink-2); font-weight: 600; }
 .agg-title {
   font: 19px var(--serif);
   color: var(--ink-2);
