@@ -334,6 +334,11 @@
     }
 
     if (getComputedStyle(el).position === "static") el.style.position = "relative";
+    // 关键:layer 是 absolute 的,不撑高父元素 → 让原 el 至少跟 layer 一样高,
+    // 否则 layer 会溢出到下条 entry,把 `.entry + .entry` 的分割线吃掉
+    const layerHeight = y + lineHeight;
+    el.dataset.pretextOldMinHeight = el.style.minHeight || "";
+    el.style.minHeight = layerHeight + "px";
     [...el.childNodes].forEach(n => {
       if (n.nodeType === Node.ELEMENT_NODE && n.classList?.contains(PRETEXT_LAYER_CLASS)) return;
       if (n.nodeType === Node.TEXT_NODE) {
@@ -396,6 +401,10 @@
         delete n.dataset.pretextOldVisibility;
       }
     });
+    if (el.dataset.pretextOldMinHeight !== undefined) {
+      el.style.minHeight = el.dataset.pretextOldMinHeight;
+      delete el.dataset.pretextOldMinHeight;
+    }
     el.removeAttribute("data-pretext-wrapped-el");
     if (entry && !entry.querySelector("[data-pretext-wrapped-el]")) {
       entry.removeAttribute(WRAPPED_FLAG);
