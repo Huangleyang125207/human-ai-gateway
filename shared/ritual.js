@@ -13,6 +13,7 @@
 
 (function () {
   const CUPS_TOTAL = 8;
+  const WATER_TASK_NAME = "喝水";  // 跟 daily-tasks.md 一行 + meta(daily_dose=8) 绑定 — 真相进 md
 
   function todayKey() {
     const d = new Date();
@@ -40,13 +41,37 @@
   async function init() {
     const care = document.getElementById("care");
     if (!care) return;
-    const state = load() || defaultState();
-    // 先拉水杯图,失败也不阻塞 render
+    // 拉水杯图 + 拉今天 daily-tasks(从 md 真相读「喝水」intake)— 并行
+    let cupImg = null, intakeFromMd = 0, waterTaskExists = false;
     try {
-      const r = await fetch("/api/water-cup");
-      const d = await r.json();
-      _cupImageUrl = d.image_url || null;
+      const [imgR, tasksR] = await Promise.all([
+        fetch("/api/water-cup").then(r => r.json()),
+        fetch("/api/daily-tasks").then(r => r.json()),
+      ]);
+      cupImg = imgR.image_url || null;
+      const wt = (tasksR.tasks || []).find(t => t.name === WATER_TASK_NAME);
+      if (wt) {
+        waterTaskExists = true;
+        intakeFromMd = Math.max(0, Math.min(CUPS_TOTAL, wt.intake_today || 0));
+      }
     } catch {}
+    _cupImageUrl = cupImg;
+
+    // 一次性迁移:若 localStorage 还有今日水量且高于 md → 推到 md 然后清 LS
+    const ls = load();
+    if (waterTaskExists && ls && ls.cups > intakeFromMd) {
+      try {
+        const r = await fetch("/api/daily-tasks/check", {
+          method: "POST", headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({task_name: WATER_TASK_NAME, intake: Math.min(CUPS_TOTAL, ls.cups)}),
+        });
+        const d = await r.json();
+        intakeFromMd = Math.max(intakeFromMd, d.intake_today || ls.cups);
+      } catch {}
+    }
+    try { localStorage.removeItem(LS_PREFIX + todayKey()); } catch {}
+
+    const state = { cups: intakeFromMd };
     render(care, state);
     refreshTasks();
   }
@@ -115,7 +140,11 @@
           }
         }
         document.getElementById("cups-count").textContent = state.cups;
-        save(state);
+        // 写真相到 md(via daily-task intake_log);失败不影响 UI,下次 reload 时 re-sync
+        fetch("/api/daily-tasks/check", {
+          method: "POST", headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({task_name: WATER_TASK_NAME, intake: next}),
+        }).catch(() => {});
         if (next > prev) {
           window.gateway.korok?.yahaha?.(...rectCenter(cup));
           window.gateway.korok?.tick?.("water");
@@ -211,6 +240,8 @@
       container.innerHTML = `<div class="daily-tasks-empty">load failed: ${e.message}</div>`;
       return;
     }
+    // 「喝水」在水杯 grid 单独显示,不重复在补剂 tile 行
+    tasks = tasks.filter(t => t.name !== WATER_TASK_NAME);
     if (!tasks.length) {
       container.innerHTML = `<div class="daily-tasks-empty">没有 daily task — 右键页面空白 → 「加一项每日任务」</div>`;
       return;
