@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -50,8 +51,37 @@ CODE_ROOT = GATEWAY_DIR.parent          # = ~/human-ai-dev/ (代码 root,放 ski
 import vault_config
 DATA_HOME = vault_config.resolve_vault_root()
 VAULT_DIR = DATA_HOME / "vault"
-DATA_DIR = DATA_HOME / "data"
-CONFIG_DIR = DATA_HOME / "config"
+
+
+# ── APP_STATE_DIR(OS-标准 Application Support / AppData / XDG)──
+# 所有 app-owned 状态(thread-history / daily-task-meta / images / config 等)
+# 放到 OS 标准的隐藏位置,跟 user-owned vault 解耦。用户在 vault 里整理文件
+# 不会动到这些。同时:Application Support 默认隐藏(macOS Finder 不显示),
+# 用户不会误删。Time Machine 自动备份覆盖。
+def _default_app_state_dir() -> Path:
+    """返当前 OS 的标准 app-state 目录。环境变量 $HUMAN_AI_STATE 覆盖。"""
+    env = os.environ.get("HUMAN_AI_STATE")
+    if env:
+        return Path(env).expanduser()
+    plat = sys.platform
+    home = Path.home()
+    if plat == "darwin":
+        return home / "Library" / "Application Support" / "HumanAI"
+    if plat.startswith("win"):
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "HumanAI"
+        return home / "AppData" / "Roaming" / "HumanAI"
+    # Linux / 其他:XDG
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        return Path(xdg) / "HumanAI"
+    return home / ".local" / "share" / "HumanAI"
+
+APP_STATE_DIR = _default_app_state_dir()
+DATA_DIR = APP_STATE_DIR / "data"
+CONFIG_DIR = APP_STATE_DIR / "config"
+
 SKILL_DIR_LOCAL = CODE_ROOT / "skill"
 WIDGETS_DIR = GATEWAY_DIR / "widgets"
 USER_WIDGETS_PATH = GATEWAY_DIR / ".user-widgets.json"
@@ -59,8 +89,73 @@ CONFIG_PATH = CONFIG_DIR / "gateway-config.json"
 JOURNAL_DIR = VAULT_DIR / "半小时复盘"
 ATTACHMENTS_DIR = VAULT_DIR / "attachments"
 TAG_AGGREGATE_PATH = VAULT_DIR / "标签聚合.md"
-# 兼容(早期代码引用 PLATFORM_ROOT 当 vault 父级用,现在保留指向 DATA_HOME)
-PLATFORM_ROOT = DATA_HOME
+# 兼容(早期代码引用 PLATFORM_ROOT 当某个 root 用 — 跟新 image 路径一起用)
+PLATFORM_ROOT = APP_STATE_DIR
+
+
+# ── 一次性迁移:旧 ~/.human-ai/data + config → APP_STATE_DIR ──
+def _migrate_old_state():
+    """启动一次。把 DATA_HOME/data + DATA_HOME/config 里的文件 COPY 到
+    APP_STATE_DIR(只 copy 不删 — 用户原位置当 fallback 留几天)。
+    新位置已有同名文件则跳过(避免覆盖更新的)。
+    """
+    legacy_data = DATA_HOME / "data"
+    legacy_config = DATA_HOME / "config"
+    moved = 0
+    for legacy, target in [(legacy_data, DATA_DIR), (legacy_config, CONFIG_DIR)]:
+        if not legacy.exists() or legacy.resolve() == target.resolve():
+            continue
+        target.mkdir(parents=True, exist_ok=True)
+        for src in legacy.rglob("*"):
+            if src.is_dir():
+                continue
+            rel = src.relative_to(legacy)
+            dst = target / rel
+            if dst.exists():
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                dst.write_bytes(src.read_bytes())
+                moved += 1
+            except Exception:
+                pass
+    return moved
+
+
+# ── 安全写(原子 tmpfile+rename + 可选 5-rotate 备份)──
+def _rotate_backup(path: Path, keep: int = 5):
+    """把 path 旋转出去:bak.{N-1} → bak.N(老的先掉),原 path 内容写进 bak.1。
+    用于写之前调一次,即使下次写出错或被错数据覆盖,bak.1..bak.5 还能 rollback。
+    """
+    if not path.exists():
+        return
+    try:
+        # 老的最旧那份清掉
+        oldest = Path(f"{path}.bak.{keep}")
+        if oldest.exists():
+            oldest.unlink()
+        # bak.{N-1} → bak.N 从大到小依次推
+        for i in range(keep, 1, -1):
+            src = Path(f"{path}.bak.{i-1}")
+            if src.exists():
+                src.rename(Path(f"{path}.bak.{i}"))
+        # 当前文件 → bak.1
+        Path(f"{path}.bak.1").write_bytes(path.read_bytes())
+    except Exception:
+        pass  # 备份失败不阻塞主流程
+
+
+def _safe_write_text(path: Path, content: str, rotate: bool = False, encoding: str = "utf-8"):
+    """原子写文本。rotate=True 先把旧的旋转成 bak.1..bak.5 再写。
+    用 tmpfile + rename 实现原子(POSIX:os.rename 是 atomic;Windows 用 os.replace)。
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if rotate:
+        _rotate_backup(path)
+    tmp = Path(f"{path}.tmp")
+    tmp.write_text(content, encoding=encoding)
+    tmp.replace(path)
 
 ALLOWED_IMAGE_EXT = {"jpg", "jpeg", "png", "gif", "webp", "heic"}
 MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -1827,8 +1922,10 @@ def _load_task_image_map() -> dict:
 
 
 def _save_task_image_map(m: dict):
-    DAILY_TASK_IMAGES_MAP.write_text(
-        json.dumps(m, indent=2, ensure_ascii=False), encoding="utf-8"
+    _safe_write_text(
+        DAILY_TASK_IMAGES_MAP,
+        json.dumps(m, indent=2, ensure_ascii=False),
+        rotate=True,  # 5 份滚动备份 — 误删 / 改名漂移可 rollback
     )
 
 
@@ -1842,9 +1939,10 @@ def _load_task_meta_map() -> dict:
 
 
 def _save_task_meta_map(m: dict):
-    DAILY_TASK_META_MAP.parent.mkdir(parents=True, exist_ok=True)
-    DAILY_TASK_META_MAP.write_text(
-        json.dumps(m, indent=2, ensure_ascii=False), encoding="utf-8"
+    _safe_write_text(
+        DAILY_TASK_META_MAP,
+        json.dumps(m, indent=2, ensure_ascii=False),
+        rotate=True,  # 5 份备份 — intake_log 历史是宝贵的不可重生数据
     )
 
 
@@ -2231,6 +2329,22 @@ def vault_repair():
     return _repair_vault()
 
 
+# 启动时跑一次老路径 → APP_STATE_DIR 迁移
+@app.on_event("startup")
+def _startup_migrate_state():
+    try:
+        n = _migrate_old_state()
+        if n > 0:
+            log.warning(
+                f"[migrate] copied {n} files from {DATA_HOME}/{{data,config}} → "
+                f"{APP_STATE_DIR}/{{data,config}}. "
+                f"老位置保留作 fallback,确认稳定后可手动 rm。"
+            )
+        log.info(f"[state] APP_STATE_DIR = {APP_STATE_DIR}")
+    except Exception as e:
+        log.warning(f"[migrate] failed: {e}")
+
+
 # 启动时跑一次 audit,有 drift 就 log 警告(不阻塞启动)
 @app.on_event("startup")
 def _startup_vault_audit():
@@ -2289,8 +2403,11 @@ async def thread_history_save(req: Request):
         raise HTTPException(400, "history must be a list")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with _THREAD_LOCK:
-        THREAD_HISTORY_PATH.write_text(
-            json.dumps(hist, ensure_ascii=False, indent=2), encoding="utf-8"
+        # rotate 5 份备份 + 原子写;事故能 rollback 到最近 5 个版本
+        _safe_write_text(
+            THREAD_HISTORY_PATH,
+            json.dumps(hist, ensure_ascii=False, indent=2),
+            rotate=True,
         )
         mtime = _thread_history_mtime_ns()
     return {"ok": True, "mtime": mtime, "count": len(hist)}
