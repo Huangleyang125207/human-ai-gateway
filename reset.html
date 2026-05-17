@@ -50,6 +50,14 @@
   </div>
 <script>
 const status = document.getElementById("status");
+const params = new URLSearchParams(location.search);
+const LS_ONLY = params.has("ls-only");
+
+if (LS_ONLY) {
+  document.querySelector("h1").textContent = "只清本浏览器(保留 server)";
+  document.querySelector("p").innerHTML = "只清本浏览器 LS,server 的 thread-history 保留不动。<br>用于:server 已经 seed 了正确数据,只是这边浏览器 LS 残留把它顶掉了。";
+}
+
 document.getElementById("backBtn").addEventListener("click", () => {
   location.href = "/";
 });
@@ -62,15 +70,19 @@ document.getElementById("goBtn").addEventListener("click", async () => {
     localStorage.removeItem("gateway.thread.history.v1");
     log("✓ 本浏览器 LS 已清");
   } catch (e) { log("× LS 清失败 " + e.message); }
-  // 2. server(POST 一个空 history → 触发 5-rotate 备份 + 落空)
-  try {
-    const r = await fetch("/api/thread/save", {
-      method: "POST", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ history: [] }),
-    });
-    const d = await r.json();
-    log(d.ok ? "✓ server thread-history 已清(留 5 份滚动备份在 .bak.1..5)" : "× server " + (d.error||"failed"));
-  } catch (e) { log("× server 清失败 " + e.message); }
+  // 2. server(可跳过)
+  if (LS_ONLY) {
+    log("⊘ server 跳过(ls-only 模式)");
+  } else {
+    try {
+      const r = await fetch("/api/thread/save", {
+        method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ history: [] }),
+      });
+      const d = await r.json();
+      log(d.ok ? "✓ server thread-history 已清(留 5 份滚动备份在 .bak.1..5)" : "× server " + (d.error||"failed"));
+    } catch (e) { log("× server 清失败 " + e.message); }
+  }
   log("\n3 秒后回 gateway⋯");
   setTimeout(() => location.href = "/", 3000);
 });
