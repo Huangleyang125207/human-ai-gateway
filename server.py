@@ -624,7 +624,72 @@ def tool_manage_daily_task(args):
     today_f = find_today_journal()
     if today_f:
         targets.append(today_f)
-    return {"ok": True, "results": [_apply_task_op(f, action, text, old_text) for f in targets]}
+    md_results = [_apply_task_op(f, action, text, old_text) for f in targets]
+
+    # rename safety:edit / del 时把 meta + image map 的 key 一并迁移 / 清掉
+    # 否则旧 key 变孤儿:intake history、图片、库存全失联
+    side_effects = {}
+    if action == "edit" and old_text and text and old_text != text and any(r.get("ok") for r in md_results):
+        side_effects = _migrate_task_keys(old_text, text)
+    elif action == "del" and old_text and any(r.get("ok") for r in md_results):
+        side_effects = _purge_task_keys(old_text)
+
+    return {"ok": True, "results": md_results, "side_effects": side_effects}
+
+
+def _migrate_task_keys(old_name: str, new_name: str) -> dict:
+    """edit 时把 daily-task-meta + daily-task-images 的 key 从 old 改 new。
+    幂等:new key 已存在就保留 new、不覆盖。返做了什么。
+    """
+    out = {"meta_migrated": False, "image_migrated": False}
+    try:
+        meta = _load_task_meta_map()
+        if old_name in meta and new_name not in meta:
+            meta[new_name] = meta.pop(old_name)
+            _save_task_meta_map(meta)
+            out["meta_migrated"] = True
+    except Exception as e:
+        out["meta_error"] = str(e)
+    try:
+        img_map = _load_task_image_map()
+        if old_name in img_map and new_name not in img_map:
+            img_map[new_name] = img_map.pop(old_name)
+            _save_task_image_map(img_map)
+            out["image_migrated"] = True
+    except Exception as e:
+        out["image_error"] = str(e)
+    return out
+
+
+def _purge_task_keys(name: str) -> dict:
+    """del 时清理 daily-task-meta + daily-task-images 的对应 key + 删图文件。
+    跟现有 daily-tasks/delete 端点逻辑保持一致(单一真相)。
+    """
+    out = {"meta_purged": False, "image_purged": False, "image_file_removed": False}
+    try:
+        meta = _load_task_meta_map()
+        if name in meta:
+            del meta[name]
+            _save_task_meta_map(meta)
+            out["meta_purged"] = True
+    except Exception as e:
+        out["meta_error"] = str(e)
+    try:
+        img_map = _load_task_image_map()
+        if name in img_map:
+            rel = img_map.pop(name)
+            _save_task_image_map(img_map)
+            out["image_purged"] = True
+            try:
+                p = PLATFORM_ROOT / rel
+                if p.exists():
+                    p.unlink()
+                    out["image_file_removed"] = True
+            except Exception:
+                pass
+    except Exception as e:
+        out["image_error"] = str(e)
+    return out
 
 
 def tool_place_scrapbook_image(args):
@@ -2033,6 +2098,156 @@ def daily_task_history(name: str, days: int = 14):
 
 # ── water cup image (8 杯水的个人化照片,跟 daily-task 共用 cutout 流) ──
 WATER_CUP_KEY = "__water_cup__"  # 在 daily-task-images.json 里的保留 key
+
+# ── vault audit + self-heal(防用户/AI 整理文件后映射失联)─────────────
+def _audit_vault() -> dict:
+    """扫所有"path-based 映射"是否还能落到真文件。
+    返报告:{image_orphans, image_recoverable, meta_orphans, aggregate_broken_links}
+    - image_orphans:image map 里 path 不存在 且 没找到同名 fallback → 真断
+    - image_recoverable:path 不存在但 daily-task-images/ 内能找到同名文件 → 可自愈
+    - meta_orphans:meta 有这个 task,但当前 daily-tasks.md + today.md 都没这一行
+    - aggregate_broken_links:聚合页 row 的 link_target 找不到对应文件
+    """
+    report = {
+        "image_orphans": [],
+        "image_recoverable": [],
+        "meta_orphans": [],
+        "aggregate_broken_links": [],
+        "checked_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+    # 1. images
+    try:
+        img_map = _load_task_image_map()
+    except Exception:
+        img_map = {}
+    # 预扫描 daily-task-images 目录下所有 png(递归),建 basename → path 索引
+    name_index = {}
+    if DAILY_TASK_IMAGES_DIR.exists():
+        for p in DAILY_TASK_IMAGES_DIR.rglob("*.png"):
+            name_index.setdefault(p.name, []).append(p)
+    for key, rel in img_map.items():
+        target = PLATFORM_ROOT / rel
+        if target.exists():
+            continue
+        # 尝试用 basename 找
+        basename = Path(rel).name
+        cands = name_index.get(basename, [])
+        if cands:
+            new_rel = str(cands[0].relative_to(PLATFORM_ROOT))
+            report["image_recoverable"].append({
+                "task": key, "old_path": rel, "new_path": new_rel,
+            })
+        else:
+            report["image_orphans"].append({"task": key, "path": rel})
+
+    # 2. meta orphans:每个 meta key 必须能在当前活跃的 daily-task 列表里找到
+    try:
+        meta = _load_task_meta_map()
+    except Exception:
+        meta = {}
+    active_names = set()
+    for src in (SCHEDULE_TEMPLATE_PATH, find_today_journal()):
+        if not src or not src.exists():
+            continue
+        try:
+            text = src.read_text(encoding="utf-8")
+            bounds = _top_section_bounds(text)
+            if not bounds:
+                continue
+            for line in text.splitlines()[bounds[0]:bounds[1]]:
+                m = re.match(r"\s*-\s*\[[ x]\]\s*(.+)", line)
+                if m:
+                    active_names.add(m.group(1).strip())
+        except Exception:
+            pass
+    for key in meta:
+        if key not in active_names:
+            report["meta_orphans"].append({"task": key, "intake_log_days": len((meta[key] or {}).get("intake_log") or {})})
+
+    # 3. 聚合页 row link 是否 404
+    # 注意:markdown `[text](url)` 里 url 含未转义 `)` 会被截断 → link_target
+    # 提前结束(如 `26.5.7(第五天` 没 .md)。fallback 重构:尝试 `path).md`。
+    try:
+        if TAG_AGGREGATE_PATH.exists():
+            text = TAG_AGGREGATE_PATH.read_text(encoding="utf-8")
+            for sec in _parse_tag_aggregate(text):
+                for row in sec["rows"]:
+                    link = row.get("link_target") or ""
+                    if not link:
+                        continue
+                    path_part = link.split("#")[0]
+                    if not path_part:
+                        continue
+                    target = VAULT_DIR / path_part
+                    if target.exists():
+                        continue
+                    # fallback:截断 `).md` 重构
+                    if not path_part.endswith(".md"):
+                        alt = VAULT_DIR / (path_part + ").md")
+                        if alt.exists():
+                            continue
+                    report["aggregate_broken_links"].append({
+                        "tag": sec["tag"], "row_date": row.get("date_short"),
+                        "row_time": row.get("time"), "link": link,
+                    })
+    except Exception:
+        pass
+
+    # total_drift 只算"真断"项:image_recoverable / image_orphans / meta_orphans。
+    # aggregate_broken_links 报告但不计入(多半是 markdown 链接括号截断,iso_date
+    # 解析仍正常,不影响 navigation)
+    report["total_drift"] = (
+        len(report["image_orphans"])
+        + len(report["image_recoverable"])
+        + len(report["meta_orphans"])
+    )
+    report["aggregate_broken_count"] = len(report["aggregate_broken_links"])
+    return report
+
+
+def _repair_vault() -> dict:
+    """安全自动修:只动 image_recoverable(改 image map 指到新 path)。
+    meta_orphans / aggregate_broken_links 留报告给用户决断,不自动碰。
+    """
+    report = _audit_vault()
+    fixed_images = 0
+    if report["image_recoverable"]:
+        img_map = _load_task_image_map()
+        for item in report["image_recoverable"]:
+            img_map[item["task"]] = item["new_path"]
+            fixed_images += 1
+        _save_task_image_map(img_map)
+    return {"fixed_images": fixed_images, "remaining": _audit_vault()}
+
+
+@app.get("/api/vault/audit")
+def vault_audit_get():
+    return _audit_vault()
+
+
+@app.post("/api/vault/repair")
+def vault_repair():
+    return _repair_vault()
+
+
+# 启动时跑一次 audit,有 drift 就 log 警告(不阻塞启动)
+@app.on_event("startup")
+def _startup_vault_audit():
+    try:
+        r = _audit_vault()
+        if r["total_drift"] > 0:
+            log.warning(
+                f"[vault audit] drift detected: "
+                f"image_orphans={len(r['image_orphans'])} "
+                f"image_recoverable={len(r['image_recoverable'])} "
+                f"meta_orphans={len(r['meta_orphans'])} "
+                f"aggregate_broken_links={len(r['aggregate_broken_links'])}. "
+                f"前端会显示 banner;或 POST /api/vault/repair 自动修可修的。"
+            )
+    except Exception as e:
+        log.warning(f"[vault audit] startup audit failed: {e}")
+
 
 # ── chat thread history(server-side 持久化,跨浏览器/跨设备同步源)──
 THREAD_HISTORY_PATH = DATA_DIR / "thread-history.json"

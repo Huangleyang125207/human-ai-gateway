@@ -861,6 +861,37 @@ body.thread-resizing { transition: none; }
   cursor: not-allowed;
   opacity: 0.55;
 }
+/* ────────── vault audit banner ────────── */
+.vault-audit-banner {
+  display: flex; align-items: center; gap: 14px;
+  margin: 12px auto;
+  max-width: 880px;
+  padding: 10px 16px;
+  background: rgba(180, 95, 65, 0.08);
+  border: 1px solid rgba(180, 95, 65, 0.22);
+  border-radius: 8px;
+  font: 13px var(--sans);
+  color: var(--ink-2);
+}
+.vab-icon { font-size: 16px; color: #b14a2b; flex-shrink: 0; }
+.vab-msg { flex: 1; min-width: 0; }
+.vab-title { font-weight: 500; color: var(--ink); }
+.vab-summary { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.vab-summary b { color: var(--ink-2); font-weight: 600; }
+.vab-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.vab-btn {
+  appearance: none; border: 1px solid rgba(58, 52, 44, 0.18);
+  background: rgba(255, 255, 255, 0.5);
+  font: 12px var(--sans); color: var(--ink-2);
+  padding: 4px 10px; border-radius: 5px; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.vab-btn:hover { background: rgba(168, 110, 70, 0.12); border-color: rgba(168, 110, 70, 0.3); }
+.vab-btn:disabled { opacity: 0.5; cursor: wait; }
+.vab-fix { background: rgba(168, 110, 70, 0.12); color: var(--ink); }
+.vab-dismiss { padding: 4px 8px; color: var(--ink-4); }
+.vab-dismiss:hover { color: var(--ink-2); }
+
 .ctx-divider {
   height: 1px;
   background: rgba(58, 52, 44, 0.1);
