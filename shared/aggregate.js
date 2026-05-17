@@ -53,6 +53,7 @@
         <header class="agg-head">
           <div class="agg-title">标签聚合</div>
           <div class="agg-tabs" id="aggTabs"></div>
+          <button class="agg-register" id="aggRegister" title="注册新 project tag(给新 tag 开一段表)">+ 注册</button>
           <button class="agg-refresh" id="aggRefresh" title="AI 扫 schedule 同步新行(只 append 不 delete)">⟳ 刷新</button>
           <button class="agg-rules-btn" id="aggRulesBtn" title="聚合规则" aria-label="rules">规则</button>
           <button class="market-close" id="aggClose" aria-label="close">×</button>
@@ -76,6 +77,7 @@
     document.body.appendChild(overlay);
     document.getElementById("aggClose").addEventListener("click", close);
     document.getElementById("aggRefresh").addEventListener("click", refresh);
+    document.getElementById("aggRegister").addEventListener("click", register);
     document.getElementById("aggRulesBtn").addEventListener("click", () => {
       const det = document.getElementById("aggRules");
       det.open = !det.open;
@@ -85,6 +87,45 @@
 
     renderTabs(sections);
     renderActiveSection();
+  }
+
+  async function register() {
+    const raw = prompt("新 project tag 名(不带 #,如 探索 / 桌宠):");
+    if (!raw) return;
+    const tag = raw.trim().replace(/^#+/, "");
+    if (!tag) return;
+    const description = (prompt(`#${tag} 描述(可空,1 句话 — 用户日后看 panel 用):`, "") || "").trim();
+    const withSub = confirm(`#${tag} 需要 Sub 列吗?\n\n点"确定"= 是(适合预计会有 #${tag}/childA #${tag}/childB 这种 sub-tag 的)\n点"取消"= 否(普通 4 列表,简单)`);
+    try {
+      const r = await fetch("/api/tag-aggregate/register", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({tag, description, with_sub: withSub}),
+      });
+      const data = await r.json();
+      if (!data.ok) {
+        window.gateway?.whisper?.("× " + (data.error || "注册失败"), 3500) || alert("× " + data.error);
+        return;
+      }
+      // 立刻跑一次 refresh 把 schedule 里已存在的同 tag entry 吸进来
+      const r2 = await fetch("/api/tag-aggregate/refresh", { method: "POST" });
+      const refData = await r2.json();
+      // 重拉 + 重渲 + 切到新 tag
+      dataCache = null;
+      try {
+        const r3 = await fetch("/api/tag-aggregate");
+        dataCache = await r3.json();
+      } catch {}
+      activeTag = tag;
+      activeSubTag = null;
+      close();
+      await open();
+      const tail = (refData && refData.ok && refData.added > 0)
+        ? ` + 吸 ${refData.added} 条已存在 entry`
+        : "";
+      window.gateway?.whisper?.(`✓ 注册 #${tag}${tail}`, 3200);
+    } catch (e) {
+      window.gateway?.whisper?.("× 注册请求失败 — " + e.message, 3500) || alert("× " + e.message);
+    }
   }
 
   async function refresh() {

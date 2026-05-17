@@ -2116,7 +2116,7 @@ body.thread-resizing { transition: none; }
   padding: 16px 22px 10px;
   border-bottom: 1px solid rgba(58, 52, 44, 0.08);
 }
-.agg-refresh, .agg-rules-btn {
+.agg-register, .agg-refresh, .agg-rules-btn {
   appearance: none;
   background: rgba(168, 110, 70, 0.08);
   color: var(--ink-3);
@@ -2129,7 +2129,7 @@ body.thread-resizing { transition: none; }
   letter-spacing: 0.02em;
   transition: background 0.18s, color 0.18s, border-color 0.18s;
 }
-.agg-refresh:hover, .agg-rules-btn:hover {
+.agg-register:hover, .agg-refresh:hover, .agg-rules-btn:hover {
   background: rgba(168, 110, 70, 0.16);
   color: var(--ink);
   border-color: rgba(168, 110, 70, 0.3);

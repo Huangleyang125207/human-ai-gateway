@@ -3147,18 +3147,72 @@ def _append_rows_to_aggregate(text: str, new_rows: dict) -> str:
             out_lines.append(line)
             i += 1
             continue
-        # table 行(以 | 开头,排除 separator |---|---|)
+        # table 行(以 | 开头)— 含 separator;新行插在 table 末尾即可,
+        # 这样空 section (只有 header + sep) 也能正确把 row 插在 sep 之后
         if line.startswith("|") and cur_tag:
-            is_separator = all((not c.strip()) or set(c.strip()) <= set("-:") for c in line.strip().strip("|").split("|"))
             out_lines.append(line)
-            if not is_separator:
-                table_last_idx = len(out_lines) - 1
+            table_last_idx = len(out_lines) - 1
             i += 1
             continue
         out_lines.append(line)
         i += 1
     flush_section()
     return "\n".join(out_lines) + ("\n" if text.endswith("\n") else "")
+
+
+@app.post("/api/tag-aggregate/register")
+async def tag_aggregate_register(req: Request):
+    """注册新 project tag — 在 标签聚合.md 末尾追加 `## #tagname` section,
+    带空表头。注册后调用方应自动 trigger refresh 把 schedule 里已有的
+    匹配 entry 吸进来。
+
+    body: {tag: str (不带 #), description?: str, with_sub?: bool}
+    """
+    body = await req.json()
+    tag = (body.get("tag") or "").strip().lstrip("#").strip()
+    description = (body.get("description") or "").strip()
+    with_sub = bool(body.get("with_sub"))
+
+    if not tag:
+        return {"ok": False, "error": "tag 名不能为空"}
+    if not re.match(r"^[\w\-一-鿿/]+$", tag):
+        return {"ok": False, "error": f"tag 只能用字母/数字/下划线/连字符/中文,得到:{tag}"}
+    if "/" in tag:
+        return {"ok": False, "error": "注册 parent tag(不带 /sub);sub-tag 自动 roll-up"}
+
+    if not TAG_AGGREGATE_PATH.exists():
+        return {"ok": False, "error": "标签聚合.md 不存在"}
+
+    text = TAG_AGGREGATE_PATH.read_text(encoding="utf-8")
+    # 已注册?
+    if re.search(rf"^##\s+#{re.escape(tag)}\s*$", text, re.MULTILINE):
+        return {"ok": False, "error": f"#{tag} 已经注册过了"}
+
+    # 拼新 section
+    parts = [f"## #{tag}\n"]
+    if description:
+        parts.append(f"\n{description}\n")
+    parts.append("\n")
+    if with_sub:
+        parts.append("| 日期 | 时间 | 链接 | 内容 | Sub |\n")
+        parts.append("|------|------|------|------|-----|\n")
+    else:
+        parts.append("| 日期 | 时间 | 链接 | 内容 |\n")
+        parts.append("|------|------|------|------|\n")
+    parts.append("\n---\n")
+    section = "".join(parts)
+
+    # append 到文件末尾(确保前面有 \n 隔开)
+    sep = "\n" if not text.endswith("\n") else ""
+    if not text.rstrip().endswith("---"):
+        # 保证段间有 --- 分隔(跟现有约定一致)
+        sep = sep + "\n---\n\n" if text.strip() else sep
+    else:
+        sep += "\n"
+    new_text = text + sep + section
+    TAG_AGGREGATE_PATH.write_text(new_text, encoding="utf-8")
+
+    return {"ok": True, "tag": tag, "with_sub": with_sub}
 
 
 @app.post("/api/tag-aggregate/refresh")
