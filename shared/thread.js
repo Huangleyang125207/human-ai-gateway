@@ -52,16 +52,16 @@
   }
 
   async function syncFromServer() {
-    // 轮询用:server mtime > 本地基线才覆盖(不会拉空 server 覆盖本地)
+    // 轮询用:仅 server mtime > 本地基线 时尝试同步;且 server "比本地多" 才覆盖
     try {
       const r = await fetch("/api/thread/history");
       const d = await r.json();
       const mtime = d.mtime || 0;
       if (mtime <= lastServerMtime) return false;
       const hist = Array.isArray(d.history) ? d.history : [];
-      // 防御:server 0 行但本地有数据时,绝不覆盖(可能是 server 文件被删 / 罕见 race)
-      if (hist.length === 0 && state.history.length > 0) {
-        // 反向推回去把 server 恢复成本地
+      // 防御:server 比 local 少 → 几乎一定是 server 文件被误删 / 测试污染 /
+      // 其他 client 错误 reset。绝不让 server 蚕食本地;反过来推 LS 救场。
+      if (hist.length < state.history.length) {
         saveHistory();
         return false;
       }
@@ -77,16 +77,17 @@
   }
 
   async function initSync() {
-    // 启动时:server 有数据 → 拉来覆盖本地(server is truth)
-    //         server 空 + 本地有数据 → push 本地到 server 当种子(一次性迁移旧 LS)
-    //         两边都空 → no-op
+    // 启动时三分支(永远 "数据多" 的那侧赢,杜绝事故吃数据):
+    //   server > local → server 覆盖本地(其他 client/设备写过)
+    //   local > server → push 本地(server 是新的/被清/初次)
+    //   等长 + server 有 mtime → 采 server(假定同份数据,基线对齐)
     try {
       const r = await fetch("/api/thread/history");
       const d = await r.json();
       const serverHist = Array.isArray(d.history) ? d.history : [];
       const serverMtime = d.mtime || 0;
-      if (serverMtime > 0 && serverHist.length > 0) {
-        // server 真相覆盖本地
+
+      if (serverHist.length > state.history.length) {
         state.history = serverHist.slice(-PERSIST_LIMIT);
         lastServerMtime = serverMtime;
         try { localStorage.setItem(THREAD_KEY, JSON.stringify(state.history)); } catch {}
@@ -94,9 +95,13 @@
           stream.innerHTML = "";
           for (const m of state.history) appendMsg(m);
         }
-      } else if (state.history.length > 0) {
-        // server 空 + LS 有数据 → 把 LS 种子推上去
+      } else if (state.history.length > serverHist.length) {
+        // local 更多 → push 上去
         saveHistory();
+      } else if (serverMtime > 0) {
+        // 等长 + server 有 mtime → 采 server 文本(可能内容一致,确保基线)
+        state.history = serverHist.slice(-PERSIST_LIMIT);
+        lastServerMtime = serverMtime;
       }
     } catch {}
   }
