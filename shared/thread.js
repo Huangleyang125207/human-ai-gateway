@@ -469,11 +469,15 @@
           ? `(用户指着这些):\n${m.refs.map(r => `[${r.kind}] ${r.label}`).join("\n")}\n\n${m.content}`
           : m.content,
       }));
+      // 30s timeout — 超时把 processing card 变红错误状态(避免永远卡"在想…")
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 30000);
       const r = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ context, message: msg || "看这里", history, model_id: activeModelId || undefined }),
-      });
+        signal: ctrl.signal,
+      }).finally(() => clearTimeout(timer));
       const data = await r.json();
       removeProcessing();
       if (data.reply) {
@@ -502,7 +506,10 @@
       saveHistory();
     } catch (e) {
       removeProcessing();
-      appendAction(`请求失败 · ${e.message}`);
+      const reason = e.name === "AbortError"
+        ? "30s 超时 — 可能是 server 卡 / 网慢 / API down。打开 /reset.html 重置或刷新重试。"
+        : e.message;
+      appendAction(`请求失败 · ${reason}`);
     } finally {
       removeProcessing();
       hintLeft.textContent = "点页面上任意东西 → 把它带进对话";

@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./shared/style.css?v=20260517k">
+<link rel="stylesheet" href="./shared/style.css?v=20260517l">
 </head>
 <body>
 <div id="app">
@@ -52,6 +52,7 @@
         <option value="">⋯</option>
       </select>
       <span class="thread-status" id="threadStatus">⋯</span>
+      <a class="thread-reset" href="./reset.html" title="清空聊天记录(本浏览器 + server,不动其他)">⟲</a>
       <button class="thread-close" id="threadClose" aria-label="close">×</button>
     </header>
     <div class="thread-stream" id="threadStream"></div>
@@ -91,6 +92,7 @@
 <script src="./shared/aggregate.js?v=20260517e" defer></script>
 <script src="./shared/vault-setup.js?v=20260516a" defer></script>
 <script src="./shared/vault-audit.js?v=20260517h" defer></script>
+<script src="./shared/health-ping.js?v=20260517k" defer></script>
 <script src="./shared/setup.js?v=20260515f" defer></script>
 <script src="./shared/widget-loader.js?v=20260515f" defer></script>
 <!-- pretext (ESM) — 文字绕图,bug 2 用 -->

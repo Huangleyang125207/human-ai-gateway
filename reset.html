@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>重置聊天 · Gateway</title>
+<link rel="icon" type="image/svg+xml" href="./brand/logo.svg">
+<style>
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5efe3; color: #3a342c;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; margin: 0;
+  }
+  .box {
+    max-width: 480px; padding: 32px 36px;
+    background: #fefaf2;
+    border: 1px solid rgba(58, 52, 44, 0.1);
+    border-radius: 10px;
+    box-shadow: 0 4px 24px rgba(58, 52, 44, 0.08);
+  }
+  h1 { font-size: 18px; font-weight: 500; margin: 0 0 8px; letter-spacing: 0.04em; }
+  p { font-size: 13.5px; color: rgba(58, 52, 44, 0.7); margin: 0 0 16px; line-height: 1.6; }
+  .actions { display: flex; gap: 10px; margin-top: 18px; }
+  button {
+    appearance: none; border: 1px solid rgba(58, 52, 44, 0.2);
+    background: rgba(255, 255, 255, 0.6);
+    font: 13px inherit; color: #3a342c;
+    padding: 8px 16px; border-radius: 6px; cursor: pointer;
+    transition: background 0.15s;
+  }
+  button.danger { background: rgba(177, 74, 43, 0.1); border-color: rgba(177, 74, 43, 0.3); color: #8a3a22; }
+  button.danger:hover { background: rgba(177, 74, 43, 0.2); }
+  button:hover { background: rgba(168, 110, 70, 0.1); }
+  .status { margin-top: 18px; font-size: 12.5px; color: rgba(58, 52, 44, 0.6); white-space: pre-line; min-height: 40px; }
+  .logo { width: 32px; height: 32px; margin-bottom: 12px; display: block; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <img class="logo" src="./brand/logo.svg" alt="">
+    <h1>重置聊天记录</h1>
+    <p>清掉本浏览器的 chat history(localStorage)+ server 端 thread-history.json + 所有滚动备份。
+       schedule / 补剂 / 图片 / 配置等其他数据<strong>不动</strong>。</p>
+    <p>用于:侧边栏卡死、历史污染、想从干净状态重开。</p>
+    <div class="actions">
+      <button class="danger" id="goBtn">就这么重置</button>
+      <button id="backBtn">返回 gateway</button>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+<script>
+const status = document.getElementById("status");
+document.getElementById("backBtn").addEventListener("click", () => {
+  location.href = "/";
+});
+document.getElementById("goBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("goBtn");
+  btn.disabled = true; btn.textContent = "清理中⋯";
+  const log = (s) => { status.textContent += s + "\n"; };
+  // 1. localStorage(本浏览器)
+  try {
+    localStorage.removeItem("gateway.thread.history.v1");
+    log("✓ 本浏览器 LS 已清");
+  } catch (e) { log("× LS 清失败 " + e.message); }
+  // 2. server(POST 一个空 history → 触发 5-rotate 备份 + 落空)
+  try {
+    const r = await fetch("/api/thread/save", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ history: [] }),
+    });
+    const d = await r.json();
+    log(d.ok ? "✓ server thread-history 已清(留 5 份滚动备份在 .bak.1..5)" : "× server " + (d.error||"failed"));
+  } catch (e) { log("× server 清失败 " + e.message); }
+  log("\n3 秒后回 gateway⋯");
+  setTimeout(() => location.href = "/", 3000);
+});
+</script>
+</body>
+</html>

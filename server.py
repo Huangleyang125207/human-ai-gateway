@@ -2397,6 +2397,12 @@ def _thread_history_mtime_ns() -> int:
         return 0
 
 
+@app.get("/api/health")
+def api_health():
+    """轻量 ping — client 每 30s 检测,断了弹 banner。"""
+    return {"ok": True, "ts": datetime.now().isoformat(timespec="seconds")}
+
+
 @app.get("/api/thread/history")
 def thread_history_get():
     """返聊天历史 + mtime_ns。client 轮询时 mtime 变化才重拉。"""
