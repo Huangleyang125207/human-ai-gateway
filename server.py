@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import subprocess
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -2032,6 +2033,53 @@ def daily_task_history(name: str, days: int = 14):
 
 # ── water cup image (8 杯水的个人化照片,跟 daily-task 共用 cutout 流) ──
 WATER_CUP_KEY = "__water_cup__"  # 在 daily-task-images.json 里的保留 key
+
+# ── chat thread history(server-side 持久化,跨浏览器/跨设备同步源)──
+THREAD_HISTORY_PATH = DATA_DIR / "thread-history.json"
+_THREAD_LOCK = threading.Lock()
+
+
+def _thread_history_mtime_ns() -> int:
+    try:
+        return THREAD_HISTORY_PATH.stat().st_mtime_ns
+    except FileNotFoundError:
+        return 0
+
+
+@app.get("/api/thread/history")
+def thread_history_get():
+    """返聊天历史 + mtime_ns。client 轮询时 mtime 变化才重拉。"""
+    if not THREAD_HISTORY_PATH.exists():
+        return {"history": [], "mtime": 0}
+    try:
+        with _THREAD_LOCK:
+            data = json.loads(THREAD_HISTORY_PATH.read_text(encoding="utf-8"))
+            mtime = _thread_history_mtime_ns()
+        if not isinstance(data, list):
+            data = []
+        return {"history": data, "mtime": mtime}
+    except Exception as e:
+        log.warning(f"thread history read failed: {e}")
+        return {"history": [], "mtime": 0, "error": str(e)}
+
+
+@app.post("/api/thread/save")
+async def thread_history_save(req: Request):
+    """全量覆盖。client 应送整段 history(最近 N 条)。
+    返新 mtime,client 拿来作为下一次 poll 的基线(避免自己写完又被自己 poll 拉一遍)。
+    """
+    body = await req.json()
+    hist = body.get("history")
+    if not isinstance(hist, list):
+        raise HTTPException(400, "history must be a list")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with _THREAD_LOCK:
+        THREAD_HISTORY_PATH.write_text(
+            json.dumps(hist, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        mtime = _thread_history_mtime_ns()
+    return {"ok": True, "mtime": mtime, "count": len(hist)}
+
 
 @app.get("/api/water-cup")
 def water_cup_get():

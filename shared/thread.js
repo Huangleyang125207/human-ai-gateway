@@ -23,6 +23,8 @@
     open: false,
     apiOk: null,
   };
+  // server-side mtime — 用于 poll diff:server > 这个值才重渲(避免自己写完被自己 pull 一次)
+  let lastServerMtime = 0;
 
   function loadHistory() {
     try {
@@ -33,11 +35,69 @@
     } catch { return []; }
   }
   function saveHistory() {
+    // 1. localStorage(离线缓存 + 同源跨 tab storage event)
     try {
       localStorage.setItem(
         THREAD_KEY,
         JSON.stringify(state.history.slice(-PERSIST_LIMIT))
       );
+    } catch {}
+    // 2. server(跨浏览器 / 跨设备真相源)
+    fetch("/api/thread/save", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ history: state.history.slice(-PERSIST_LIMIT) }),
+    }).then(r => r.json()).then(d => {
+      if (d && d.mtime) lastServerMtime = d.mtime;
+    }).catch(() => {});  // 离线 / server down 都不阻塞
+  }
+
+  async function syncFromServer() {
+    // 轮询用:server mtime > 本地基线才覆盖(不会拉空 server 覆盖本地)
+    try {
+      const r = await fetch("/api/thread/history");
+      const d = await r.json();
+      const mtime = d.mtime || 0;
+      if (mtime <= lastServerMtime) return false;
+      const hist = Array.isArray(d.history) ? d.history : [];
+      // 防御:server 0 行但本地有数据时,绝不覆盖(可能是 server 文件被删 / 罕见 race)
+      if (hist.length === 0 && state.history.length > 0) {
+        // 反向推回去把 server 恢复成本地
+        saveHistory();
+        return false;
+      }
+      state.history = hist.slice(-PERSIST_LIMIT);
+      lastServerMtime = mtime;
+      try { localStorage.setItem(THREAD_KEY, JSON.stringify(state.history)); } catch {}
+      if (typeof stream !== "undefined" && stream) {
+        stream.innerHTML = "";
+        for (const m of state.history) appendMsg(m);
+      }
+      return true;
+    } catch { return false; }
+  }
+
+  async function initSync() {
+    // 启动时:server 有数据 → 拉来覆盖本地(server is truth)
+    //         server 空 + 本地有数据 → push 本地到 server 当种子(一次性迁移旧 LS)
+    //         两边都空 → no-op
+    try {
+      const r = await fetch("/api/thread/history");
+      const d = await r.json();
+      const serverHist = Array.isArray(d.history) ? d.history : [];
+      const serverMtime = d.mtime || 0;
+      if (serverMtime > 0 && serverHist.length > 0) {
+        // server 真相覆盖本地
+        state.history = serverHist.slice(-PERSIST_LIMIT);
+        lastServerMtime = serverMtime;
+        try { localStorage.setItem(THREAD_KEY, JSON.stringify(state.history)); } catch {}
+        if (stream) {
+          stream.innerHTML = "";
+          for (const m of state.history) appendMsg(m);
+        }
+      } else if (state.history.length > 0) {
+        // server 空 + LS 有数据 → 把 LS 种子推上去
+        saveHistory();
+      }
     } catch {}
   }
 
@@ -291,12 +351,15 @@
     requestAnimationFrame(() => { stream.scrollTop = stream.scrollHeight; });
   }
 
-  // initial render of history
+  // initial render of history(先用 LS 给即时画面,然后再 initSync 校准:
+  // server 有数据 → 拉来覆盖;server 空 + LS 有 → 把 LS 推上去当种子)
   for (const m of state.history) appendMsg(m);
+  initSync();
 
-  // ── cross-tab sync ───────────────────────────────────
-  // localStorage 'storage' event 只在 *其他* tab 触发(写的那个 tab 自己不收),
-  // 所以另一个窗口写新消息 → 这边自动重渲。pending 引用是 tab-local,不动。
+  // ── cross-client sync(三层)─────────────────────────
+  // L1: storage event — 同源跨 tab 即时同步(<10ms)
+  // L2: server poll(3s)— 跨浏览器 / 跨设备真相源
+  // L3: tab 可见性变化 + window focus 时强 sync — 用户切回来立刻最新
   window.addEventListener("storage", (e) => {
     if (e.key === THREAD_KEY) {
       state.history = loadHistory();
@@ -310,6 +373,11 @@
       }
     }
   });
+  setInterval(() => syncFromServer(), 3000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") syncFromServer();
+  });
+  window.addEventListener("focus", () => syncFromServer());
 
   // ── model picker init ────────────────────────────────
   loadModels();
