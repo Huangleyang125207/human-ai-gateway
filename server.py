@@ -906,22 +906,42 @@ def tool_set_daily_task_meta(args):
 
 
 def _do_web_search(query: str, max_results: int = 5) -> str:
-    """ddgs 后端,跟 investment-dashboard 同款。失败 / 空结果 都返字符串(不抛)。"""
+    """ddgs 后端。三段式 fall through:
+      1. auto — 默认混合多引擎,中文 query 结果质量最高
+      2. duckduckgo,google,wikipedia — auto 崩时显式链(漏掉常炸 TLS 的 brave/mullvad)
+      3. wikipedia 单独 — 最后兜底(没 TLS 协议负担)
+    auto 失败常见原因:某个被选中的引擎 TLS handshake 崩
+    ('Unsupported protocol version 0x304')。
+    失败 / 空结果 都返字符串(不抛)。
+    """
     max_results = max(1, min(int(max_results or 5), 10))
     try:
         from ddgs import DDGS
-        results = list(DDGS().text(query, max_results=max_results))
     except Exception as e:
-        return f"[搜索后端出错:{type(e).__name__}: {e}]"
-    if not results:
-        return "[无结果]"
-    parts = []
-    for r in results:
-        title = r.get("title", "")
-        href = r.get("href", "")
-        body = (r.get("body") or "")[:300]
-        parts.append(f"- {title}\n  {href}\n  {body}")
-    return "\n".join(parts)
+        return f"[ddgs 没装好:{e}]"
+
+    # ddg+google 组合实测中文 query 出真结果(单 ddg 偶尔"No results",
+    # 单 google 给随机数学题,bing 把中文 tokenize 飞);auto 兜底
+    backends_to_try = ["duckduckgo,google", "duckduckgo,google,bing,wikipedia", "auto", "wikipedia"]
+    last_err = None
+    for backend in backends_to_try:
+        try:
+            results = list(DDGS().text(query, max_results=max_results, backend=backend))
+        except Exception as e:
+            last_err = e
+            continue
+        if not results:
+            continue
+        parts = []
+        for r in results:
+            title = r.get("title", "")
+            href = r.get("href", "")
+            body = (r.get("body") or "")[:300]
+            parts.append(f"- {title}\n  {href}\n  {body}")
+        return "\n".join(parts)
+    if last_err:
+        return f"[搜索后端全崩(3 个 backend 配置都试过):{type(last_err).__name__}: {last_err}]"
+    return "[无结果]"
 
 
 def tool_web_search(args):
