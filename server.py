@@ -1685,20 +1685,27 @@ def _chat_stream_generator(client, active_model, messages, active_tools):
         messages.append(asst_msg)
 
         if not msg.tool_calls:
-            # 模型不要 tool 了 — 这轮的 text 已经在手里。要么直接 yield 完了,
-            # 要么 pop 出去再 stream 一次(更"弹字感")。后者 1 次 API call 代价,
-            # 但是体验跟 ChatGPT 一致。取折中:直接 chunk 化 yield(纯前端体验,
-            # 不额外多调一次 API)。
-            text = msg.content or ""
-            text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
-            if not text and last_actions:
-                names = ", ".join(a.get("name", "?") for a in last_actions)
-                text = f"(已执行 {names},模型未补充文字)"
-            # 假流:把已有 text 按 ~10 字符切,2ms 一片 yield
-            # 不是真 streaming(模型已经返完),但保持"弹字"视觉
-            for i in range(0, len(text), 8):
-                yield _sse({"type": "delta", "text": text[i:i+8]})
-            yield _sse({"type": "done", "actions": last_actions})
+            # 模型不要 tool 了 — pop 出已收的 asst 消息,改用 stream=True 真流
+            # (extra 1 API call,但保证真"弹字",跟最后一轮路径一致)
+            messages.pop()
+            try:
+                stream_resp = client.chat.completions.create(
+                    model=active_model, messages=messages, stream=True,
+                )
+                emitted = False
+                for chunk in stream_resp:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        emitted = True
+                        yield _sse({"type": "delta", "text": delta.content})
+                if not emitted and last_actions:
+                    names = ", ".join(a.get("name", "?") for a in last_actions)
+                    yield _sse({"type": "delta", "text": f"(已执行 {names},模型未补充文字)"})
+                yield _sse({"type": "done", "actions": last_actions})
+            except Exception as e:
+                yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
             return
 
         # 执行 tools,逐个 yield action 事件
