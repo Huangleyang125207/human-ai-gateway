@@ -674,6 +674,17 @@ body.thread-resizing { transition: none; }
 }
 
 .t-msg { display: flex; flex-direction: column; gap: 4px; }
+/* streaming 中的 AI 消息:body 末尾跟一个闪烁游标 */
+.t-msg.streaming .body::after {
+  content: "▌";
+  color: #b8362b;
+  margin-left: 2px;
+  animation: t-cursor-blink 1s steps(2) infinite;
+}
+@keyframes t-cursor-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
 .t-msg .who {
   font: 10px var(--sans); color: var(--ink-4);
   letter-spacing: 0.14em; text-transform: uppercase;

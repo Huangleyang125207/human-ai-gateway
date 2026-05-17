@@ -32,7 +32,7 @@ import secrets
 log = logging.getLogger("gateway")
 import requests
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 try:
@@ -1486,6 +1486,7 @@ async def chat(req: Request):
     user_msg = body.get("message", "")
     history = body.get("history", []) or []
     model_id = body.get("model_id")  # 前端 picker 选的 profile id
+    stream_mode = bool(body.get("stream"))
 
     profile = get_profile(model_id)
     client = get_client(profile)
@@ -1542,6 +1543,14 @@ async def chat(req: Request):
 
     # web_search 现在是 function tool(走 ddgs 后端),所有 provider 都用同一份 — 不再 per-provider 过滤
     active_tools = [t for t in TOOLS if t.get("type") == "function"]
+
+    # ── streaming 模式:SSE 事件流(action / delta / done / error)──
+    if stream_mode:
+        return StreamingResponse(
+            _chat_stream_generator(client, active_model, messages, active_tools),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     # multi-turn tool loop (max 4 rounds);最后一轮 force-no-tool 逼出文本回复,
     # 避免某些模型(如 DeepSeek)search 完仍想继续 search 撞 loop 上限返空 reply。
@@ -1618,6 +1627,106 @@ async def chat(req: Request):
 
     final_reply = re.sub(r"<think>.*?</think>\s*", "", msg.content or "", flags=re.DOTALL).strip()
     return {"reply": final_reply or "(no reply, tool loop hit max iterations)", "actions": last_actions}
+
+# ── chat SSE streaming generator ────────────────────────────────────
+# 事件类型:
+#   {"type":"action","name":"...","args":{...},"result":{...}}  — 工具执行完
+#   {"type":"delta","text":"..."}                                — 文本片段
+#   {"type":"done","actions":[...]}                              — 收尾
+#   {"type":"error","text":"..."}                                — 异常
+def _sse(obj: dict) -> str:
+    return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+
+def _chat_stream_generator(client, active_model, messages, active_tools):
+    """跑跟非 stream 一样的 tool loop,但最后一轮(无 tool_calls 那一次)
+    用 stream=True 把 text 一段段 yield 出去。tool 调用之间 yield action 事件。
+    """
+    last_actions = []
+    MAX_ROUNDS = 4
+    for round_idx in range(MAX_ROUNDS):
+        is_last_round = (round_idx == MAX_ROUNDS - 1)
+        # 非最后轮:先非 stream 让模型决定要不要 tool;
+        # 最后轮:直接 stream(强制无 tool 出文本)
+        if is_last_round:
+            # 直接 stream
+            try:
+                stream_resp = client.chat.completions.create(
+                    model=active_model, messages=messages, stream=True,
+                )
+                for chunk in stream_resp:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        yield _sse({"type": "delta", "text": delta.content})
+                yield _sse({"type": "done", "actions": last_actions})
+            except Exception as e:
+                yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
+            return
+
+        # tool round:非 stream
+        try:
+            resp = client.chat.completions.create(
+                model=active_model, messages=messages,
+                tools=active_tools, tool_choice="auto",
+            )
+        except Exception as e:
+            yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
+            return
+
+        msg = resp.choices[0].message
+        asst_msg = msg.model_dump(exclude_none=True)
+        asst_msg["role"] = "assistant"
+        if not msg.tool_calls:
+            asst_msg.pop("tool_calls", None)
+        if asst_msg.get("content") is None:
+            asst_msg["content"] = ""
+        messages.append(asst_msg)
+
+        if not msg.tool_calls:
+            # 模型不要 tool 了 — 这轮的 text 已经在手里。要么直接 yield 完了,
+            # 要么 pop 出去再 stream 一次(更"弹字感")。后者 1 次 API call 代价,
+            # 但是体验跟 ChatGPT 一致。取折中:直接 chunk 化 yield(纯前端体验,
+            # 不额外多调一次 API)。
+            text = msg.content or ""
+            text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
+            if not text and last_actions:
+                names = ", ".join(a.get("name", "?") for a in last_actions)
+                text = f"(已执行 {names},模型未补充文字)"
+            # 假流:把已有 text 按 ~10 字符切,2ms 一片 yield
+            # 不是真 streaming(模型已经返完),但保持"弹字"视觉
+            for i in range(0, len(text), 8):
+                yield _sse({"type": "delta", "text": text[i:i+8]})
+            yield _sse({"type": "done", "actions": last_actions})
+            return
+
+        # 执行 tools,逐个 yield action 事件
+        for tc in msg.tool_calls:
+            if getattr(tc, "type", "function") != "function" or not getattr(tc, "function", None):
+                continue
+            fn = tc.function.name
+            args = {}
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except Exception:
+                pass
+            try:
+                result = TOOL_IMPL[fn](args)
+            except Exception as e:
+                result = {"error": str(e)}
+            action_payload = {"name": fn, "args": args, "result": result}
+            last_actions.append(action_payload)
+            yield _sse({"type": "action", **action_payload})
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": json.dumps(result, ensure_ascii=False),
+            })
+
+    # MAX_ROUNDS 用完都没出文本
+    yield _sse({"type": "done", "actions": last_actions, "warning": "hit max rounds"})
+
 
 # ── journal parser ───────────────────────────────────────────────────
 TIME_H1_RE = re.compile(r'^# (\d{1,2})[：:](\d{2})\s*$')

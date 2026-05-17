@@ -457,65 +457,129 @@
       return;
     }
 
+    // ── streaming send ────────────────────────────────────
+    // SSE 事件:action(工具完成) / delta(文本 chunk) / done(收尾) / error
+    // 监控:连续 90s 没收到任何 chunk → AbortController 触发,显示错误
+    const TASK_MUTATING = /^(manage_daily_task|check_daily_task|set_daily_task_image|set_water_cup_image|set_daily_task_meta)$/;
+    const SCHEDULE_MUTATING = /^(patch_journal_block|insert_journal_block)$/;
+    const SCRAPBOOK_MUTATING = /^place_scrapbook_image$/;
+    let streamMsgEl = null;
+    let accumText = "";
+    let needTaskRefresh = false, needScheduleRefresh = false, needScrapbookRefresh = false;
+
+    const ctrl = new AbortController();
+    let chunkTimer = null;
+    const resetChunkTimer = () => {
+      if (chunkTimer) clearTimeout(chunkTimer);
+      // 90s 没新 chunk = 卡了。比纯 30s total 友好得多 — 长文输出也能写完
+      chunkTimer = setTimeout(() => ctrl.abort(), 90000);
+    };
+    resetChunkTimer();
+
     try {
       const context = {
         type: "thread",
         refs: sentRefs.map(r => ({ kind: r.kind, label: r.label, payload: r.payload })),
       };
-      // last N messages as conversation history
       const history = state.history.slice(-MAX_HISTORY - 1, -1).map(m => ({
         role: m.role,
         content: m.refs && m.refs.length
           ? `(用户指着这些):\n${m.refs.map(r => `[${r.kind}] ${r.label}`).join("\n")}\n\n${m.content}`
           : m.content,
       }));
-      // 30s timeout — 超时把 processing card 变红错误状态(避免永远卡"在想…")
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 30000);
       const r = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ context, message: msg || "看这里", history, model_id: activeModelId || undefined }),
+        body: JSON.stringify({
+          context, message: msg || "看这里", history,
+          model_id: activeModelId || undefined,
+          stream: true,
+        }),
         signal: ctrl.signal,
-      }).finally(() => clearTimeout(timer));
-      const data = await r.json();
-      removeProcessing();
-      if (data.reply) {
-        const aiMsg = { role: "assistant", content: data.reply };
-        state.history.push(aiMsg);
-        appendMsg(aiMsg);
-      }
-      // tool 调用产生 side effect 后,联动刷新对应 UI(否则 AI 加了任务 / 改了 schedule, 用户得手刷)
-      const TASK_MUTATING = /^(manage_daily_task|check_daily_task|set_daily_task_image|set_water_cup_image|set_daily_task_meta)$/;
-      const SCHEDULE_MUTATING = /^(patch_journal_block|insert_journal_block)$/;
-      const SCRAPBOOK_MUTATING = /^place_scrapbook_image$/;
-      let needTaskRefresh = false, needScheduleRefresh = false, needScrapbookRefresh = false;
-      for (const a of data.actions || []) {
-        const summary = `tool · ${a.name} → ${JSON.stringify(a.result).slice(0, 140)}`;
-        appendAction(summary);
-        if (/^(add|patch)_widget$/.test(a.name) && !a.result?.error) {
-          appendAction("widget 已落盘 · 刷新页面看效果");
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        resetChunkTimer();
+        buf += decoder.decode(value, { stream: true });
+        // SSE: 事件用 \n\n 分隔;每行 "data: <json>"
+        const events = buf.split("\n\n");
+        buf = events.pop() || "";
+        for (const ev of events) {
+          const line = ev.trim();
+          if (!line.startsWith("data: ")) continue;
+          let data;
+          try { data = JSON.parse(line.slice(6)); } catch { continue; }
+
+          if (data.type === "delta") {
+            if (!streamMsgEl) {
+              removeProcessing();
+              streamMsgEl = appendStreamingMsg();
+            }
+            accumText += data.text || "";
+            streamMsgEl.querySelector(".body").textContent = accumText;
+            scrollToBottom();
+          } else if (data.type === "action") {
+            const summary = `tool · ${data.name} → ${JSON.stringify(data.result).slice(0, 140)}`;
+            appendAction(summary);
+            if (/^(add|patch)_widget$/.test(data.name) && !data.result?.error) {
+              appendAction("widget 已落盘 · 刷新页面看效果");
+            }
+            if (TASK_MUTATING.test(data.name) && !data.result?.error) needTaskRefresh = true;
+            if (SCHEDULE_MUTATING.test(data.name) && !data.result?.error) needScheduleRefresh = true;
+            if (SCRAPBOOK_MUTATING.test(data.name) && !data.result?.error) needScrapbookRefresh = true;
+          } else if (data.type === "error") {
+            removeProcessing();
+            appendAction(`⚠ AI 错: ${data.text}`);
+          } else if (data.type === "done") {
+            // 收尾 — streamingMsg 升级成正式消息(渲 markdown)进 history
+            if (streamMsgEl && accumText) {
+              streamMsgEl.querySelector(".body").innerHTML = renderText(accumText);
+              streamMsgEl.classList.remove("streaming");
+            } else if (!streamMsgEl) {
+              // 没文本(纯工具调用 / 全失败)— 提示一下
+              if ((data.actions || []).length > 0) {
+                appendAction("（已执行工具,模型未补充文字）");
+              }
+            }
+            if (accumText) {
+              state.history.push({ role: "assistant", content: accumText });
+              saveHistory();
+            }
+          }
         }
-        if (TASK_MUTATING.test(a.name) && !a.result?.error) needTaskRefresh = true;
-        if (SCHEDULE_MUTATING.test(a.name) && !a.result?.error) needScheduleRefresh = true;
-        if (SCRAPBOOK_MUTATING.test(a.name) && !a.result?.error) needScrapbookRefresh = true;
       }
+
       if (needTaskRefresh) window.gateway.ritual?.refreshTasks?.();
       if (needScheduleRefresh) window.gateway.journal?.refresh?.();
       if (needScrapbookRefresh) window.gateway.scrapbook?.refresh?.();
-      saveHistory();
     } catch (e) {
       removeProcessing();
       const reason = e.name === "AbortError"
-        ? "30s 超时 — 可能是 server 卡 / 网慢 / API down。打开 /reset.html 重置或刷新重试。"
+        ? "90s 没新字 — 可能 server 卡 / 网慢 / API down。打开 /reset.html 重置或刷新重试。"
         : e.message;
       appendAction(`请求失败 · ${reason}`);
     } finally {
+      if (chunkTimer) clearTimeout(chunkTimer);
       removeProcessing();
       hintLeft.textContent = "点页面上任意东西 → 把它带进对话";
-      // 强 focus 在 macOS 上偶尔会 reset IME(切回英文)。先聚一下,IME 状态由用户控制
       try { input.focus({ preventScroll: true }); } catch {}
     }
+  }
+
+  function appendStreamingMsg() {
+    const el = document.createElement("div");
+    el.className = "t-msg ai streaming";
+    el.innerHTML = `<span class="who">AI</span><div class="body"></div>`;
+    stream.appendChild(el);
+    scrollToBottom();
+    return el;
   }
 
   // 输入法 composition 状态(macOS / Win 切中文 / 拼音候选期)。
