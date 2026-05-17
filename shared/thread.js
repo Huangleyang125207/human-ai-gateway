@@ -352,6 +352,24 @@
     stream.appendChild(el);
     scrollToBottom();
   }
+
+  // ── "AI 在想…" processing card(动态 logo,跟 brand 同一图)──
+  function showProcessing(label = "在想⋯") {
+    removeProcessing();
+    const el = document.createElement("div");
+    el.className = "t-processing";
+    el.id = "tProcessing";
+    el.innerHTML = `
+      <img class="t-processing-logo" src="./brand/logo-animated.svg" alt="">
+      <span class="t-processing-text"></span>
+    `;
+    el.querySelector(".t-processing-text").textContent = label;
+    stream.appendChild(el);
+    scrollToBottom();
+  }
+  function removeProcessing() {
+    document.getElementById("tProcessing")?.remove();
+  }
   function scrollToBottom() {
     requestAnimationFrame(() => { stream.scrollTop = stream.scrollHeight; });
   }
@@ -427,8 +445,10 @@
     input.value = "";
     input.style.height = "auto";
     hintLeft.textContent = "⋯";
+    showProcessing();
 
     if (state.apiOk === false) {
+      removeProcessing();
       const aiMsg = { role: "assistant", content: "（AI 没接上 — 起 server / 设 api key 后再来）" };
       state.history.push(aiMsg);
       appendMsg(aiMsg);
@@ -455,6 +475,7 @@
         body: JSON.stringify({ context, message: msg || "看这里", history, model_id: activeModelId || undefined }),
       });
       const data = await r.json();
+      removeProcessing();
       if (data.reply) {
         const aiMsg = { role: "assistant", content: data.reply };
         state.history.push(aiMsg);
@@ -480,8 +501,10 @@
       if (needScrapbookRefresh) window.gateway.scrapbook?.refresh?.();
       saveHistory();
     } catch (e) {
+      removeProcessing();
       appendAction(`请求失败 · ${e.message}`);
     } finally {
+      removeProcessing();
       hintLeft.textContent = "点页面上任意东西 → 把它带进对话";
       // 强 focus 在 macOS 上偶尔会 reset IME(切回英文)。先聚一下,IME 状态由用户控制
       try { input.focus({ preventScroll: true }); } catch {}

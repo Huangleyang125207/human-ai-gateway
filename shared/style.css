@@ -639,6 +639,30 @@ body.thread-resizing { transition: none; }
 .thread-stream::-webkit-scrollbar { width: 6px; }
 .thread-stream::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
 
+/* ────────── AI processing card(等回复)────────── */
+.t-processing {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px;
+  margin: 6px 0;
+  background: rgba(168, 110, 70, 0.05);
+  border-radius: 8px;
+  border-left: 2px solid rgba(184, 54, 43, 0.3);  /* 朱砂红 — 跟 logo 共价键同色 */
+  animation: t-processing-pulse 2.2s ease-in-out infinite;
+}
+.t-processing-logo {
+  width: 26px; height: 26px;
+  flex-shrink: 0;
+}
+.t-processing-text {
+  font: 13px var(--sans);
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+}
+@keyframes t-processing-pulse {
+  0%, 100% { background: rgba(168, 110, 70, 0.05); }
+  50%      { background: rgba(168, 110, 70, 0.10); }
+}
+
 .t-msg { display: flex; flex-direction: column; gap: 4px; }
 .t-msg .who {
   font: 10px var(--sans); color: var(--ink-4);
