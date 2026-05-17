@@ -81,6 +81,37 @@ body {
 .days {
   display: flex; justify-content: center; gap: 0;
   font-family: var(--sans);
+  /* 多 day 时溢出 → scroll-drag 接管(JS 套 .scroll-drag 类) */
+  flex: 0 1 auto;
+  max-width: 60vw;
+}
+
+/* ────────── scroll-drag(横向拖动滚 + 边缘渐变) ────────── */
+.scroll-drag {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* IE/old Edge */
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+          mask-image: linear-gradient(to right, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+}
+.scroll-drag::-webkit-scrollbar { display: none; }
+.scroll-drag.dragging { cursor: grabbing; }
+/* 拖到最左 → 不再左渐变;拖到最右同理 */
+.scroll-drag.no-fade-left {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+          mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+}
+.scroll-drag.no-fade-right {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 28px, #000 100%);
+          mask-image: linear-gradient(to right, transparent 0, #000 28px, #000 100%);
+}
+.scroll-drag.no-fade-left.no-fade-right {
+  -webkit-mask-image: none;
+          mask-image: none;
 }
 .day-pill {
   appearance: none; border: 0; background: transparent;

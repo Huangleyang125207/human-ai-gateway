@@ -101,6 +101,15 @@
         fetchJournal(d);
       });
     });
+    // 横向拖动 + 边缘渐变 + 自动滚到当前 day
+    const updateFade = window.gateway?.dragScroll?.(el);
+    requestAnimationFrame(() => {
+      const cur = el.querySelector(".day-pill.on");
+      if (cur && cur.scrollIntoView) {
+        cur.scrollIntoView({ block: "nearest", inline: "center", behavior: "auto" });
+      }
+      updateFade?.();
+    });
   }
 
   function renderHead(data) {

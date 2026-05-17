@@ -173,6 +173,8 @@
   function renderTabs(sections) {
     const tabs = document.getElementById("aggTabs");
     tabs.innerHTML = "";
+    // 横向拖动滚 + 边缘渐变(idempotent — 重渲时只 init 一次)
+    const updateFade = window.gateway?.dragScroll?.(tabs);
     for (const s of sections) {
       const btn = document.createElement("button");
       btn.className = "agg-tab" + (s.tag === activeTag ? " on" : "");
@@ -186,6 +188,8 @@
       });
       tabs.appendChild(btn);
     }
+    // 内容渲完后再算一次渐变(scrollWidth 这时才稳)
+    if (updateFade) requestAnimationFrame(updateFade);
   }
 
   function renderActiveSection() {
