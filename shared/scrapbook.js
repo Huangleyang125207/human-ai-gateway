@@ -102,6 +102,7 @@
     wrap.style.width = (it.w || 200) + "px";
     wrap.style.height = (it.h || 200) + "px";
 
+    wrap.dataset.rotation = String(it.rotation || 0);
     const inner = document.createElement("div");
     inner.className = "sb-wrap-inner";
     inner.style.transform = `rotate(${it.rotation || 0}deg)`;
@@ -164,6 +165,8 @@
       const newTopPx = startTopPx + (e.clientY - startCY);
       wrap.style.left = newLeftPx + "px";
       wrap.style.top = newTopPx + "px";
+      // live drag reflow — rAF throttled inside entryWrap
+      window.gateway?.entryWrap?.liveRewrap?.();
     });
     wrap.addEventListener("pointerup", async (e) => {
       if (!dragging) return;
@@ -215,6 +218,10 @@
         const ang = Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180 / Math.PI;
         it.rotation = Math.round((origRot + (ang - startAng)) * 10) / 10;
         inner.style.transform = `rotate(${it.rotation}deg)`;
+        // 同步给 obstacle 用的 polygon
+        const wrap = inner.closest(".sb-wrap");
+        if (wrap) wrap.dataset.rotation = String(it.rotation);
+        window.gateway?.entryWrap?.liveRewrap?.();
       };
       const onUp = () => {
         try { handle.releasePointerCapture(e.pointerId); } catch {}
@@ -242,6 +249,7 @@
         it.h = Math.round(nh);
         wrap.style.width = it.w + "px";
         wrap.style.height = it.h + "px";
+        window.gateway?.entryWrap?.liveRewrap?.();
       };
       const onUp = () => {
         try { handle.releasePointerCapture(e.pointerId); } catch {}
