@@ -294,6 +294,23 @@
   // initial render of history
   for (const m of state.history) appendMsg(m);
 
+  // ── cross-tab sync ───────────────────────────────────
+  // localStorage 'storage' event 只在 *其他* tab 触发(写的那个 tab 自己不收),
+  // 所以另一个窗口写新消息 → 这边自动重渲。pending 引用是 tab-local,不动。
+  window.addEventListener("storage", (e) => {
+    if (e.key === THREAD_KEY) {
+      state.history = loadHistory();
+      stream.innerHTML = "";
+      for (const m of state.history) appendMsg(m);
+    } else if (e.key === MODEL_KEY) {
+      const newId = e.newValue || "";
+      if (newId !== activeModelId) {
+        activeModelId = newId;
+        if (modelSel) modelSel.value = activeModelId;
+      }
+    }
+  });
+
   // ── model picker init ────────────────────────────────
   loadModels();
 
