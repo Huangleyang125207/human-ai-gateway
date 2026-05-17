@@ -153,6 +153,20 @@ def _rotate_backup(path: Path, keep: int = 5):
         pass  # 备份失败不阻塞主流程
 
 
+def _pretty_rel(p: Path) -> str:
+    """Display-friendly 相对路径。Phase 1/2 后 vault 和 app-state 分属不同 root,
+    单一 PLATFORM_ROOT 不够用。逐个尝试合理 base,落空返绝对 path。
+    URL 构造也走它(APP_STATE_DIR 命中 → `data/...`,可直接接前缀 `/`)。
+    """
+    p = Path(p)
+    for base in (APP_STATE_DIR, DATA_HOME, CODE_ROOT):
+        try:
+            return str(p.relative_to(base))
+        except ValueError:
+            continue
+    return str(p)
+
+
 def _safe_write_text(path: Path, content: str, rotate: bool = False, encoding: str = "utf-8"):
     """原子写文本。rotate=True 先把旧的旋转成 bak.1..bak.5 再写。
     用 tmpfile + rename 实现原子(POSIX:os.rename 是 atomic;Windows 用 os.replace)。
@@ -689,7 +703,7 @@ def tool_set_water_cup_image(args):
     DAILY_TASK_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     out = DAILY_TASK_IMAGES_DIR / "_water_cup.png"
     out.write_bytes(processed.read_bytes())
-    rel = str(out.relative_to(PLATFORM_ROOT))
+    rel = _pretty_rel(out)
     image_map = _load_task_image_map()
     image_map[WATER_CUP_KEY] = rel
     _save_task_image_map(image_map)
@@ -708,7 +722,7 @@ def tool_set_daily_task_image(args):
     stem = _sanitize_task_filename(task_name)
     out = DAILY_TASK_IMAGES_DIR / f"{stem}.png"
     out.write_bytes(processed.read_bytes())
-    rel = str(out.relative_to(PLATFORM_ROOT))
+    rel = _pretty_rel(out)
     image_map = _load_task_image_map()
     image_map[task_name] = rel
     _save_task_image_map(image_map)
@@ -837,7 +851,7 @@ def tool_place_scrapbook_image(args):
         out_file = SCRAPBOOK_IMAGES_DIR / f"{out_stem}{ext}"
         out_file.write_bytes(src_file.read_bytes())
 
-    rel = "/" + str(out_file.relative_to(PLATFORM_ROOT))
+    rel = "/" + _pretty_rel(out_file)
 
     items = _load_scrapbook(date)
     item = {
@@ -1684,7 +1698,7 @@ def _list_journal_files():
             continue
         yy, mm, dd = int(m.group(1)), int(m.group(2)), int(m.group(3))
         iso = f"20{yy:02d}-{mm:02d}-{dd:02d}"
-        items.append({"date": iso, "stem": f.stem, "file": str(f.relative_to(PLATFORM_ROOT))})
+        items.append({"date": iso, "stem": f.stem, "file": _pretty_rel(f)})
     items.sort(key=lambda x: x["date"])
     return items
 
@@ -1701,7 +1715,7 @@ def _journal_for_date(date_iso=None):
     if not f:
         return {"error": f"no journal file for {target.strftime('%Y-%m-%d')}"}
     return {
-        "file": str(f.relative_to(PLATFORM_ROOT)),
+        "file": _pretty_rel(f),
         "date": target.strftime("%Y-%m-%d"),
         "blocks": parse_journal(f.read_text(encoding="utf-8")),
     }
@@ -1756,7 +1770,7 @@ async def journal_new_day(req: Request):
     file_rel = ""
     if file_match:
         try:
-            file_rel = str(Path(file_match.group(1)).relative_to(PLATFORM_ROOT))
+            file_rel = _pretty_rel(Path(file_match.group(1)))
         except Exception:
             file_rel = file_match.group(1)
     return {"ok": True, "created": created, "file": file_rel, "stdout": out.strip()}
@@ -2240,7 +2254,7 @@ def _audit_vault() -> dict:
         basename = Path(rel).name
         cands = name_index.get(basename, [])
         if cands:
-            new_rel = str(cands[0].relative_to(PLATFORM_ROOT))
+            new_rel = _pretty_rel(cands[0])
             report["image_recoverable"].append({
                 "task": key, "old_path": rel, "new_path": new_rel,
             })
@@ -2441,7 +2455,7 @@ async def water_cup_set(req: Request):
     DAILY_TASK_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     out = DAILY_TASK_IMAGES_DIR / "_water_cup.png"
     out.write_bytes(processed.read_bytes())
-    rel = str(out.relative_to(PLATFORM_ROOT))
+    rel = _pretty_rel(out)
     image_map = _load_task_image_map()
     image_map[WATER_CUP_KEY] = rel
     _save_task_image_map(image_map)
@@ -2476,7 +2490,7 @@ async def cutout_image(req: Request):
     out_file = DAILY_TASK_IMAGES_DIR / f"{stem}.png"
     out_file.write_bytes(processed.read_bytes())
 
-    rel = str(out_file.relative_to(PLATFORM_ROOT))
+    rel = _pretty_rel(out_file)
     image_map = _load_task_image_map()
     image_map[task_name] = rel
     _save_task_image_map(image_map)
@@ -3810,7 +3824,7 @@ def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "") -> dic
         new_text = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
         f.write_text(new_text, encoding="utf-8")
         return {"ok": True, "appended_to_existing": True, "h2": h2_line,
-                "file": str(f.relative_to(PLATFORM_ROOT))}
+                "file": _pretty_rel(f)}
 
     new_h1 = f"# {hh}：{mm:02d}"
     if insert_idx is not None:
@@ -3821,7 +3835,7 @@ def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "") -> dic
 
     new_text = "\n".join(new_lines) + ("\n" if text.endswith("\n") else "")
     f.write_text(new_text, encoding="utf-8")
-    return {"ok": True, "inserted": new_h1, "file": str(f.relative_to(PLATFORM_ROOT))}
+    return {"ok": True, "inserted": new_h1, "file": _pretty_rel(f)}
 
 
 # ── daily-task 维护(真相源 + 今天文件双写) ─────────────────────────
@@ -3875,8 +3889,7 @@ def _apply_task_op(f: Path, action: str, text: str, old_text: str) -> dict:
     lines = raw.splitlines()
     bounds = _top_section_bounds(raw)
     if bounds is None:
-        return {"file": str(f.relative_to(PLATFORM_ROOT)) if f.is_absolute() and PLATFORM_ROOT in f.parents else str(f),
-                "error": "找不到顶部 section (缺 --- 分割)"}
+        return {"file": _pretty_rel(f), "error": "找不到顶部 section (缺 --- 分割)"}
     start, end = bounds  # [start, end)
 
     if action == "add":
@@ -3916,7 +3929,7 @@ def _apply_task_op(f: Path, action: str, text: str, old_text: str) -> dict:
     new_text = "\n".join(new_lines) + ("\n" if raw.endswith("\n") else "")
     f.write_text(new_text, encoding="utf-8")
     try:
-        rel = str(f.relative_to(PLATFORM_ROOT))
+        rel = _pretty_rel(f)
     except Exception:
         rel = str(f)
     return {"file": rel, "ok": True}
@@ -3962,7 +3975,7 @@ async def journal_delete_block(req: Request):
     # 替换为占位 `##` + 一个空行
     new_lines = lines[:start + 1] + ["", "##", ""] + lines[end:]
     f.write_text("\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
-    return {"ok": True, "cleared": time_label, "file": str(f.relative_to(PLATFORM_ROOT))}
+    return {"ok": True, "cleared": time_label, "file": _pretty_rel(f)}
 
 
 @app.post("/api/journal/patch")
@@ -4014,7 +4027,7 @@ def _patch_block(f: Path, time_label: str, new_md: str) -> dict:
 
     new_lines = lines[:start + 1] + [""] + new_md.rstrip().splitlines() + [""] + lines[end:]
     f.write_text("\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
-    return {"patched": time_label, "file": str(f.relative_to(PLATFORM_ROOT))}
+    return {"patched": time_label, "file": _pretty_rel(f)}
 
 # ── vault config (Obsidian-style 选址) ──────────────────────────────
 @app.get("/api/vault")
