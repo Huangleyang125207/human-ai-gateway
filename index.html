@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./shared/style.css?v=20260517m">
+<link rel="stylesheet" href="./shared/style.css?v=20260517o">
 </head>
 <body>
 <div id="app">
@@ -47,7 +47,10 @@
       <span class="tab-label">AI</span>
     </div>
     <header class="thread-head">
-      <span class="thread-title">在听</span>
+      <div class="thread-view-tabs" role="tablist">
+        <button class="tvt on" data-view="chat" id="tvtChat">对话</button>
+        <button class="tvt" data-view="board" id="tvtBoard">留言板<span class="tvt-dot" id="tvtBoardDot" hidden></span></button>
+      </div>
       <select class="thread-model" id="threadModel" aria-label="切换模型" title="切换模型">
         <option value="">⋯</option>
       </select>
@@ -55,20 +58,29 @@
       <a class="thread-reset" href="./reset.html" title="清空聊天记录(本浏览器 + server,不动其他)">⟲</a>
       <button class="thread-close" id="threadClose" aria-label="close">×</button>
     </header>
-    <div class="thread-stream" id="threadStream"></div>
-    <div class="thread-pending" id="threadPending"></div>
-    <div class="thread-input-row">
-      <button class="thread-attach" id="threadAttachBtn" aria-label="upload image" title="上传图片(也可粘贴/拖入)">📎</button>
-      <input type="file" id="threadFileInput" accept="image/*" multiple hidden>
-      <textarea
-        class="thread-input"
-        id="threadInput"
-        rows="1"
-        placeholder="跟它说点什么⋯  ⏎ 发送 · shift+⏎ 换行"
-      ></textarea>
-      <div class="thread-hint">
-        <span id="threadHintLeft">点页面上任意东西 → 把它带进对话</span>
-        <span>⏎</span>
+    <!-- view: chat (chat 流 + 输入框) -->
+    <div class="thread-view chat-view on" id="chatView">
+      <div class="thread-stream" id="threadStream"></div>
+      <div class="thread-pending" id="threadPending"></div>
+      <div class="thread-input-row">
+        <button class="thread-attach" id="threadAttachBtn" aria-label="upload image" title="上传图片(也可粘贴/拖入)">📎</button>
+        <input type="file" id="threadFileInput" accept="image/*" multiple hidden>
+        <textarea
+          class="thread-input"
+          id="threadInput"
+          rows="1"
+          placeholder="跟它说点什么⋯  ⏎ 发送 · shift+⏎ 换行"
+        ></textarea>
+        <div class="thread-hint">
+          <span id="threadHintLeft">点页面上任意东西 → 把它带进对话</span>
+          <span>⏎</span>
+        </div>
+      </div>
+    </div>
+    <!-- view: 留言板 (AI 单向给用户的今晚复盘) -->
+    <div class="thread-view board-view" id="boardView">
+      <div class="board-content" id="boardContent">
+        <div class="board-empty">载入中⋯</div>
       </div>
     </div>
   </aside>
@@ -84,6 +96,7 @@
 <script src="./shared/md.js?v=20260515f" defer></script>
 <script src="./shared/context-menu.js?v=20260515f" defer></script>
 <script src="./shared/thread.js?v=20260517m" defer></script>
+<script src="./shared/notes-board.js?v=20260517o" defer></script>
 <script src="./shared/journal.js?v=20260517e" defer></script>
 <script src="./shared/scrapbook.js?v=20260517a" defer></script>
 <script src="./shared/ritual.js?v=20260517g" defer></script>
