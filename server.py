@@ -87,22 +87,30 @@ WIDGETS_DIR = GATEWAY_DIR / "widgets"
 USER_WIDGETS_PATH = GATEWAY_DIR / ".user-widgets.json"
 CONFIG_PATH = CONFIG_DIR / "gateway-config.json"
 JOURNAL_DIR = VAULT_DIR / "半小时复盘"
-ATTACHMENTS_DIR = VAULT_DIR / "attachments"
+# attachments + PULSE 镜像 是 app-owned(URL 服务 / 单向同步),搬出 vault → APP_STATE_DIR
+# 防用户在 vault 里整理文件时误删 / 改名,断 md 链接 / 失去 PULSE 状态
+ATTACHMENTS_DIR = APP_STATE_DIR / "attachments"
+# 标签聚合.md 保持 vault 暴露(用户保留 Obsidian 反链体验)
 TAG_AGGREGATE_PATH = VAULT_DIR / "标签聚合.md"
 # 兼容(早期代码引用 PLATFORM_ROOT 当某个 root 用 — 跟新 image 路径一起用)
 PLATFORM_ROOT = APP_STATE_DIR
 
 
-# ── 一次性迁移:旧 ~/.human-ai/data + config → APP_STATE_DIR ──
+# ── 一次性迁移:旧路径 → APP_STATE_DIR ──
+# 包括:
+#   ~/.human-ai/data + config   → APP_STATE_DIR/data + config(Phase 1)
+#   vault/PULSE/                → APP_STATE_DIR/pulse-mirror/  (Phase 2)
+#   vault/attachments/          → APP_STATE_DIR/attachments/   (Phase 2)
+# COPY 不删 — 老位置留作 fallback。新位置有同名跳过。
 def _migrate_old_state():
-    """启动一次。把 DATA_HOME/data + DATA_HOME/config 里的文件 COPY 到
-    APP_STATE_DIR(只 copy 不删 — 用户原位置当 fallback 留几天)。
-    新位置已有同名文件则跳过(避免覆盖更新的)。
-    """
-    legacy_data = DATA_HOME / "data"
-    legacy_config = DATA_HOME / "config"
     moved = 0
-    for legacy, target in [(legacy_data, DATA_DIR), (legacy_config, CONFIG_DIR)]:
+    migrations = [
+        (DATA_HOME / "data",   DATA_DIR),
+        (DATA_HOME / "config", CONFIG_DIR),
+        (VAULT_DIR / "PULSE",       PULSE_DIR),
+        (VAULT_DIR / "attachments", ATTACHMENTS_DIR),
+    ]
+    for legacy, target in migrations:
         if not legacy.exists() or legacy.resolve() == target.resolve():
             continue
         target.mkdir(parents=True, exist_ok=True)
@@ -2503,7 +2511,7 @@ async def cutout_image(req: Request):
     }
 
 
-PULSE_DIR = VAULT_DIR / "PULSE"  # 提前到 eval 段之前,因 eval 引用之
+PULSE_DIR = APP_STATE_DIR / "pulse-mirror"  # 搬出 vault,app-owned 单向镜像
 
 # ─── daily eval (测试端点) ──────────────────────────────────────────────────
 # 设计:保留 build_system_prompt() 的 co-writer 身份不动,evaluator role
