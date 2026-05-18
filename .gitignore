@@ -2,3 +2,8 @@
 .gateway-config.json
 *.log
 /dist/
+/.venv-build/
+/dist-pyinstaller/
+/build/
+*.spec
+brand/logo.icns

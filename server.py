@@ -45,7 +45,12 @@ except ImportError:
 #   代码: ~/human-ai-dev/ (将来 GitHub 仓库)
 #   数据: ~/.human-ai/  (XDG 风格,跟代码解耦, 不进 git)
 # 优先级: $HUMAN_AI_HOME env var → ~/.human-ai/ → 历史 fallback
-GATEWAY_DIR = Path(__file__).parent.resolve()
+# PyInstaller frozen 时,静态资源被解到 sys._MEIPASS(临时,只读)。
+# 非 frozen(dev / 源码跑)时,GATEWAY_DIR 就是 server.py 所在目录。
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    GATEWAY_DIR = Path(sys._MEIPASS).resolve()
+else:
+    GATEWAY_DIR = Path(__file__).parent.resolve()
 CODE_ROOT = GATEWAY_DIR.parent          # = ~/human-ai-dev/ (代码 root,放 skill/scripts/etc)
 
 import vault_config
@@ -84,7 +89,17 @@ CONFIG_DIR = APP_STATE_DIR / "config"
 
 SKILL_DIR_LOCAL = CODE_ROOT / "skill"
 WIDGETS_DIR = GATEWAY_DIR / "widgets"
-USER_WIDGETS_PATH = GATEWAY_DIR / ".user-widgets.json"
+# user-widgets.json 是 writable 状态(用户挑了哪些 widget 落在哪个 slot),
+# 必须落 APP_STATE_DIR — 不然 PyInstaller frozen 下 _MEIPASS 只读,写不进去。
+USER_WIDGETS_PATH = DATA_DIR / "user-widgets.json"
+# 旧位置(开发模式下放在 gateway/ 旁边)兼容:首次启动若新位置无文件,从旧位置拷
+_LEGACY_USER_WIDGETS = Path(__file__).parent / ".user-widgets.json"
+if _LEGACY_USER_WIDGETS.exists() and not USER_WIDGETS_PATH.exists():
+    try:
+        USER_WIDGETS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        USER_WIDGETS_PATH.write_text(_LEGACY_USER_WIDGETS.read_text(encoding="utf-8"), encoding="utf-8")
+    except Exception:
+        pass
 CONFIG_PATH = CONFIG_DIR / "gateway-config.json"
 JOURNAL_DIR = VAULT_DIR / "半小时复盘"
 # attachments + PULSE 镜像 是 app-owned(URL 服务 / 单向同步),搬出 vault → APP_STATE_DIR
