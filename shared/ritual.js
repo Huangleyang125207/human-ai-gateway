@@ -37,43 +37,59 @@
   }
 
   let _cupImageUrl = null;  // 用户上传水杯抠完的 PNG url(若有)
+  let _viewDate = null;     // null = 今天;"YYYY-MM-DD" = 在看历史日(只读)
+  let _viewIsToday = true;
 
   async function init() {
     const care = document.getElementById("care");
     if (!care) return;
-    // 拉水杯图 + 拉今天 daily-tasks(从 md 真相读「喝水」intake)— 并行
-    let cupImg = null, intakeFromMd = 0, waterTaskExists = false;
+    // 水杯图全局只拉一次(跨天不变)
     try {
-      const [imgR, tasksR] = await Promise.all([
-        fetch("/api/water-cup").then(r => r.json()),
-        fetch("/api/daily-tasks").then(r => r.json()),
-      ]);
-      cupImg = imgR.image_url || null;
-      const wt = (tasksR.tasks || []).find(t => t.name === WATER_TASK_NAME);
-      if (wt) {
-        waterTaskExists = true;
-        intakeFromMd = Math.max(0, Math.min(CUPS_TOTAL, wt.intake_today || 0));
-      }
+      const imgR = await fetch("/api/water-cup").then(r => r.json());
+      _cupImageUrl = imgR.image_url || null;
     } catch {}
-    _cupImageUrl = cupImg;
+    // 默认渲今天 + 监听切日
+    await loadDay(null);
+    document.addEventListener("gateway:day-change", (e) => {
+      loadDay(e.detail?.date || null);
+    });
+  }
 
-    // 一次性迁移:若 localStorage 还有今日水量且高于 md → 推到 md 然后清 LS
-    const ls = load();
-    if (waterTaskExists && ls && ls.cups > intakeFromMd) {
-      try {
-        const r = await fetch("/api/daily-tasks/check", {
-          method: "POST", headers: {"Content-Type":"application/json"},
-          body: JSON.stringify({task_name: WATER_TASK_NAME, intake: Math.min(CUPS_TOTAL, ls.cups)}),
-        });
-        const d = await r.json();
-        intakeFromMd = Math.max(intakeFromMd, d.intake_today || ls.cups);
-      } catch {}
+  async function loadDay(dateISO) {
+    const care = document.getElementById("care");
+    if (!care) return;
+    _viewDate = dateISO;
+    const qs = dateISO ? `?date=${encodeURIComponent(dateISO)}` : "";
+    let tasksR = { tasks: [], is_today: true };
+    try {
+      tasksR = await fetch("/api/daily-tasks" + qs).then(r => r.json());
+    } catch (e) {
+      console.warn("[ritual] /api/daily-tasks failed:", e);
     }
-    try { localStorage.removeItem(LS_PREFIX + todayKey()); } catch {}
+    _viewIsToday = tasksR.is_today !== false;
+    const wt = (tasksR.tasks || []).find(t => t.name === WATER_TASK_NAME);
+    let intakeFromMd = wt ? Math.max(0, Math.min(CUPS_TOTAL, wt.today_intake || 0)) : 0;
 
-    const state = { cups: intakeFromMd };
+    // LS → server 一次性迁移,只在今天做
+    if (_viewIsToday && wt) {
+      const ls = load();
+      if (ls && ls.cups > intakeFromMd) {
+        try {
+          const r = await fetch("/api/daily-tasks/check", {
+            method: "POST", headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({task_name: WATER_TASK_NAME, intake: Math.min(CUPS_TOTAL, ls.cups)}),
+          });
+          const d = await r.json();
+          intakeFromMd = Math.max(intakeFromMd, d.today_intake || ls.cups);
+        } catch {}
+      }
+      try { localStorage.removeItem(LS_PREFIX + todayKey()); } catch {}
+    }
+
+    care.classList.toggle("care-readonly", !_viewIsToday);
+    const state = { cups: intakeFromMd, readonly: !_viewIsToday };
     render(care, state);
-    refreshTasks();
+    renderTasksFromData(tasksR.tasks || [], !_viewIsToday);
   }
 
   function render(care, state) {
@@ -103,16 +119,19 @@
 
     // cup click → 注水 (silent, no thread popup)
     // long-press 600ms → 指着今日水量跟 AI 说话
+    // 历史日:cup 只读,click 弹 toast,但 long-press 还能 "指给 AI" 看那天的水量
     [...care.querySelectorAll(".cup")].forEach((cup) => {
       let pressT = null;
       cup.addEventListener("pointerdown", () => {
         pressT = setTimeout(() => {
           pressT = null;
-          window.gateway.thread?.addRef({
-            kind: "ritual",
-            label: `今日水量 ${state.cups}/${CUPS_TOTAL}`,
-            payload: `今天喝水: ${state.cups} / ${CUPS_TOTAL} 杯`,
-          });
+          const label = state.readonly
+            ? `${_viewDate} 水量 ${state.cups}/${CUPS_TOTAL}`
+            : `今日水量 ${state.cups}/${CUPS_TOTAL}`;
+          const payload = state.readonly
+            ? `${_viewDate} 喝水: ${state.cups} / ${CUPS_TOTAL} 杯`
+            : `今天喝水: ${state.cups} / ${CUPS_TOTAL} 杯`;
+          window.gateway.thread?.addRef({ kind: "ritual", label, payload });
         }, 600);
       });
       const cancelPress = () => { if (pressT) { clearTimeout(pressT); pressT = null; } };
@@ -121,6 +140,10 @@
       cup.addEventListener("pointerup", () => {
         if (!pressT) return;          // long-press 已经触发
         clearTimeout(pressT); pressT = null;
+        if (state.readonly) {
+          window.gatewayToast?.("回到今天才能打卡");
+          return;
+        }
         // level-meter:click cup #k 把 state.cups 设到 k+1 (上调) 或 k (降到该级以下,把刚点的也清空)
         const k = +cup.dataset.k;
         const prev = state.cups;
@@ -227,34 +250,39 @@
   }
 
   // ── daily-tasks 横排 strip ───────────────────────────
+  // refreshTasks 拉今天数据后渲染(老调用方:点击 / 上传抠图后刷新)
   async function refreshTasks() {
+    // 不打扰 _viewDate;只刷今天那份数据,但若当前在历史日则保持 readonly
+    const qs = _viewDate ? `?date=${encodeURIComponent(_viewDate)}` : "";
+    try {
+      const r = await fetch("/api/daily-tasks" + qs);
+      const data = await r.json();
+      renderTasksFromData(data.tasks || [], data.is_today === false);
+    } catch (e) {
+      const container = document.getElementById("dailyTasks");
+      if (container) container.innerHTML = `<div class="daily-tasks-empty">load failed: ${e.message}</div>`;
+    }
+  }
+
+  function renderTasksFromData(tasks, readonly) {
     const container = document.getElementById("dailyTasks");
     const counter = document.getElementById("tasks-count");
     if (!container) return;
-    let tasks = [];
-    try {
-      const r = await fetch("/api/daily-tasks");
-      const data = await r.json();
-      tasks = data.tasks || [];
-    } catch (e) {
-      container.innerHTML = `<div class="daily-tasks-empty">load failed: ${e.message}</div>`;
-      return;
-    }
     // 「喝水」在水杯 grid 单独显示,不重复在补剂 tile 行
-    tasks = tasks.filter(t => t.name !== WATER_TASK_NAME);
+    tasks = (tasks || []).filter(t => t.name !== WATER_TASK_NAME);
     if (!tasks.length) {
       container.innerHTML = `<div class="daily-tasks-empty">没有 daily task — 右键页面空白 → 「加一项每日任务」</div>`;
+      if (counter) counter.parentElement.innerHTML = `<b id="tasks-count">0</b> / 0 项`;
       return;
     }
     container.innerHTML = "";
-    // 行分组规则:每行最多 4,但若末行只有 1 个就从前一行借一个 → 5 变 3+2,9 变 4+3+2
     const rowSizes = splitRows(tasks.length, 4);
     let idx = 0;
     for (const size of rowSizes) {
       const row = document.createElement("div");
       row.className = "tasks-row";
       for (let i = 0; i < size; i++) {
-        row.appendChild(taskNode(tasks[idx++]));
+        row.appendChild(taskNode(tasks[idx++], readonly));
       }
       container.appendChild(row);
     }
@@ -262,7 +290,6 @@
       const done = tasks.filter(t => t.checked).length;
       counter.parentElement.innerHTML = `<b id="tasks-count">${done}</b> / ${tasks.length} 项`;
     }
-    // wire 5s dock-max for newly rendered tasks
     wireDockMax([...container.querySelectorAll(".task")]);
   }
 
@@ -277,7 +304,7 @@
     return rows;
   }
 
-  function taskNode(t) {
+  function taskNode(t, readonly) {
     const el = document.createElement("article");
     const dose = Math.max(1, t.daily_dose || 1);
     // 兼容:md 已 [x] 但 meta 没 intake 记录 → 按满计(老数据迁移)
@@ -285,7 +312,8 @@
     const intake = Math.max(0, Math.min(dose, rawIntake));
     const fullyOn = intake >= dose;
     el.className = "task" + (fullyOn ? " on" : "") + (intake > 0 && !fullyOn ? " partial" : "")
-                 + (t.image_url ? "" : " no-image");
+                 + (t.image_url ? "" : " no-image")
+                 + (readonly ? " readonly" : "");
     el.dataset.name = t.name;
 
     const photo = document.createElement("button");
@@ -357,6 +385,10 @@
     photo.addEventListener("pointercancel", clearLP);
     photo.addEventListener("click", (e) => {
       if (longPressFired) { longPressFired = false; return; }   // 长按已开 modal,跳过 click
+      if (readonly) {
+        window.gatewayToast?.("回到今天才能打卡");
+        return;
+      }
       if (!t.image_url) return uploadForTask(t.name);
 
       const curDose = Math.max(1, t.daily_dose || 1);

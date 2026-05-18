@@ -79,6 +79,8 @@
     renderStream(data);
     // 重渲完同步刷 scrapbook(切日 + 内容刷新都自动跟)
     window.gateway.scrapbook?.refresh(data.date);
+    // 通知 care strip(水杯 + 补剂 tile)按这一天的真相重渲
+    document.dispatchEvent(new CustomEvent("gateway:day-change", { detail: { date: data.date } }));
   }
 
   function renderDays(data) {

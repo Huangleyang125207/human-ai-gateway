@@ -222,7 +222,18 @@ body { transition: padding-right 0.45s cubic-bezier(0.2, 0.7, 0.2, 1); }
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   align-items: stretch;
+  position: relative;
 }
+.care.care-readonly { opacity: 0.78; }
+.care.care-readonly::after {
+  content: "历史日只读 · 切回今天可打卡";
+  position: absolute; top: 6px; right: 8px;
+  font: 10px var(--sans); color: var(--ink-4);
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+.care.care-readonly .cup { cursor: not-allowed; }
+.care.care-readonly .task { cursor: not-allowed; }
 .care-block {
   display: flex; flex-direction: column; gap: 10px;
   cursor: default;

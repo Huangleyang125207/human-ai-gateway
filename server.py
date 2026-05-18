@@ -684,7 +684,8 @@ def tool_check_daily_task(args):
     start, end = bounds
     box = "x" if checked else " "
     for i in range(start, end):
-        m = re.match(r"(\s*-\s*\[)([ x])(\]\s*)(.+)", lines[i])
+        # 顶层 only
+        m = re.match(r"^(-\s*\[)([ x])(\]\s*)(.+)", lines[i])
         if m and m.group(4).strip() == name:
             lines[i] = f"{m.group(1)}{box}{m.group(3)}{m.group(4)}"
             new_text = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
@@ -2088,15 +2089,19 @@ def _today_date_str() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
-def _task_meta_state(name: str, meta_map: dict) -> dict:
-    """单 task 的剂量/库存状态。无 meta 返默认。"""
+def _task_meta_state(name: str, meta_map: dict, target_date=None) -> dict:
+    """单 task 的剂量/库存状态。无 meta 返默认。
+    target_date=None → 今天 intake;target_date=datetime → 该日 intake。
+    """
     m = meta_map.get(name) or {}
     total_pills = m.get("total_pills")  # int | None
     daily_dose = int(m.get("daily_dose") or 1)
     if daily_dose < 1:
         daily_dose = 1
     intake_log = m.get("intake_log") or {}
-    today_intake = int(intake_log.get(_today_date_str(), 0) or 0)
+    date_key = (target_date.strftime("%Y-%m-%d") if target_date is not None
+                else _today_date_str())
+    today_intake = int(intake_log.get(date_key, 0) or 0)
     consumed = sum(int(v or 0) for v in intake_log.values())
     remaining = (total_pills - consumed) if isinstance(total_pills, int) else None
     return {
@@ -2135,29 +2140,108 @@ def _bump_intake(name: str, delta: int = 1, set_to=None) -> dict:
     return _task_meta_state(name, meta_map)
 
 
-def _read_daily_tasks_from_md() -> list:
-    """从今天的 md 顶部读 daily task 清单 (- [ ] xxx 行,任意 checkbox 状态)。
+def _read_daily_tasks_from_md(target_date=None) -> list:
+    """从指定日 md 顶部读 daily task 清单 (- [ ] xxx 行,任意 checkbox 状态)。
+    target_date=None → 今天(没今天 fallback 模板)。
+    target_date=datetime → 该日;没文件返 []。
     返 [{name, checked}, ...]
     """
-    f = find_today_journal()
-    if not f:
-        # 没今天 → 读模板
-        tpl = SCHEDULE_TEMPLATE_PATH if SCHEDULE_TEMPLATE_PATH.exists() else None
-        if not tpl:
+    if target_date is not None:
+        f = find_today_journal(target_date)
+        if not f:
             return []
-        text = tpl.read_text(encoding="utf-8")
-    else:
         text = f.read_text(encoding="utf-8")
+    else:
+        f = find_today_journal()
+        if not f:
+            tpl = SCHEDULE_TEMPLATE_PATH if SCHEDULE_TEMPLATE_PATH.exists() else None
+            if not tpl:
+                return []
+            text = tpl.read_text(encoding="utf-8")
+        else:
+            text = f.read_text(encoding="utf-8")
     bounds = _top_section_bounds(text)
     if bounds is None:
         return []
     start, end = bounds
     out = []
     for line in text.splitlines()[start:end]:
-        m = re.match(r"\s*-\s*\[([ x])\]\s*(.+)", line)
+        # 只取顶层(无缩进)task。daily_dose>1 的 task 下挂的子 box 是进度刻度,不算独立 task。
+        m = re.match(r"^-\s*\[([ x])\]\s*(.+)", line)
         if m:
             out.append({"name": m.group(2).strip(), "checked": m.group(1) == "x"})
     return out
+
+
+def _ensure_md_progress_children(name: str, daily_dose: int, today_intake: int,
+                                  target_date=None) -> bool:
+    """daily_dose > 1 的 task,把 md 顶部该行下面挂 N 个进度子 box,前 today_intake 个 [x],其余 [ ]。
+    幂等。
+    target_date=None(默认):同时刷模板源 + 今天文件。
+    target_date=datetime:只刷该日期对应的 md(用于历史回填,不动模板)。
+    daily_dose <= 1 不做(单行就够,展开反而碍眼)。
+    """
+    if daily_dose < 2:
+        return False
+    changed = False
+    targets = []
+    if target_date is None:
+        if SCHEDULE_TEMPLATE_PATH.exists():
+            targets.append(SCHEDULE_TEMPLATE_PATH)
+        today_f = find_today_journal()
+        if today_f and today_f not in targets:
+            targets.append(today_f)
+    else:
+        day_f = find_today_journal(target_date)
+        if day_f:
+            targets.append(day_f)
+    for f in targets:
+        try:
+            text = f.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        bounds = _top_section_bounds(text)
+        if not bounds:
+            continue
+        lines = text.splitlines()
+        start, end = bounds
+        # 找父行(顶层 only)
+        parent_idx = None
+        for i in range(start, end):
+            m = re.match(r"^(-\s*\[)([ x])(\]\s*)(.+)$", lines[i])
+            if m and m.group(4).strip() == name:
+                parent_idx = i
+                parent_m = m
+                break
+        if parent_idx is None:
+            continue
+        # 数已挂的子 box(紧随父行的缩进 - [ ] 行)
+        child_end = parent_idx + 1
+        while child_end < end and re.match(r"^\s+-\s*\[[ x]\]", lines[child_end]):
+            child_end += 1
+        # 目标:N 个子 box,前 K 个 [x],其余 [ ];父行根据"是否全勾"翻
+        clamp_intake = max(0, min(today_intake, daily_dose))
+        desired_children = [
+            f"  - [{'x' if k <= clamp_intake else ' '}] {k}"
+            for k in range(1, daily_dose + 1)
+        ]
+        parent_box = "x" if clamp_intake >= daily_dose else " "
+        new_parent = f"{parent_m.group(1)}{parent_box}{parent_m.group(3)}{parent_m.group(4)}"
+        existing_children = lines[parent_idx + 1:child_end]
+        if lines[parent_idx] == new_parent and existing_children == desired_children:
+            continue  # 已经 in sync
+        new_lines = (
+            lines[:parent_idx]
+            + [new_parent]
+            + desired_children
+            + lines[child_end:]
+        )
+        f.write_text(
+            "\n".join(new_lines) + ("\n" if text.endswith("\n") else ""),
+            encoding="utf-8",
+        )
+        changed = True
+    return changed
 
 
 def _set_md_checkbox(name: str, checked: bool) -> bool:
@@ -2185,17 +2269,34 @@ def _set_md_checkbox(name: str, checked: bool) -> bool:
 
 
 @app.get("/api/daily-tasks")
-def daily_tasks_catalog():
-    """返今天 daily-task 清单 + 每个 task 的 image url + meta(剂量/库存)。"""
-    tasks = _read_daily_tasks_from_md()
+def daily_tasks_catalog(date: str = ""):
+    """返指定日 daily-task 清单 + 每个 task 的 image url + meta(剂量/库存)。
+    date 缺省 = 今天;date=YYYY-MM-DD 看历史(read-only,不会触发 md 同步)。
+    """
+    target = None
+    is_today = True
+    if date:
+        try:
+            target = datetime.strptime(date, "%Y-%m-%d")
+            is_today = (date == _today_date_str())
+        except ValueError:
+            raise HTTPException(400, f"bad date: {date}")
+    # 读 md(指定日 / 今天)
+    tasks = _read_daily_tasks_from_md(target_date=target)
     image_map = _load_task_image_map()
     meta_map = _load_task_meta_map()
     for t in tasks:
         rel = image_map.get(t["name"])
         t["image_url"] = f"/{rel}" if rel else None
-        state = _task_meta_state(t["name"], meta_map)
+        state = _task_meta_state(t["name"], meta_map, target_date=target)
         t.update(state)
-    return {"tasks": tasks}
+        # 只对"今天"做 md 子 box 同步(历史已经 backfill 过,且只读)
+        if is_today and state["daily_dose"] > 1:
+            try:
+                _ensure_md_progress_children(t["name"], state["daily_dose"], state["today_intake"])
+            except Exception as e:
+                log.warning(f"ensure md children for '{t['name']}' failed: {e}")
+    return {"tasks": tasks, "date": date or _today_date_str(), "is_today": is_today}
 
 
 @app.post("/api/daily-tasks/check")
@@ -2228,6 +2329,12 @@ async def daily_task_check(req: Request):
     if not _set_md_checkbox(name, md_checked):
         # md 没找到也不报错 — 可能 task 在 daily-tasks.md 但今天 file 顶部还未刷
         log.info(f"check: md row '{name}' not found in today (meta updated only)")
+    # daily_dose>1:同步进度子 box(前 K 个 [x],其余 [ ])
+    if state["daily_dose"] > 1:
+        try:
+            _ensure_md_progress_children(name, state["daily_dose"], state["today_intake"])
+        except Exception as e:
+            log.warning(f"ensure md children for '{name}' failed: {e}")
     return {
         "ok": True,
         "task_name": name,
@@ -2263,6 +2370,38 @@ async def daily_task_meta_update(req: Request):
     meta_map[name] = entry
     _save_task_meta_map(meta_map)
     return {"ok": True, "task_name": name, **_task_meta_state(name, meta_map)}
+
+
+@app.post("/api/daily-tasks/backfill-progress")
+def daily_task_backfill_progress():
+    """扫所有 task 的 intake_log,把每一天对应的 md 顶部段也展成 N 个进度子 box。
+    幂等可重跑。只动 daily_dose > 1 的 task。
+    """
+    meta_map = _load_task_meta_map()
+    touched = []
+    skipped_no_file = []
+    for name, entry in meta_map.items():
+        entry = entry or {}
+        daily_dose = int(entry.get("daily_dose") or 1)
+        if daily_dose < 2:
+            continue
+        intake_log = entry.get("intake_log") or {}
+        for date_str, intake in intake_log.items():
+            try:
+                d = datetime.strptime(date_str, "%Y-%m-%d")
+            except Exception:
+                continue
+            day_f = find_today_journal(d)
+            if not day_f:
+                skipped_no_file.append({"task": name, "date": date_str})
+                continue
+            try:
+                changed = _ensure_md_progress_children(name, daily_dose, int(intake or 0), target_date=d)
+                if changed:
+                    touched.append({"task": name, "date": date_str, "intake": int(intake or 0), "dose": daily_dose})
+            except Exception as e:
+                log.warning(f"backfill {name} {date_str}: {e}")
+    return {"ok": True, "touched": touched, "touched_count": len(touched), "skipped_no_file": skipped_no_file}
 
 
 @app.post("/api/daily-tasks/delete")
@@ -2322,7 +2461,7 @@ def daily_task_history(name: str, days: int = 14):
                 if bounds:
                     lines = text.splitlines()
                     for ln in lines[bounds[0]:bounds[1]]:
-                        m = re.match(r"\s*-\s*\[([ x])\]\s*(.+)", ln)
+                        m = re.match(r"^-\s*\[([ x])\]\s*(.+)", ln)
                         if m and m.group(2).strip() == name:
                             entry["checked"] = (m.group(1) == "x")
                             break
@@ -2392,7 +2531,7 @@ def _audit_vault() -> dict:
             if not bounds:
                 continue
             for line in text.splitlines()[bounds[0]:bounds[1]]:
-                m = re.match(r"\s*-\s*\[[ x]\]\s*(.+)", line)
+                m = re.match(r"^-\s*\[[ x]\]\s*(.+)", line)
                 if m:
                     active_names.add(m.group(1).strip())
         except Exception:
@@ -4046,25 +4185,33 @@ def _apply_task_op(f: Path, action: str, text: str, old_text: str) -> dict:
         return {"file": _pretty_rel(f), "error": "找不到顶部 section (缺 --- 分割)"}
     start, end = bounds  # [start, end)
 
+    # 顶层 task only — 不动 daily_dose>1 task 下挂的进度子 box
+    def _is_top_task_line(s: str) -> bool:
+        return s.startswith("- [")
+
     if action == "add":
-        # 找最后一个 '- [' 行,在它后面加;否则在 end 前加
+        # 找最后一个顶层 '- [' 行,在它后面加;否则在 end 前加
         insert_after = end
         for j in range(end - 1, start - 1, -1):
-            if lines[j].lstrip().startswith("- ["):
-                insert_after = j + 1
+            if _is_top_task_line(lines[j]):
+                # 跳过该顶层项的子 box,新行插在子 box 之后
+                k = j + 1
+                while k < end and re.match(r"^\s+-\s*\[[ x]\]", lines[k]):
+                    k += 1
+                insert_after = k
                 break
         new_line = f"- [ ] {text}"
         new_lines = lines[:insert_after] + [new_line] + lines[insert_after:]
     elif action == "edit":
         target_idx = None
         for j in range(start, end):
-            if old_text and old_text in lines[j] and lines[j].lstrip().startswith("- ["):
+            if old_text and old_text in lines[j] and _is_top_task_line(lines[j]):
                 target_idx = j
                 break
         if target_idx is None:
             return {"file": str(f), "error": f"找不到含 '{old_text}' 的任务项"}
         # 保留 checkbox 状态前缀,替换文本部分
-        checkbox_match = re.match(r'(\s*-\s*\[[ x]\]\s*)(.*)', lines[target_idx])
+        checkbox_match = re.match(r'^(-\s*\[[ x]\]\s*)(.*)', lines[target_idx])
         if checkbox_match:
             lines[target_idx] = checkbox_match.group(1) + text
         else:
@@ -4073,12 +4220,16 @@ def _apply_task_op(f: Path, action: str, text: str, old_text: str) -> dict:
     else:  # del
         target_idx = None
         for j in range(start, end):
-            if old_text and old_text in lines[j] and lines[j].lstrip().startswith("- ["):
+            if old_text and old_text in lines[j] and _is_top_task_line(lines[j]):
                 target_idx = j
                 break
         if target_idx is None:
             return {"file": str(f), "error": f"找不到含 '{old_text}' 的任务项"}
-        new_lines = lines[:target_idx] + lines[target_idx + 1:]
+        # 删父行 + 紧随的进度子 box(若有)
+        end_idx = target_idx + 1
+        while end_idx < end and re.match(r"^\s+-\s*\[[ x]\]", lines[end_idx]):
+            end_idx += 1
+        new_lines = lines[:target_idx] + lines[end_idx:]
 
     new_text = "\n".join(new_lines) + ("\n" if raw.endswith("\n") else "")
     f.write_text(new_text, encoding="utf-8")
