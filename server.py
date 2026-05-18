@@ -45,10 +45,24 @@ except ImportError:
 #   代码: ~/human-ai-dev/ (将来 GitHub 仓库)
 #   数据: ~/.human-ai/  (XDG 风格,跟代码解耦, 不进 git)
 # 优先级: $HUMAN_AI_HOME env var → ~/.human-ai/ → 历史 fallback
-# PyInstaller frozen 时,静态资源被解到 sys._MEIPASS(临时,只读)。
+# PyInstaller frozen 时,静态资源被解到 sys._MEIPASS。
 # 非 frozen(dev / 源码跑)时,GATEWAY_DIR 就是 server.py 所在目录。
+#
+# macOS .app 特殊处理:--windowed 出来的 bundle 里,_MEIPASS = Contents/Frameworks,
+# 但数据文件(html/js/css)实际在 Contents/Resources/,Frameworks 那边全是符号链接
+# 指向 Resources(为了 ad-hoc 代码签名)。StaticFiles 安全检查会拒接 "符号链接
+# 指向 mount dir 外" 的文件 → 全部 404。
+# 解法:直接把 GATEWAY_DIR 指 Resources(真文件所在),mount serve 就不踩坑。
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-    GATEWAY_DIR = Path(sys._MEIPASS).resolve()
+    _meipass = Path(sys._MEIPASS)
+    if sys.platform == "darwin" and _meipass.name == "Frameworks":
+        _real_resources = _meipass.parent / "Resources"
+        if _real_resources.is_dir():
+            GATEWAY_DIR = _real_resources.resolve()
+        else:
+            GATEWAY_DIR = _meipass.resolve()
+    else:
+        GATEWAY_DIR = _meipass.resolve()
 else:
     GATEWAY_DIR = Path(__file__).parent.resolve()
 CODE_ROOT = GATEWAY_DIR.parent          # = ~/human-ai-dev/ (代码 root,放 skill/scripts/etc)
@@ -1921,6 +1935,7 @@ def _new_day_create(date_iso: str) -> dict:
     else:
         top_section = (
             "# 每日补剂打卡\n\n"
+            "- [ ] 喝水\n"
             "- [ ] 鱼油（Swisse）\n"
             "- [ ] 苏糖酸镁（Life Extension）\n"
             "- [ ] 南非醉茄（KSM-66 / Sensoril 二选一）\n"
@@ -2373,6 +2388,22 @@ async def daily_task_check(req: Request):
     name = (body.get("task_name") or "").strip()
     if not name:
         raise HTTPException(400, "need task_name")
+
+    # 可选:首次记录该 task 时用 caller 给的 daily_dose 初始化(没设过的话)。
+    # 水杯特别需要 — 前端 CUPS_TOTAL=8,但 fresh meta 没这个 task,默认 dose=1
+    # 会把 intake=4 clamp 到 1。caller 传 daily_dose 表"我知道这个 task 的剂量"。
+    init_dose = body.get("daily_dose")
+    if init_dose is not None:
+        try:
+            init_dose = max(1, int(init_dose))
+            mm = _load_task_meta_map()
+            if name not in mm or "daily_dose" not in (mm.get(name) or {}):
+                ent = dict(mm.get(name) or {})
+                ent["daily_dose"] = init_dose
+                mm[name] = ent
+                _save_task_meta_map(mm)
+        except (TypeError, ValueError):
+            pass
 
     if "intake" in body:
         state = _bump_intake(name, set_to=int(body["intake"]))

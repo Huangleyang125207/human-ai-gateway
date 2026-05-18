@@ -77,7 +77,7 @@
         try {
           const r = await fetch("/api/daily-tasks/check", {
             method: "POST", headers: {"Content-Type":"application/json"},
-            body: JSON.stringify({task_name: WATER_TASK_NAME, intake: Math.min(CUPS_TOTAL, ls.cups)}),
+            body: JSON.stringify({task_name: WATER_TASK_NAME, intake: Math.min(CUPS_TOTAL, ls.cups), daily_dose: CUPS_TOTAL}),
           });
           const d = await r.json();
           intakeFromMd = Math.max(intakeFromMd, d.today_intake || ls.cups);
@@ -164,9 +164,11 @@
         }
         document.getElementById("cups-count").textContent = state.cups;
         // 写真相到 md(via daily-task intake_log);失败不影响 UI,下次 reload 时 re-sync
+        // daily_dose=CUPS_TOTAL 是首次 init 用 — server 仅当 meta 没设过 dose 时采纳,
+        // 老用户已有 daily_dose=8 不受影响。
         fetch("/api/daily-tasks/check", {
           method: "POST", headers: {"Content-Type":"application/json"},
-          body: JSON.stringify({task_name: WATER_TASK_NAME, intake: next}),
+          body: JSON.stringify({task_name: WATER_TASK_NAME, intake: next, daily_dose: CUPS_TOTAL}),
         }).catch(() => {});
         if (next > prev) {
           window.gateway.korok?.yahaha?.(...rectCenter(cup));
