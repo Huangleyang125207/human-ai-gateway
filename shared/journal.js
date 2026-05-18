@@ -55,11 +55,44 @@
   function renderError(data) {
     const head = document.getElementById("head");
     const stream = document.getElementById("stream");
+    const noJournalToday = /no journal file for/i.test(data.error || "");
     if (head) head.innerHTML = `<div class="ord">⋯ ${escapeHtml(data.error || "no journal")}</div>`;
-    if (stream) stream.innerHTML = `
-      <div style="padding:32px 0; color:var(--ink-4); font:13px var(--sans); letter-spacing:.04em;">
-        起 server: <code>bash gateway/start.sh</code> 然后刷新本页。
-      </div>`;
+    if (stream) {
+      if (noJournalToday) {
+        // fresh / 没今天 → 给个"立刻创建"按钮,而非旧的"起 server" 误导提示
+        stream.innerHTML = `
+          <div style="padding:64px 0; text-align:center; color:var(--ink-4); font:14px var(--sans);">
+            <div style="margin-bottom:18px;">今天的日记还没创建</div>
+            <button id="streamCreateToday" style="
+              padding:10px 22px; border:1px solid var(--ink-4); background:transparent;
+              color:var(--ink); font:13px var(--sans); letter-spacing:.06em;
+              cursor:pointer; border-radius:2px;">
+              新建今天 +
+            </button>
+          </div>`;
+        document.getElementById("streamCreateToday")?.addEventListener("click", async () => {
+          try {
+            const r = await fetch("/api/journal/new-day", {
+              method: "POST", headers: {"Content-Type":"application/json"},
+              body: JSON.stringify({})
+            });
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || "create failed");
+            // 刷 days + 切到今天
+            await fetchDays();
+            await fetchJournal(null);
+          } catch (e) {
+            window.gatewayToast?.("创建失败: " + e.message);
+          }
+        });
+      } else {
+        // 真起不来 server / 其他错才显示旧 hint
+        stream.innerHTML = `
+          <div style="padding:32px 0; color:var(--ink-4); font:13px var(--sans); letter-spacing:.04em;">
+            server 没起来?重启 Gateway 再刷新本页。
+          </div>`;
+      }
+    }
   }
 
   function render(data) {

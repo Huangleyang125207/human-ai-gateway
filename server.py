@@ -620,7 +620,7 @@ def tool_list_widgets():
         for d in sorted(WIDGETS_DIR.iterdir()):
             if d.is_dir() and (d / "manifest.json").exists():
                 folders.append({"name": d.name, "active": d.name in active})
-    return {"widgets": folders, "user_widgets_file": str(USER_WIDGETS_PATH.relative_to(CODE_ROOT))}
+    return {"widgets": folders, "user_widgets_file": _pretty_rel(USER_WIDGETS_PATH)}
 
 def tool_add_widget(args):
     name = args["name"]
@@ -1852,6 +1852,18 @@ def _journal_for_date(date_iso=None):
         "blocks": parse_journal(f.read_text(encoding="utf-8")),
     }
 
+@app.get("/api/user-widgets")
+def get_user_widgets():
+    """返 user-widgets.json 内容。前端 widget-loader.js 用。
+    历史前端走 GET /.user-widgets.json 静态文件,搬到 APP_STATE_DIR 后改走这里。"""
+    if not USER_WIDGETS_PATH.exists():
+        return {"active": []}
+    try:
+        return json.loads(USER_WIDGETS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {"active": []}
+
+
 @app.get("/api/journal/today")
 def journal_today(date: str = None):
     return _journal_for_date(date)
@@ -1860,52 +1872,74 @@ def journal_today(date: str = None):
 def journal_days():
     return {"days": _list_journal_files()}
 
+_DAY_ONE_STR = "2026-05-03"  # 5.3 = 第一天
+_DAY_CN = ["零","一","二","三","四","五","六","七","八","九","十",
+           "十一","十二","十三","十四","十五","十六","十七","十八","十九","二十",
+           "二十一","二十二","二十三","二十四","二十五","二十六","二十七","二十八","二十九","三十"]
+
+def _new_day_create(date_iso: str) -> dict:
+    """Python 原生 new-day(替代 scripts/new-day.sh;frozen 模式下脚本不在,改这里)。
+    返 {ok, created, file, message}。已存在返 created=False。"""
+    try:
+        target = datetime.strptime(date_iso, "%Y-%m-%d")
+    except ValueError:
+        return {"ok": False, "error": f"bad date: {date_iso}"}
+    day_one = datetime.strptime(_DAY_ONE_STR, "%Y-%m-%d")
+    day_num = (target - day_one).days + 1
+    day_cn = _DAY_CN[day_num] if 0 <= day_num <= 30 else str(day_num)
+    yy = target.strftime("%y")
+    mm = target.month  # 不补零
+    dd = target.day
+    filename = f"{yy}.{mm}.{dd}(第{day_cn}天).md"
+    JOURNAL_DIR.mkdir(parents=True, exist_ok=True)
+    filepath = JOURNAL_DIR / filename
+    if filepath.exists():
+        return {"ok": True, "created": False, "file": _pretty_rel(filepath),
+                "message": f"already exists: {filename}"}
+    # 顶部 daily-task section:从 vault/daily-tasks.md 第一个 --- 前抓
+    daily_tasks_src = VAULT_DIR / "daily-tasks.md"
+    if daily_tasks_src.exists():
+        src = daily_tasks_src.read_text(encoding="utf-8")
+        top = []
+        for line in src.splitlines():
+            if line.strip() == "---":
+                break
+            top.append(line)
+        top_section = "\n".join(top).rstrip()
+    else:
+        top_section = (
+            "# 每日补剂打卡\n\n"
+            "- [ ] 鱼油（Swisse）\n"
+            "- [ ] 苏糖酸镁（Life Extension）\n"
+            "- [ ] 南非醉茄（KSM-66 / Sensoril 二选一）\n"
+            "- [ ] 维生素 D3+K2（gloryfeel）"
+        )
+    # 时间格(7:30 - 23:00,半小时一块,7:00 没有)
+    parts = [top_section, "\n---"]
+    for h in range(7, 23):
+        for m in ("00", "30"):
+            if h == 7 and m == "00":
+                continue
+            parts.append(f"\n# {h}：{m}\n\n##\n\n---")
+    parts.append("\n# 23：00\n\n##\n")
+    filepath.write_text("\n".join(parts), encoding="utf-8")
+    return {"ok": True, "created": True, "file": _pretty_rel(filepath),
+            "message": f"created: {filename}"}
+
+
 @app.post("/api/journal/new-day")
 async def journal_new_day(req: Request):
-    """生成今天(或指定日期)的 schedule 骨架文件,调 scripts/new-day.sh.
-
+    """生成今天(或指定日期)的 schedule 骨架文件。Python 内联,不依赖 bash 脚本。
     body 可选 {"date": "YYYY-MM-DD"};不传 = 今天。
-    返回 {ok, created, file, stdout} 或 {ok=false, error, stderr}.
-    幂等:文件已存在脚本会拒覆盖,这里返回 created=false 但 ok=true。
+    返 {ok, created, file, message}。已存在 created=False 仍 ok=True(幂等)。
     """
     body = {}
     try:
         body = await req.json()
     except Exception:
         pass
-    date_arg = (body or {}).get("date", "").strip()
-
-    script = CODE_ROOT / "scripts" / "new-day.sh"
-    if not script.exists():
-        raise HTTPException(500, f"new-day script missing at {script}")
-
-    cmd = ["bash", str(script)]
-    if date_arg:
-        cmd.append(date_arg)
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-    except subprocess.TimeoutExpired:
-        raise HTTPException(504, "new-day.sh timed out")
-
-    out = (proc.stdout or "") + (proc.stderr or "")
-    # 脚本"文件存在则拒覆盖"会非 0 退出 + 提示;算 ok=true created=false
-    already_exists = "已存在" in out or "exists" in out.lower()
-    created = proc.returncode == 0 and not already_exists
-    if proc.returncode != 0 and not already_exists:
-        return JSONResponse(
-            status_code=500,
-            content={"ok": False, "error": "script failed", "stdout": out},
-        )
-
-    # 解析新文件路径(脚本输出形如 "Created: /path/...md" 或 "已存在")
-    file_match = re.search(r"(?:Created|已创建)[:：]?\s*(\S+\.md)", out)
-    file_rel = ""
-    if file_match:
-        try:
-            file_rel = _pretty_rel(Path(file_match.group(1)))
-        except Exception:
-            file_rel = file_match.group(1)
-    return {"ok": True, "created": created, "file": file_rel, "stdout": out.strip()}
+    date_arg = (body or {}).get("date", "").strip() or datetime.now().strftime("%Y-%m-%d")
+    return _new_day_create(date_arg)
 
 
 # ── scrapbook (手账浮层照片) ─────────────────────────────────────────

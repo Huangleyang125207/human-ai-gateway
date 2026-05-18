@@ -12,13 +12,13 @@
  */
 
 (async function gatewayWidgetLoader() {
-  const configPath = './.user-widgets.json';
-
+  // 注:user-widgets 历史在 gateway/.user-widgets.json 走静态 mount;
+  // 后来搬到 APP_STATE_DIR(frozen 模式 _MEIPASS 只读),改走 API。
   let config;
   try {
-    config = await fetch(configPath).then(r => r.json());
+    config = await fetch('/api/user-widgets').then(r => r.json());
   } catch (e) {
-    console.warn('[gateway] no .user-widgets.json yet — running with empty widget set');
+    console.warn('[gateway] /api/user-widgets failed — running with empty widget set');
     config = { active: [] };
   }
 
