@@ -1,3 +1,4 @@
 .env
 .gateway-config.json
 *.log
+/dist/
