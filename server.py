@@ -4463,7 +4463,9 @@ app.mount("/", StaticFiles(directory=str(GATEWAY_DIR), html=True), name="gateway
 
 if __name__ == "__main__":
     import uvicorn
-    print("[gateway] starting on http://localhost:4321")
+    # 默认 4321;GATEWAY_PORT env 可覆盖(测试 / 多实例)
+    port = int(os.environ.get("GATEWAY_PORT", "4321"))
+    print(f"[gateway] starting on http://localhost:{port}")
     print(f"[gateway] static root: {GATEWAY_DIR}")
     print(f"[gateway] config: {CONFIG_PATH} {'(set)' if CONFIG_PATH.exists() else '(missing — copy .gateway-config.example.json)'}")
-    uvicorn.run(app, host="127.0.0.1", port=4321, log_level="info")
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
