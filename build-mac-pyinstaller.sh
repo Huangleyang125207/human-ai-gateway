@@ -114,9 +114,15 @@ rm -rf "$GATEWAY_DIR/build" "$GATEWAY_DIR/Gateway.spec"
 APP="$DIST/Gateway.app"
 [ -d "$APP" ] || { echo "✗ PyInstaller 没出 Gateway.app"; exit 1; }
 
-echo "→ 5. arch check"
+echo "→ 5. arch check + Info.plist 后处理(LSUIElement=true 防 Dock 一直 bounce)"
 ARCH=$(file "$APP/Contents/MacOS/Gateway" | sed 's/^.*: //')
 echo "  $ARCH"
+# server 是 headless,没 GUI 窗口。--windowed 出来的 plist 没 LSUIElement,
+# Dock 图标会一直 bounce 等窗口。改成 background app(无 Dock 图标),
+# server.py 启动时自动开浏览器,用户看到的就是网页 UI。
+/usr/libexec/PlistBuddy -c "Delete :LSUIElement" "$APP/Contents/Info.plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$APP/Contents/Info.plist"
+echo "  ✓ LSUIElement = true"
 
 echo "→ 6. 打 DMG"
 STAGE="$DIST/.dmg-stage"

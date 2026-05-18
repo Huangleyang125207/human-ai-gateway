@@ -78,6 +78,7 @@ echo "→ 1. 启动 bundled binary(隔离 env)"
 HUMAN_AI_STATE="$TEST_STATE" \
 HUMAN_AI_HOME="$TEST_VAULT" \
 GATEWAY_PORT=$TEST_PORT \
+GATEWAY_NO_OPEN=1 \
 "$BIN" > "$LOG_FILE" 2>&1 &
 BUNDLE_PID=$!
 echo "  PID=$BUNDLE_PID"

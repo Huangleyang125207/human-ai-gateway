@@ -28,7 +28,22 @@
     <button class="thread-toggle" id="threadToggleTop" aria-label="open thread" title="跟它说点别的">
       <span class="tt-dot"></span>
     </button>
+    <button class="market" id="quitBtn" aria-label="quit gateway" title="退出 Gateway(server 停)">⏻</button>
   </header>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("quitBtn")?.addEventListener("click", async () => {
+        if (!confirm("退出 Gateway?\nserver 会关掉,网页就不响应了 — 想再用得重新双击 Gateway.app。")) return;
+        try {
+          await fetch("/api/quit", { method: "POST" });
+          document.body.innerHTML = '<div style="font:14px var(--sans); color:var(--ink-4); padding:80px; text-align:center;">Gateway 已停。<br><br>关掉这个页面即可。<br>下次想用,双击 Applications/Gateway。</div>';
+        } catch (e) {
+          // server 关掉时连接 abort 是正常的 — 已退出
+          document.body.innerHTML = '<div style="font:14px var(--sans); color:var(--ink-4); padding:80px; text-align:center;">Gateway 已停。</div>';
+        }
+      });
+    });
+  </script>
 
   <main class="page">
     <section class="head" id="head">

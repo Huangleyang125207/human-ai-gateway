@@ -1852,6 +1852,18 @@ def _journal_for_date(date_iso=None):
         "blocks": parse_journal(f.read_text(encoding="utf-8")),
     }
 
+@app.post("/api/quit")
+def quit_gateway():
+    """优雅退出。bundled .app 时(LSUIElement=true 无 Dock 图标)是用户唯一的"退出"出口。
+    先返响应,delay 后 os._exit(避免 uvicorn 抢在 response 前关连接)。"""
+    def _shutdown():
+        import time as _t
+        _t.sleep(0.4)
+        os._exit(0)
+    threading.Thread(target=_shutdown, daemon=True).start()
+    return {"ok": True, "message": "gateway shutting down"}
+
+
 @app.get("/api/user-widgets")
 def get_user_widgets():
     """返 user-widgets.json 内容。前端 widget-loader.js 用。
@@ -4468,4 +4480,25 @@ if __name__ == "__main__":
     print(f"[gateway] starting on http://localhost:{port}")
     print(f"[gateway] static root: {GATEWAY_DIR}")
     print(f"[gateway] config: {CONFIG_PATH} {'(set)' if CONFIG_PATH.exists() else '(missing — copy .gateway-config.example.json)'}")
+
+    # PyInstaller .app 双击 Mac 场景:macOS 期待 GUI 窗口,我们 headless → Dock 一直
+    # bounce。Info.plist LSUIElement=true 让 .app 当后台 app(无 Dock 图标),同时
+    # 这里启动后自动开浏览器到 gateway,用户立刻看到界面而不是空 Dock。
+    # GATEWAY_NO_OPEN=1 可禁(test / headless / 服务器场景)。
+    if not os.environ.get("GATEWAY_NO_OPEN"):
+        def _open_browser():
+            import time as _t
+            _t.sleep(1.5)  # 等 uvicorn 监听就绪
+            url = f"http://127.0.0.1:{port}"
+            try:
+                if sys.platform == "darwin":
+                    subprocess.Popen(["open", url])
+                elif sys.platform.startswith("win"):
+                    subprocess.Popen(["cmd", "/c", "start", "", url], shell=False)
+                else:
+                    subprocess.Popen(["xdg-open", url])
+            except Exception as e:
+                log.warning(f"auto-open browser failed: {e}")
+        threading.Thread(target=_open_browser, daemon=True).start()
+
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
