@@ -68,7 +68,9 @@ ADDS=(
   --add-data ".gateway-config.example.json:."
   --add-data "vault_config.py:."
   --add-data "cutout.py:."
+  --add-data "cutout_local.py:."
   --add-data "ocr.py:."
+  --add-data "tools:tools"
 )
 # uvicorn 的隐式 import(PyInstaller 默认抓不到)
 HIDDEN=(

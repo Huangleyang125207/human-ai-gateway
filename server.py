@@ -2269,10 +2269,9 @@ def _cutout_keys(cfg: dict) -> tuple:
 
 def _get_or_create_processed_attachment(attachment_url: str, cutout: bool = True):
     """统一图像处理路径。
-    cutout=True(默认): 走百度抠图返透明 PNG,缓存为 .cutout.png。
+    cutout=True(默认): 端侧优先 — macOS Subject Lift / rembg → 百度兜底 → 原图
     cutout=False: 直接返原图路径(不抠)。
-    无 cutout key 配置时无论 cutout 参数都 fallback 原图(silent,不报错)— UX
-    要让 fresh 用户能跑通"上传水杯换图",不能因为没填百度 key 就整功能挂。
+    抠图全失败时 silent fallback 原图,不抛错 — UX 不能因为抠图挂掉整个上传链路。
     返 (Path, None) 成功,(None, error_msg) 失败。
     """
     m = re.match(r"^/attachments/([^/]+)/([^/]+)$", (attachment_url or "").strip())
@@ -2281,24 +2280,36 @@ def _get_or_create_processed_attachment(attachment_url: str, cutout: bool = True
     src = ATTACHMENTS_DIR / m.group(1) / m.group(2)
     if not src.exists():
         return None, f"attachment not found: {attachment_url}"
-
-    # 用户主动选不抠,或者没配 key — 直接返原图
-    cfg = load_config() or {}
-    api_key, sec = _cutout_keys(cfg)
-    has_cutout_key = bool(api_key and sec and not api_key.startswith("YOUR_") and not sec.startswith("YOUR_"))
-    if not cutout or not has_cutout_key:
+    if not cutout:
         return src, None
 
-    # 有 key + 用户没拒绝 → 走抠图;失败才报错(quota / 网络等)
     cached = src.with_suffix(src.suffix + ".cutout.png")
     if cached.exists() and cached.stat().st_size > 0:
         return cached, None
-    from cutout import baidu_cutout_image
-    png = baidu_cutout_image(src, api_key, sec)
-    if not png:
-        return None, "百度抠图失败 (检查 quota / 图片大小 / 主体清晰度)"
-    cached.write_bytes(png)
-    return cached, None
+
+    # 1) 端侧:macOS Subject Lift → rembg(跨平台 ONNX)— 不联网,无 quota
+    try:
+        from cutout_local import cutout_local
+        png = cutout_local(src)
+        if png:
+            cached.write_bytes(png)
+            return cached, None
+    except Exception as e:
+        log.warning(f"local cutout chain failed: {e}")
+
+    # 2) 兜底:百度抠图(用户配了 key 才走;无 key 静默放原图)
+    cfg = load_config() or {}
+    api_key, sec = _cutout_keys(cfg)
+    has_cutout_key = bool(api_key and sec and not api_key.startswith("YOUR_") and not sec.startswith("YOUR_"))
+    if has_cutout_key:
+        from cutout import baidu_cutout_image
+        png = baidu_cutout_image(src, api_key, sec)
+        if png:
+            cached.write_bytes(png)
+            return cached, None
+
+    # 3) 全失败 → 原图(不报错,日记还是能用)
+    return src, None
 
 
 def _load_task_image_map() -> dict:
