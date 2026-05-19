@@ -3261,11 +3261,38 @@ _EVAL_INJECTION = """
 输入维度(payload):
 - today_entries          今天所有时间块的 H2 + tag + body
 - 7day_md                近 7 天完整 schedule
+- past_boards            过去 7 晚你(AI)给 user 的留言板原文 — 连续性来源
 - project_pulse          项目当下气压 / 历史阶段
 - project_todos          CLAUDE.md 待办 + Do not 段
 
+连续性使用 past_boards:
+- 上晚 tomorrow_question 问了什么? user 今天 schedule 里有回应吗? 没回应可以再追问
+- 上晚 what_missing 指出过的缺记类型,user 今天补上了吗? 补了就 celebrate
+- 别重复同一句鼓励、同一句战略建议 — past_boards 里看过的角度今晚换一个
+
 ═══════════════════════════════════════════════════════════════════════════
 """
+
+
+def _eval_load_past_boards(target: datetime, n: int = 7) -> str:
+    """读过去 N 天的 eval-log markdown(不含 target 当天本身),拼成一段。
+    用于注入 _eval_build_messages 的 payload — 让今晚的 eval AI 看到自己
+    过去几晚说过什么,保持留言板的连贯性(不重复鼓励、跟进之前的 tomorrow_question)。
+    """
+    if not EVAL_LOG_DIR.exists():
+        return "(没有历史 eval — 这是第一次)"
+    target_str = target.strftime("%Y-%m-%d")
+    files = sorted(EVAL_LOG_DIR.glob("????-??-??.md"))
+    files = [f for f in files if f.stem < target_str][-n:]  # 严格小于 target,按日期升序取最近 N
+    if not files:
+        return "(target 之前没有历史 eval)"
+    parts = []
+    for f in files:
+        try:
+            parts.append(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+    return "\n\n---\n\n".join(parts) if parts else "(eval-log 读取失败)"
 
 
 def _eval_build_messages(target: datetime, model_id: str = None) -> list:
@@ -3283,6 +3310,9 @@ def _eval_build_messages(target: datetime, model_id: str = None) -> list:
         f"# 今天 ({target.strftime('%Y-%m-%d %A')}) 的 schedule md\n\n"
         f"{today_md}\n\n"
         f"# 近 7 天 schedule\n\n{_eval_load_recent_md(target, 7)}\n\n"
+        f"# 过去 7 晚你(AI)给 user 的留言板原文 — 看完决定今晚说什么,"
+        f"不要重复鼓励、可以跟进之前的 tomorrow_question 看 user 有没有回应\n\n"
+        f"{_eval_load_past_boards(target, 7)}\n\n"
         f"# 项目 PULSE\n\n{_eval_load_pulse_all()}\n\n"
         f"# 项目 CLAUDE.md (待办 / Do not / Progress)\n\n{_eval_load_project_claude_md()}\n"
     )
@@ -3331,6 +3361,29 @@ def _eval_build_feature_intro_messages(target: datetime) -> list:
         {"role": "system", "content": _FEATURE_INTRO_PROMPT},
         {"role": "user",   "content": payload},
     ]
+
+
+@app.get("/api/eval/list")
+def eval_list(n: int = 14):
+    """返最近 N 天的 eval 复盘原文(按日期降序),给留言板做垂直 stack 渲染。
+    item: {date, is_today, markdown}。没记录返 {items: []}。
+    """
+    if not EVAL_LOG_DIR.exists():
+        return {"items": []}
+    n = max(1, min(60, int(n)))  # clamp 防滥用
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    files = sorted(EVAL_LOG_DIR.glob("????-??-??.md"), key=lambda p: p.name, reverse=True)[:n]
+    items = []
+    for f in files:
+        try:
+            items.append({
+                "date": f.stem,
+                "is_today": f.stem == today_str,
+                "markdown": f.read_text(encoding="utf-8"),
+            })
+        except Exception:
+            continue
+    return {"items": items}
 
 
 @app.get("/api/eval/today")

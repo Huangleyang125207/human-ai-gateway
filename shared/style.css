@@ -709,6 +709,45 @@ body.thread-resizing { transition: none; }
 }
 .board-actions button:hover { background: rgba(168, 110, 70, 0.08); color: var(--ink-2); }
 .board-actions button:disabled { opacity: 0.5; cursor: wait; }
+/* 过去日子的卡片:更素一点(灰底 + 弱边),让今晚那张视觉上突出 */
+.board-card + .board-card { margin-top: 14px; }
+.board-card.board-card-past {
+  background: rgba(254, 250, 242, 0.5);
+  border-left-color: rgba(168, 110, 70, 0.35);
+  border-color: rgba(168, 110, 70, 0.08);
+}
+.board-card.board-card-past .board-card-title {
+  font-size: 13.5px;
+  color: var(--ink-3);
+}
+.board-card.board-card-past .board-card-body p {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.board-card.board-card-empty {
+  background: rgba(254, 250, 242, 0.4);
+  border-style: dashed;
+}
+.board-past-divider {
+  margin: 26px 4px 12px;
+  font: 10.5px var(--sans);
+  color: var(--ink-4);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  text-align: center;
+  position: relative;
+}
+.board-past-divider::before,
+.board-past-divider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 30%;
+  height: 1px;
+  background: rgba(58, 52, 44, 0.08);
+}
+.board-past-divider::before { left: 4px; }
+.board-past-divider::after  { right: 4px; }
 .thread-title {
   font: 11px var(--sans); color: var(--ink-3);
   letter-spacing: 0.18em; text-transform: uppercase;
