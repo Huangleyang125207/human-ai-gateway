@@ -1359,16 +1359,34 @@ def _save_attachments_index(arr: list):
     )
 
 
+# Lock + upsert 化解 race:后台 OCR task 和 chat 触发的 vision call 都要写索引,
+# 各自 load → mutate → save 会互相覆盖(后写的赢)— 现象:OCR 覆盖了 vision,
+# 或反过来。upsert 只 merge 显式传的字段,不动其他;lock 串行化 read-modify-write。
+import threading as _threading
+_attachments_index_lock = _threading.Lock()
+
+
+def _index_upsert(date: str, filename: str, **fields):
+    """Find-or-create by (date, filename),只 merge 传进来的字段;不动其余。
+    在 lock 下做完整 read-modify-write 防并发覆盖。
+    """
+    with _attachments_index_lock:
+        arr = _load_attachments_index()
+        idx = next((i for i, x in enumerate(arr)
+                    if x.get("date") == date and x.get("filename") == filename), -1)
+        if idx < 0:
+            arr.append({"date": date, "filename": filename, **fields})
+        else:
+            arr[idx].update(fields)
+        _save_attachments_index(arr)
+
+
 def _index_attachment(date: str, filename: str, original: str, size: int):
     """后台跑 OCR + 写索引。失败也不抛(索引降级)。
     vision 分类不在这里跑(成本考虑):upload 即跑 vision 对"上传多但不讨论"
     场景白花钱。lazy 策略 — chat 时 _refs_to_vision_hints 现场 sync call 一次
     + 回写索引,后续命中 cache。
     """
-    arr = _load_attachments_index()
-    # 已有则跳过(防重复)
-    if any(x.get("date") == date and x.get("filename") == filename for x in arr):
-        return
     f = ATTACHMENTS_DIR / date / filename
     ocr_text = ""
     try:
@@ -1381,16 +1399,15 @@ def _index_attachment(date: str, filename: str, original: str, size: int):
         ) or ""
     except Exception as e:
         log.warning(f"index OCR failed for {filename}: {e}")
-    arr.append({
-        "date": date,
-        "filename": filename,
-        "original": original,
-        "size": size,
-        "ocr_text": ocr_text[:2000],
-        "vision": {},      # 留空,chat 时 lazy 补
-        "url": f"/attachments/{date}/{filename}",
-    })
-    _save_attachments_index(arr)
+    # upsert 而非 append:若 vision call 先到、已建好 entry,这里只补 OCR / 元数据,
+    # 不动已有的 vision 字段(原来 append + skip-if-exists 的逻辑碰上 race 会丢 vision)
+    _index_upsert(
+        date, filename,
+        original=original,
+        size=size,
+        ocr_text=ocr_text[:2000],
+        url=f"/attachments/{date}/{filename}",
+    )
 
 
 @app.get("/api/attachments")
@@ -1561,7 +1578,6 @@ def _refs_to_vision_hints(refs):
     out = []
     idx = _load_attachments_index()
     by_url = {x.get("url"): x for x in idx if x.get("url")}
-    dirty = False
     for r in refs or []:
         if r.get("kind") != "image":
             continue
@@ -1574,27 +1590,21 @@ def _refs_to_vision_hints(refs):
             continue
         entry = by_url.get(url)
         vision = (entry or {}).get("vision") or {}
-        # cache miss(没索引 或 vision 字段空)→ 现场补
+        # cache miss(没索引 或 vision 字段空)→ 现场补 + upsert 回索引
+        # 用 upsert 而非直接 mutate+save,避免和后台 OCR task 互相 read-modify-write
+        # 覆盖对方的字段(原来的 bug:OCR 跑得慢,等它写完时把 vision 冲了)
         if not vision:
             try:
                 vc = _qwen_classify_image(f)
                 if isinstance(vc, dict) and not vc.get("error"):
                     vision = vc
-                    # 写回索引(下次 hit)
-                    if entry:
-                        entry["vision"] = vision
-                        dirty = True
-                    else:
-                        idx.append({
-                            "date": m.group(1),
-                            "filename": m.group(2),
-                            "original": (r.get("payload") or {}).get("original") or m.group(2),
-                            "size": f.stat().st_size,
-                            "ocr_text": "",
-                            "vision": vision,
-                            "url": url,
-                        })
-                        dirty = True
+                    _index_upsert(
+                        m.group(1), m.group(2),
+                        vision=vision,
+                        url=url,
+                        original=(r.get("payload") or {}).get("original") or m.group(2),
+                        size=f.stat().st_size,
+                    )
             except Exception as e:
                 log.warning(f"sync vision failed for {url}: {e}")
         if vision:
@@ -1608,11 +1618,6 @@ def _refs_to_vision_hints(refs):
                 "vision": vision,
                 "user_cutout_pref": bool(cutout_pref),
             })
-    if dirty:
-        try:
-            _save_attachments_index(idx)
-        except Exception:
-            pass
     return out
 
 
