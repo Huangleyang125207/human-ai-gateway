@@ -958,11 +958,28 @@ def _gemini_classify_image(file_path: Path, extra_q: str = "") -> dict:
         return {"error": f"gemini call failed: {type(e).__name__}: {e}"}
 
 
+def _compress_for_vision(file_path: Path, max_dim: int = 1024, quality: int = 85) -> bytes:
+    """只为 vision API 入口做一次性压缩 — 不改原文件,只返压缩后的 JPEG bytes。
+    原图永远在 attachments/ 完整保留(给用户日记图档案用)。
+    一张 4000×3000 手机相 ≈ 8 MB → 1024×768 ≈ 100-200 KB,vision token 几乎线性下降。
+    """
+    from PIL import Image
+    import io
+    img = Image.open(file_path)
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+    img.thumbnail((max_dim, max_dim), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
+
+
 def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
     """调 Qwen-VL (Dashscope OpenAI-compat) 看图,返结构化 JSON。失败返 {error}。
     需 gateway-config.json 里有 dashscope_api_key。
-    用 qwen-vl-plus(质量+成本平衡;更快可改 qwen-vl-max-latest 或 qwen3-vl-flash)。
+    默认 qwen3-vl-flash(便宜+快;classify 任务足够;质量需求更高可换 qwen-vl-plus / qwen-vl-max-latest)。
     取代 Gemini(国内网络环境 Gemini 不稳)。
+    入口压缩:1024px max + JPEG q=85,vision token 大降但识别率不掉。
     """
     cfg = load_config() or {}
     # 优先 dashscope_api_key;空时 fallback 主 api_key(百炼迁移后顶层 key 就是 dashscope)
@@ -975,13 +992,23 @@ def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
                     "hint": "请去 setup 面板填 Dashscope API key (Qwen-VL),才能用 vision 路由"}
     if not file_path.exists():
         return {"error": f"file not found: {file_path}"}
+    # 入口压缩(只动 vision 传输,不动原图)
+    use_compressed = True
     try:
-        b64 = base64.b64encode(file_path.read_bytes()).decode("ascii")
+        b64 = base64.b64encode(_compress_for_vision(file_path)).decode("ascii")
     except Exception as e:
-        return {"error": f"read file failed: {e}"}
-    ext = file_path.suffix.lower().lstrip(".")
-    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-            "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png")
+        log.warning(f"compress failed for {file_path}, fallback to raw: {e}")
+        use_compressed = False
+        try:
+            b64 = base64.b64encode(file_path.read_bytes()).decode("ascii")
+        except Exception as e2:
+            return {"error": f"read file failed: {e2}"}
+    if use_compressed:
+        mime = "image/jpeg"
+    else:
+        ext = file_path.suffix.lower().lstrip(".")
+        mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png")
     data_url = f"data:{mime};base64,{b64}"
 
     prompt = (
@@ -996,7 +1023,7 @@ def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
     if extra_q:
         prompt += f"- extra: {extra_q}\n"
 
-    model_id = cfg.get("dashscope_vision_model", "qwen-vl-plus")
+    model_id = cfg.get("dashscope_vision_model", "qwen3-vl-flash")
     base_url = cfg.get("dashscope_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 
     try:
@@ -1328,9 +1355,10 @@ def _save_attachments_index(arr: list):
 
 
 def _index_attachment(date: str, filename: str, original: str, size: int):
-    """后台跑 OCR + vision 分类 + 写索引。失败也不抛(索引降级)。
-    upload-side vision router 的第一步:用户每次拖图,后台立刻分类一次,
-    chat 阶段直接从索引读 hint 注入 prompt — AI 不用再现场 call vision_classify。
+    """后台跑 OCR + 写索引。失败也不抛(索引降级)。
+    vision 分类不在这里跑(成本考虑):upload 即跑 vision 对"上传多但不讨论"
+    场景白花钱。lazy 策略 — chat 时 _refs_to_vision_hints 现场 sync call 一次
+    + 回写索引,后续命中 cache。
     """
     arr = _load_attachments_index()
     # 已有则跳过(防重复)
@@ -1348,21 +1376,13 @@ def _index_attachment(date: str, filename: str, original: str, size: int):
         ) or ""
     except Exception as e:
         log.warning(f"index OCR failed for {filename}: {e}")
-    # vision 分类(qwen-vl,best-effort)
-    vision = {}
-    try:
-        vc = _qwen_classify_image(f)
-        if isinstance(vc, dict) and not vc.get("error"):
-            vision = vc
-    except Exception as e:
-        log.warning(f"index vision failed for {filename}: {e}")
     arr.append({
         "date": date,
         "filename": filename,
         "original": original,
         "size": size,
         "ocr_text": ocr_text[:2000],
-        "vision": vision,
+        "vision": {},      # 留空,chat 时 lazy 补
         "url": f"/attachments/{date}/{filename}",
     })
     _save_attachments_index(arr)
