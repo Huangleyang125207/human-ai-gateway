@@ -133,11 +133,37 @@
 
   // 启动时如果今天有复盘 → 在 tab 上点个小红点(unread)
   // 但若用户首次就打开了 board → 点点立刻消
-  fetch("/api/eval/today").then(r => r.json()).then(d => {
-    if (d.is_today && tvtBoardDot && !boardView.classList.contains("on")) {
-      tvtBoardDot.hidden = false;
-    }
-  }).catch(() => {});
+  // 同时这个 polling 也用来在 21:30 eval 后台跑完后自动 flip "今晚还没复盘" → "今晚复盘"
+  let lastTodayState = null;  // null | true(has md) | false(no md)
+  function refreshTodayDot() {
+    fetch("/api/eval/today").then(r => r.json()).then(d => {
+      const now = !!(d.is_today && d.markdown);
+      // 状态变化(刚出炉)→ 红点 + 若 board 已打开就刷新视图
+      if (now && lastTodayState === false) {
+        if (boardView.classList.contains("on")) {
+          loadBoard();
+        } else if (tvtBoardDot) {
+          tvtBoardDot.hidden = false;
+        }
+      } else if (now && lastTodayState === null) {
+        // 首次启动发现今天已有 → 不在 board 视图就点红点
+        if (tvtBoardDot && !boardView.classList.contains("on")) {
+          tvtBoardDot.hidden = false;
+        }
+      }
+      lastTodayState = now;
+    }).catch(() => {});
+  }
+  refreshTodayDot();
+
+  // 每 60s 轻量 poll(只查 today md 是否存在,不拉全量 list)
+  // 21:30 前后这条 poll 会让前台自动 flip,不必用户手动刷
+  setInterval(refreshTodayDot, 60000);
+  // 切回标签页 / 重新聚焦窗口时也立刻 check 一次
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshTodayDot();
+  });
+  window.addEventListener("focus", refreshTodayDot);
 
   window.gateway = window.gateway || {};
   window.gateway.notesBoard = { open: () => setView("board"), refresh: loadBoard };
