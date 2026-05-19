@@ -75,22 +75,31 @@
         ${reason ? `<div class="setup-reason">⚠ ${escape(reason)}</div>` : ""}
         <div class="setup-body">
           <section class="setup-section">
-            <h3>大模型 (至少配 1 个,需测试通过)</h3>
+            <h3>大模型 · 阿里云百炼 (推荐)</h3>
+            <div class="setup-aliyun-howto">
+              一个 API key 覆盖 Qwen + DeepSeek + GLM + Kimi + MiniMax + OCR/Vision。
+              <ol>
+                <li>访问 <a href="https://www.aliyun.com/benefit/scene/ai-discount" target="_blank" rel="noopener">aliyun.com / AI 优惠场景</a> 注册或登录,可领新用户 token 福利</li>
+                <li>进 <a href="https://bailian.console.aliyun.com/" target="_blank" rel="noopener">百炼控制台</a> → 开通服务(免费)</li>
+                <li>左侧 "API-KEY" → 创建,sk-xxx 复制粘贴到下方</li>
+              </ol>
+              <small>同一个 key 在下方选不同 model 反复加,无需再开第二个 provider。</small>
+            </div>
             <div class="setup-providers" id="setupProviders"></div>
             <div class="setup-add-row">
               <select id="setupTemplatePicker">
-                <option value="">+ 加 provider…</option>
+                <option value="">+ 加 provider(选 model)…</option>
                 ${templates.map((t, i) => `<option value="${i}">${escape(t.label)}</option>`).join("")}
                 <option value="custom">自定义 (其他 OAI 兼容)</option>
               </select>
             </div>
           </section>
           <section class="setup-section">
-            <h3>百度 API <span class="setup-optional">(可选 — 用于图片 OCR + 抠图)</span></h3>
+            <h3>百度抠图 <span class="setup-optional">(可选 — 上传水杯 / 补剂照自动去背景,百炼无此能力)</span></h3>
             <div class="setup-baidu" id="setupBaidu"></div>
           </section>
           <section class="setup-section">
-            <h3>Gemini Flash <span class="setup-optional">(可选 — vision LLM 路由,自动识别上传图)</span></h3>
+            <h3>Gemini Flash <span class="setup-optional">(可选 — vision 路由;百炼已含 qwen-vl,这里基本不用配)</span></h3>
             <div class="setup-gemini" id="setupGemini"></div>
           </section>
         </div>

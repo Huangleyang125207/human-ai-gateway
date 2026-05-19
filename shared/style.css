@@ -2594,6 +2594,18 @@ body.thread-resizing { transition: none; }
   margin: 0 0 8px; font-weight: 500; letter-spacing: 0.02em;
 }
 .setup-optional { font-size: 11px; color: var(--ink-4); font-weight: 400; margin-left: 6px; }
+.setup-aliyun-howto {
+  background: rgba(255, 248, 224, 0.55);
+  border: 1px solid rgba(180, 130, 30, 0.25);
+  border-radius: 8px;
+  padding: 10px 14px; margin: 0 0 10px;
+  font: 12.5px var(--sans); color: var(--ink-2); line-height: 1.55;
+}
+.setup-aliyun-howto ol { margin: 6px 0 4px; padding-left: 22px; }
+.setup-aliyun-howto li { margin: 3px 0; }
+.setup-aliyun-howto a { color: #b4731e; text-decoration: underline; }
+.setup-aliyun-howto a:hover { color: #8a5712; }
+.setup-aliyun-howto small { color: var(--ink-4); font-size: 11px; display: block; margin-top: 6px; }
 .setup-empty {
   padding: 16px; text-align: center;
   color: var(--ink-4); font-style: italic; font-size: 12.5px;
