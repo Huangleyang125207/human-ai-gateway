@@ -3657,28 +3657,19 @@ BAILIAN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 # 走它就替代原来 6 个独立 provider + 百度 OCR(用 qwen-vl-ocr)+ Gemini vision(用 qwen3-vl)。
 # 文档:https://help.aliyun.com/zh/model-studio/
 BAILIAN_MODELS = [
-    {"id": "qwen3-max",         "label": "Qwen3 Max (旗舰对话)"},
-    {"id": "qwen3-coder-plus",  "label": "Qwen3 Coder Plus (代码)"},
-    {"id": "deepseek-v4-pro",   "label": "DeepSeek V4 Pro"},
-    {"id": "deepseek-v4-flash", "label": "DeepSeek V4 Flash (快)"},
-    {"id": "deepseek-r1",       "label": "DeepSeek R1 (深度思考)"},
-    {"id": "glm-5",             "label": "GLM-5"},
-    {"id": "kimi-k2.5",         "label": "Kimi K2.5 (200K context)"},
-    {"id": "minimax-m2.5",      "label": "MiniMax M2.5"},
-    {"id": "qwen3-vl-plus",     "label": "Qwen3 VL Plus (图像理解)"},
-    {"id": "qwen-vl-ocr-latest","label": "Qwen VL OCR (文字识别)"},
+    {"id": "qwen3-max",         "label": "Qwen3 Max",         "tag": "旗舰对话", "default": True},
+    {"id": "qwen3-coder-plus",  "label": "Qwen3 Coder Plus",  "tag": "代码"},
+    {"id": "deepseek-v4-pro",   "label": "DeepSeek V4 Pro",   "tag": "强推理",   "default": True},
+    {"id": "deepseek-v4-flash", "label": "DeepSeek V4 Flash", "tag": "快"},
+    {"id": "deepseek-r1",       "label": "DeepSeek R1",       "tag": "深度思考"},
+    {"id": "glm-5",             "label": "GLM-5",             "tag": ""},
+    {"id": "kimi-k2.5",         "label": "Kimi K2.5",         "tag": "200K context"},
+    {"id": "minimax-m2.5",      "label": "MiniMax M2.5",      "tag": ""},
+    {"id": "qwen3-vl-plus",     "label": "Qwen3 VL Plus",     "tag": "图像理解(vision router)", "default": True},
+    {"id": "qwen-vl-ocr-latest","label": "Qwen VL OCR",       "tag": "文字识别"},
 ]
-PROVIDER_TEMPLATES = [
-    {
-        "label": f"阿里云百炼 · {m['label']}",
-        "base_url": BAILIAN_BASE_URL,
-        "model": m["id"],
-        "note": "购 + 拿 key:https://www.aliyun.com/benefit/scene/ai-discount → 控制台 / 百炼 / API-KEY 管理 → 创建"
-            if m == BAILIAN_MODELS[0] else "",
-    } for m in BAILIAN_MODELS
-]
-# 注:setup.js 的下拉里另有一项 "自定义 (其他 OAI 兼容)" 走独立分支(空 base + 空 model
-# 让用户手填),不需要在这里再加一条"自定义" 模板,否则下拉会出现两条容易混。
+# 历史 PROVIDER_TEMPLATES(每 model 一条独立 provider)已废 — 前端改成"1 key + 多 model 复选"
+# 形态。setup/templates 现在分两段:bailian(单 key)+ custom_templates(自定义 OAI)。
 
 
 @app.get("/api/setup-status")
@@ -3700,7 +3691,20 @@ def setup_status():
 
 @app.get("/api/setup/templates")
 def setup_templates():
-    return {"templates": PROVIDER_TEMPLATES}
+    """新 setup UI 分两段:阿里云百炼(1 key 多 model 复选)+ 自定义 OAI provider 列表。"""
+    return {
+        "bailian": {
+            "base_url": BAILIAN_BASE_URL,
+            "label": "阿里云百炼",
+            "models": BAILIAN_MODELS,
+        },
+        "custom_templates": [],  # 自定义 provider 走前端 onAddProvider("custom") 分支
+        # 兼容旧 setup.js(里面仍 fetch .templates):返一份合并列表
+        "templates": [
+            {"label": f"阿里云百炼 · {m['label']}", "base_url": BAILIAN_BASE_URL, "model": m["id"]}
+            for m in BAILIAN_MODELS
+        ],
+    }
 
 
 @app.post("/api/setup/test")

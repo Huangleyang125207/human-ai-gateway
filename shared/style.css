@@ -2616,6 +2616,77 @@ body.thread-resizing { transition: none; }
 .setup-aliyun-howto a { color: #b4731e; text-decoration: underline; }
 .setup-aliyun-howto a:hover { color: #8a5712; }
 .setup-aliyun-howto small { color: var(--ink-4); font-size: 11px; display: block; margin-top: 6px; }
+
+/* 百炼 1-key 卡 — v2 setup 主区 */
+.bailian-card {
+  background: rgba(255, 252, 242, 0.6);
+  border: 1px solid rgba(58, 52, 44, 0.15);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.bailian-key-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+}
+.bailian-key-row label {
+  font: 12px var(--sans); color: var(--ink-3); min-width: 56px;
+}
+.bailian-key-row input {
+  flex: 1; font: 13px var(--mono, monospace); padding: 5px 8px;
+  border: 1px solid rgba(58, 52, 44, 0.2); border-radius: 5px; background: white;
+}
+.bailian-test-btn {
+  font: 12px var(--sans); padding: 5px 12px;
+  background: #b87a4f; color: #fffaf0; border: 0; border-radius: 5px;
+  cursor: pointer;
+}
+.bailian-test-btn:hover { filter: brightness(0.95); }
+
+.bailian-models-label {
+  font: 11px var(--sans); color: var(--ink-4);
+  letter-spacing: 0.04em; margin: 6px 0 6px;
+}
+.bailian-models {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px;
+  margin-bottom: 10px;
+}
+.bailian-model {
+  display: flex; align-items: center; gap: 6px;
+  font: 12.5px var(--sans); color: var(--ink-2); cursor: pointer;
+  padding: 3px 4px; border-radius: 4px;
+}
+.bailian-model:hover { background: rgba(184, 122, 79, 0.08); }
+.bailian-model input { margin: 0; cursor: pointer; }
+.bailian-mname { font-weight: 500; }
+.bailian-mtag { font-size: 10.5px; color: var(--ink-4); margin-left: 4px; }
+
+.bailian-default-row {
+  display: flex; align-items: center; gap: 8px; margin-top: 4px;
+  padding-top: 8px; border-top: 1px dashed rgba(58, 52, 44, 0.15);
+}
+.bailian-default-row label {
+  font: 12px var(--sans); color: var(--ink-3);
+}
+.bailian-default-row select {
+  flex: 1; font: 12.5px var(--sans); padding: 4px 8px;
+  border: 1px solid rgba(58, 52, 44, 0.2); border-radius: 5px; background: white;
+}
+
+/* 自定义 OAI 折叠 */
+.setup-details {
+  margin-top: 10px;
+}
+.setup-details summary {
+  cursor: pointer; font: 12px var(--sans); color: var(--ink-3);
+  padding: 4px 0; user-select: none;
+}
+.setup-details summary:hover { color: var(--ink-2); }
+.setup-add-custom {
+  font: 12px var(--sans); padding: 4px 10px; margin-top: 6px;
+  background: transparent; color: var(--ink-3);
+  border: 1px dashed rgba(58, 52, 44, 0.25); border-radius: 5px;
+  cursor: pointer;
+}
+.setup-add-custom:hover { color: var(--ink-2); border-color: var(--ink-4); }
 .setup-empty {
   padding: 16px; text-align: center;
   color: var(--ink-4); font-style: italic; font-size: 12.5px;
