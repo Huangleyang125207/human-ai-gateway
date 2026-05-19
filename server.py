@@ -513,7 +513,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "place_scrapbook_image",
-            "description": "把用户上传的照片嵌进对应时间块的正文里(浏览器 float wrap,文字自动绕图)。用户在 thread 里拖图 + 说'把这张贴到 15:00 中南海那段右边'/'放到 21:30 旁边左侧'时调。会跟用户确认细节(左/右、抠图与否)再调。落地后用户可以直接拖到别条 entry / 旋转 / 缩放。",
+            "description": "把用户上传的照片嵌进对应时间块的正文里(浏览器 float wrap,文字自动绕图)。\n\n**anchor_time 怎么选**:\n- 用户明说('贴到 15:00 那段')→ 直接用\n- 用户没明说 → **不要瞎猜**。先调 read_today_schedule 看今天所有 entry(time + tags + title + body),再调 vision_classify 看图内容,最后基于'图内容 + entry 题材'匹配最合的那一段 anchor_time。两者都不显然匹配就问用户。\n- 落地后用户可直接拖到别条 entry / 旋转 / 缩放。",
             "parameters": {
                 "type": "object",
                 "required": ["attachment_url", "date", "anchor_time"],
@@ -871,7 +871,9 @@ def tool_place_scrapbook_image(args):
     SCRAPBOOK_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     out_stem = f"{date}_{_scrapbook_id()}"
     if do_cutout:
-        processed, err = _get_or_create_processed_attachment(url)
+        # 把用户意图传下去 — 函数内部还会再 fallback 一次(无 key 直接返原图),
+        # 这里 do_cutout=True 表"用户希望抠",有 key 才真抠,没 key 静默原图。
+        processed, err = _get_or_create_processed_attachment(url, cutout=True)
         if err:
             return {"error": err + " (要不要 cutout=false 重试?)"}
         out_file = SCRAPBOOK_IMAGES_DIR / f"{out_stem}.png"
@@ -963,10 +965,14 @@ def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
     取代 Gemini(国内网络环境 Gemini 不稳)。
     """
     cfg = load_config() or {}
-    key = cfg.get("dashscope_api_key", "")
-    if not key:
-        return {"error": "no_dashscope_key",
-                "hint": "请去 setup 面板填 Dashscope API key (Qwen-VL),才能用 vision 路由"}
+    # 优先 dashscope_api_key;空时 fallback 主 api_key(百炼迁移后顶层 key 就是 dashscope)
+    key = cfg.get("dashscope_api_key", "") or cfg.get("api_key", "")
+    base_for_check = (cfg.get("base_url") or "")
+    if not key or (cfg.get("dashscope_api_key") == "" and "dashscope" not in base_for_check):
+        # 没专用 dashscope key,顶层 base_url 也不是 dashscope → 不能保证 key 是百炼的
+        if not key:
+            return {"error": "no_dashscope_key",
+                    "hint": "请去 setup 面板填 Dashscope API key (Qwen-VL),才能用 vision 路由"}
     if not file_path.exists():
         return {"error": f"file not found: {file_path}"}
     try:
@@ -1322,7 +1328,10 @@ def _save_attachments_index(arr: list):
 
 
 def _index_attachment(date: str, filename: str, original: str, size: int):
-    """后台跑 OCR + 写索引。失败也不抛(索引降级)。"""
+    """后台跑 OCR + vision 分类 + 写索引。失败也不抛(索引降级)。
+    upload-side vision router 的第一步:用户每次拖图,后台立刻分类一次,
+    chat 阶段直接从索引读 hint 注入 prompt — AI 不用再现场 call vision_classify。
+    """
     arr = _load_attachments_index()
     # 已有则跳过(防重复)
     if any(x.get("date") == date and x.get("filename") == filename for x in arr):
@@ -1339,12 +1348,21 @@ def _index_attachment(date: str, filename: str, original: str, size: int):
         ) or ""
     except Exception as e:
         log.warning(f"index OCR failed for {filename}: {e}")
+    # vision 分类(qwen-vl,best-effort)
+    vision = {}
+    try:
+        vc = _qwen_classify_image(f)
+        if isinstance(vc, dict) and not vc.get("error"):
+            vision = vc
+    except Exception as e:
+        log.warning(f"index vision failed for {filename}: {e}")
     arr.append({
         "date": date,
         "filename": filename,
         "original": original,
         "size": size,
-        "ocr_text": ocr_text[:2000],   # 截断防爆
+        "ocr_text": ocr_text[:2000],
+        "vision": vision,
         "url": f"/attachments/{date}/{filename}",
     })
     _save_attachments_index(arr)
@@ -1509,6 +1527,65 @@ def _refs_to_image_blocks(refs):
     return out
 
 
+def _refs_to_vision_hints(refs):
+    """upload-side vision router 的第二步:
+    chat 收到 image refs 时,从索引拿 cache vision 结果;cache miss / vision 空 → 现场 sync
+    call 一次 qwen-vl 补上,并回写索引(下次 hit)。
+    返 [{filename, url, vision_dict}],上层拼成 hint 注入 user message。
+    """
+    out = []
+    idx = _load_attachments_index()
+    by_url = {x.get("url"): x for x in idx if x.get("url")}
+    dirty = False
+    for r in refs or []:
+        if r.get("kind") != "image":
+            continue
+        url = (r.get("payload") or {}).get("url") or ""
+        m = re.match(r"^/attachments/([^/]+)/([^/]+)$", url)
+        if not m:
+            continue
+        f = ATTACHMENTS_DIR / m.group(1) / m.group(2)
+        if not f.exists():
+            continue
+        entry = by_url.get(url)
+        vision = (entry or {}).get("vision") or {}
+        # cache miss(没索引 或 vision 字段空)→ 现场补
+        if not vision:
+            try:
+                vc = _qwen_classify_image(f)
+                if isinstance(vc, dict) and not vc.get("error"):
+                    vision = vc
+                    # 写回索引(下次 hit)
+                    if entry:
+                        entry["vision"] = vision
+                        dirty = True
+                    else:
+                        idx.append({
+                            "date": m.group(1),
+                            "filename": m.group(2),
+                            "original": (r.get("payload") or {}).get("original") or m.group(2),
+                            "size": f.stat().st_size,
+                            "ocr_text": "",
+                            "vision": vision,
+                            "url": url,
+                        })
+                        dirty = True
+            except Exception as e:
+                log.warning(f"sync vision failed for {url}: {e}")
+        if vision:
+            out.append({
+                "filename": (r.get("payload") or {}).get("original") or f.name,
+                "url": url,
+                "vision": vision,
+            })
+    if dirty:
+        try:
+            _save_attachments_index(idx)
+        except Exception:
+            pass
+    return out
+
+
 @app.post("/api/chat")
 async def chat(req: Request):
     body = await req.json()
@@ -1536,6 +1613,33 @@ async def chat(req: Request):
             ocr_section_lines.append(f"\n图片 [{r['filename']}]:\n```\n{text}\n```")
         ocr_section_lines.append("</图片 OCR 识别结果>")
         full_user_text = full_user_text + "\n".join(ocr_section_lines)
+
+    # upload-side vision router:把 vision 分类结果作为 hint 拼进 user message
+    # (cache hit 走索引;miss 现场 sync call 一次,自动缓存)
+    vision_hints = _refs_to_vision_hints(context.get("refs", []))
+    if vision_hints:
+        v_lines = ["", "<vision-pre-router 已分类>"]
+        for h in vision_hints:
+            v = h["vision"]
+            kind = v.get("kind", "?")
+            desc = v.get("description", "")
+            brand = v.get("brand", "")
+            suggested = v.get("suggested_action", "")
+            ocr_likely = v.get("ocr_likely", False)
+            pill_count = v.get("pill_count", 0)
+            v_lines.append(
+                f"图片 [{h['filename']}] ({h['url']}):\n"
+                f"  · kind={kind} | 描述={desc} | 品牌={brand or '-'}\n"
+                f"  · OCR有文字={ocr_likely} | 颗数={pill_count or '-'}\n"
+                f"  · 建议下游路径: {suggested or '-'}"
+            )
+        v_lines.append(
+            "</vision-pre-router 已分类>\n"
+            "(基于这些 hint 直接走对应工具;不要再调 vision_classify。"
+            "若是 scrapbook 贴图但用户没指 anchor → 调 read_today_schedule 看 entry,"
+            "按 kind/描述 匹配最合的那段,不要问用户。)"
+        )
+        full_user_text = full_user_text + "\n".join(v_lines)
 
     # ── history processing: strip OCR + sliding-window summarize ──
     cleaned_history = []
@@ -2103,10 +2207,12 @@ def _cutout_keys(cfg: dict) -> tuple:
     return api, sec
 
 
-def _get_or_create_processed_attachment(attachment_url: str):
-    """统一图像处理路径:把上传的原图抠成透明 PNG,缓存为同名 .cutout.png。
-    所有把图嵌进 UI 的 tool(water_cup / daily_task / scrapbook)都走这条。
-    同一张原图只跑一次百度 API,后续命中缓存。
+def _get_or_create_processed_attachment(attachment_url: str, cutout: bool = True):
+    """统一图像处理路径。
+    cutout=True(默认): 走百度抠图返透明 PNG,缓存为 .cutout.png。
+    cutout=False: 直接返原图路径(不抠)。
+    无 cutout key 配置时无论 cutout 参数都 fallback 原图(silent,不报错)— UX
+    要让 fresh 用户能跑通"上传水杯换图",不能因为没填百度 key 就整功能挂。
     返 (Path, None) 成功,(None, error_msg) 失败。
     """
     m = re.match(r"^/attachments/([^/]+)/([^/]+)$", (attachment_url or "").strip())
@@ -2115,12 +2221,20 @@ def _get_or_create_processed_attachment(attachment_url: str):
     src = ATTACHMENTS_DIR / m.group(1) / m.group(2)
     if not src.exists():
         return None, f"attachment not found: {attachment_url}"
+
+    # 用户主动选不抠,或者没配 key — 直接返原图
+    cfg = load_config() or {}
+    api_key, sec = _cutout_keys(cfg)
+    has_cutout_key = bool(api_key and sec and not api_key.startswith("YOUR_") and not sec.startswith("YOUR_"))
+    if not cutout or not has_cutout_key:
+        return src, None
+
+    # 有 key + 用户没拒绝 → 走抠图;失败才报错(quota / 网络等)
     cached = src.with_suffix(src.suffix + ".cutout.png")
     if cached.exists() and cached.stat().st_size > 0:
         return cached, None
-    cfg = load_config() or {}
     from cutout import baidu_cutout_image
-    png = baidu_cutout_image(src, *_cutout_keys(cfg))
+    png = baidu_cutout_image(src, api_key, sec)
     if not png:
         return None, "百度抠图失败 (检查 quota / 图片大小 / 主体清晰度)"
     cached.write_bytes(png)

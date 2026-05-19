@@ -179,6 +179,25 @@ inline 注保留 disclosure 的功能,不违 § H4 形式。
 | 用户传图 + "这是我的 X (X 是某个补剂名)" | 先 `read_today_schedule()` 验 task_name 存在 → `set_daily_task_image(task_name, attachment_url)` |
 | 用户传图 + 含糊说"加个图" | **不要猜**,先列出当前 daily tasks 让用户选哪个 |
 
+### vision-pre-router(用户上传图自动分类机制)
+
+用户每次拖图,server 会跑一次 vision LLM(qwen-vl)并把结果作为
+`<vision-pre-router 已分类>` 块注入 user message 末尾。字段:
+- `kind`(supplement / food / place / object / selfie / doc / other)
+- `description`(中文 20 字)
+- `brand` / `pill_count` / `ocr_likely`
+- `suggested_action`(scrapbook_paste / supplement_track / ocr / none)
+
+**看到 hint 时**:
+- **不要再调** `vision_classify` — 已经跑过了
+- **基于 hint 直接走对应路径**:
+  - `kind=supplement` + 用户没说哪个 task → 列 daily tasks 让用户选
+  - `kind=food / object / place` + 用户说"贴一下"或含糊话 → 调 `read_today_schedule`,
+    按 entry 的 tags/title/body 匹配 hint 的 description,选最合的 anchor_time 直接调
+    `place_scrapbook_image`。**不要反问"贴到哪段"**,匹配显然就直接贴。
+  - `kind=doc` + `ocr_likely=true` → OCR 文本当用户笔记写进当前时间块
+- 仅在 hint 跟所有今天 entries 都不沾边时才反问。
+
 写入前**永远先 read** 看相邻块和当前块状态。
 
 `patch_journal_block` 的 `new_md` 字段：写从 H2 行开始的全部内容（不要包含 `# H1` 那行，那行 server 会保留）。
