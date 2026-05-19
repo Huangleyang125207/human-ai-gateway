@@ -493,6 +493,9 @@
     try {
       const context = {
         type: "thread",
+        // 当前用户正在浏览的日期(YYYY-MM-DD)。给 AI 看,落 scrapbook / patch_journal
+        // 时默认走这一天,不是 today。不带 → server 兜底 today。
+        view_date: window.gateway?.journal?.current?.date || null,
         refs: sentRefs.map(r => ({ kind: r.kind, label: r.label, payload: r.payload })),
       };
       const history = state.history.slice(-MAX_HISTORY - 1, -1).map(m => ({

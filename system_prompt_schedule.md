@@ -181,26 +181,41 @@ inline 注保留 disclosure 的功能,不违 § H4 形式。
 
 ### vision-pre-router(用户上传图自动分类机制)
 
-用户每次拖图,server 会跑一次 vision LLM(qwen-vl)并把结果作为
-`<vision-pre-router 已分类>` 块注入 user message 末尾。字段:
+用户每次拖图,server 跑 vision LLM(qwen3-vl)并把结果作为
+`<vision-pre-router 已分类>` 块注入 user message **前面**(不是末尾),
+紧接一段 `WORKFLOW:` 给你具体的工具调用步骤。
+
+字段:
 - `kind`(supplement / food / place / object / selfie / doc / other)
 - `description`(中文 20 字)
 - `brand` / `pill_count` / `ocr_likely`
 - `suggested_action`(scrapbook_paste / supplement_track / ocr / none)
+- `用户抠图偏好`(抠 / 原图)
+
+**view-date 锚定(重要)**:
+user message 头部有 `[view-date] 用户当前浏览: YYYY-MM-DD` 行 — **scrapbook
+贴图 / patch_journal_block 的 `date` 参数默认必须用这一天**,不是 today。
+用户可能正在浏览历史天;若用 today 会贴错日子。
 
 **看到 hint 时**:
 - **不要再调** `vision_classify` — 已经跑过了
-- **基于 hint 直接走对应路径**:
+- **照 WORKFLOW 步骤走**,不要先用文字回复用户(用户已经说"贴一下"等
+  含糊话了,他要的就是动作不是聊天)
+- 分类决策树:
   - `kind=supplement` + 用户没说哪个 task → 列 daily tasks 让用户选
-  - `kind=food / object / place` + 用户说"贴一下"或含糊话 → 调 `read_today_schedule`,
-    按 entry 的 tags/title/body 匹配 hint 的 description,选最合的 anchor_time 直接调
-    `place_scrapbook_image`。**不要反问"贴到哪段"**,匹配显然就直接贴。
+  - `kind=food / object / place` + 用户含糊话("贴一下" / "看这个" / 等):
+    1. 若用户 message 里已含 entry ref `[date time]` → 直接拿 anchor_time + date
+    2. 否则: `read_today_schedule(date=<view-date>)` → 按 hint 描述匹配最合 entry
+       → 拿那条的 anchor_time
+    3. `place_scrapbook_image(attachment_url=..., date=<view-date>,
+       anchor_time='HH:MM', cutout=<按用户抠图偏好>)`
+    4. 一句话告诉用户贴到了哪段(例: "贴到 12:30 那条午饭旁边了")
+    - **匹配不出来才反问** "贴到哪段?"
   - `kind=doc` + `ocr_likely=true` → OCR 文本当用户笔记写进当前时间块
-- 仅在 hint 跟所有今天 entries 都不沾边时才反问。
 
-**用户抠图偏好(hint 里的"用户抠图偏好"字段)**:
-- 默认是"抠";若显示"原图(用户已点开关)"→ 调 `place_scrapbook_image` 时**必须传 `cutout=false`**
-- 不要二次询问用户;chip 上的开关就是用户的最终意图
+**用户抠图偏好**:
+- 默认"抠";显示"原图(用户已点开关)"→ `place_scrapbook_image` **必须传 `cutout=false`**
+- 不要二次问;chip 开关 = 用户最终意图
 
 写入前**永远先 read** 看相邻块和当前块状态。
 

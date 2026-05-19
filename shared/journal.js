@@ -215,7 +215,8 @@
         { label: "💬 指给 AI 看这一段",
           action: () => {
             const label = `${b.time}${h.title ? " · " + h.title.slice(0, 14) : ""}`;
-            const payload = `[${b.time}] ${h.tags.map(t => "#" + t).join(" ")} ${h.title || ""}\n${h.body || ""}`;
+            // payload 第一行带日期 + 时间块,让 AI 直接定位 (date, anchor_time)
+            const payload = `[${currentDate} ${b.time}] ${h.tags.map(t => "#" + t).join(" ")} ${h.title || ""}\n${h.body || ""}`;
             window.gateway.thread?.addRef({ kind: "entry", label, payload });
           } },
         { label: "🗑 删整个时间块",

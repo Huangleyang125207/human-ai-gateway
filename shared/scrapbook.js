@@ -35,6 +35,13 @@
 
   /** 兼容老数据 → 统一成 {x_pct, y_px} */
   function normalizeItem(it) {
+    // auto_y=true:AI 调 place_scrapbook_image 没指定 y → 按 anchor_time 算到对应 entry 旁边。
+    // 用户拖完后 upsert 清掉 auto_y,之后 reload 不再覆盖用户拖拽位置。
+    if (it.auto_y && it.anchor_time) {
+      it.y_px = computeYFromAnchor(it.anchor_time);
+      if (it.x_pct == null) it.x_pct = 75;
+      return it;
+    }
     if (it.x_pct != null && it.y_px != null) return it;
     // legacy v2: align → x_pct
     if (it.align === "left" || it.align === "right") {
@@ -92,6 +99,25 @@
     }
     // 图重新 render 之后,触发文字 re-wrap(pretext)
     window.gateway?.entryWrap?.rewrap?.();
+    // 二次 + 三次 pass:pretext 把文字绕图是异步的,首次定位用的是 pretext 前的
+    // entry top,wrap 完了 entry 整体下移 → 图错位。等 200ms / 600ms 让 pretext
+    // 都跑完再 reposition。两次是因为第一次 reposition 可能又触发一次 rewrap。
+    const repositionPass = () => {
+      let moved = false;
+      for (const it of items) {
+        if (!it.auto_y || !it.anchor_time) continue;
+        const newY = computeYFromAnchor(it.anchor_time);
+        if (Math.abs(newY - (it.y_px || 0)) < 2) continue;
+        it.y_px = newY;
+        const wrap = document.querySelector(`.sb-wrap[data-id="${it.id}"]`);
+        if (wrap) wrap.style.top = newY + "px";
+        moved = true;
+      }
+      if (moved) window.gateway?.entryWrap?.rewrap?.();
+      return moved;
+    };
+    setTimeout(repositionPass, 200);
+    setTimeout(repositionPass, 600);
   }
 
   function placeWrap(it, layer) {
@@ -181,6 +207,7 @@
       const yPx = Math.max(0, finalTopPx);
       it.x_pct = Math.round(xPct * 10) / 10;
       it.y_px = Math.round(yPx);
+      it.auto_y = false;  // 用户手动定了位置,下次 reload 不再按 anchor 重算
       applyPos(wrap, it);  // 重置回 % 表达式(响应式)
       // 更新 anchor_time:看落点 y 离哪个 entry 最近,记下来
       const newAnchor = inferAnchorByY(it.y_px);

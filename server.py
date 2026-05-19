@@ -851,8 +851,12 @@ def tool_place_scrapbook_image(args):
     if x_pct is None:
         legacy_align = args.get("align") or args.get("position")
         x_pct = 3 if legacy_align == "left" else 75
+    # auto_y 表示"AI 没指定纵坐标 → 由客户端按 anchor_time 算到对应 entry 旁边"。
+    # 之前默认 y_px=0 + 注释说"前端会重算",但前端 applyPos 老老实实读 0,图就贴
+    # 到了页面顶。补 auto_y 字段让 scrapbook.js 触发 computeYFromAnchor。
+    auto_y = (y_px is None)
     if y_px is None:
-        y_px = 0  # 默认顶部,前端会按 anchor_time 重算
+        y_px = 0
     x_pct = max(0, min(95, float(x_pct)))
     y_px = max(0, float(y_px))
     do_cutout = args.get("cutout", True)
@@ -895,6 +899,7 @@ def tool_place_scrapbook_image(args):
         "w": 220,
         "h": 220,
         "rotation": float(rot),
+        "auto_y": auto_y,  # True → 客户端 render 时按 anchor_time 算 y;用户拖完后 upsert 会清掉
     }
     items.append(item)
     _save_scrapbook(date, items)
@@ -1627,23 +1632,21 @@ async def chat(req: Request):
 
     ctx_str = json.dumps(context, ensure_ascii=False, indent=2)
     time_hint = _compute_time_block_hint()
-    full_user_text = f"{time_hint}\n\n<context>\n{ctx_str}\n</context>\n\n{user_msg}"
+    # 用户当前浏览的日期(从 thread.js context.view_date 来)。fallback 到 today。
+    # AI 落 scrapbook / patch_journal_block 默认必须用这一天 — 不是 today,
+    # 不是 hint 里的"now"日期(可能 user 在历史天浏览,now 跟 view_date 不同)。
+    view_date = (context or {}).get("view_date") or _today_date_str()
+    view_date_hint = f"[view-date] 用户当前浏览: {view_date}(YYYY-MM-DD) — scrapbook / patch_journal_block 的 date 参数默认必传这个,不是 today。"
 
-    # 有图就跑 OCR,把识字结果以 markdown 块形式拼到 user message 文本里
+    # 先做 OCR + vision-pre-router,把结果 hoist 到 user_msg 之前
+    # (原本拼在末尾,AI 读到用户那句"贴一下"先回复,常常跳过尾部 hint → 不调工具)
     ocr_results = _refs_to_image_blocks(context.get("refs", []))
-    if ocr_results:
-        ocr_section_lines = ["", "<图片 OCR 识别结果>"]
-        for r in ocr_results:
-            text = r["ocr_text"] or "(图中无可识别文字 / OCR 未配置)"
-            ocr_section_lines.append(f"\n图片 [{r['filename']}]:\n```\n{text}\n```")
-        ocr_section_lines.append("</图片 OCR 识别结果>")
-        full_user_text = full_user_text + "\n".join(ocr_section_lines)
-
-    # upload-side vision router:把 vision 分类结果作为 hint 拼进 user message
-    # (cache hit 走索引;miss 现场 sync call 一次,自动缓存)
     vision_hints = _refs_to_vision_hints(context.get("refs", []))
+
+    pre_sections = []  # 拼在 user_msg 前面的工作流块
+
     if vision_hints:
-        v_lines = ["", "<vision-pre-router 已分类>"]
+        v_lines = ["<vision-pre-router 已分类 — 立即按 WORKFLOW 走,不要先回复用户文字>"]
         for h in vision_hints:
             v = h["vision"]
             kind = v.get("kind", "?")
@@ -1658,15 +1661,36 @@ async def chat(req: Request):
                 f"  · kind={kind} | 描述={desc} | 品牌={brand or '-'}\n"
                 f"  · OCR有文字={ocr_likely} | 颗数={pill_count or '-'}\n"
                 f"  · 建议下游路径: {suggested or '-'}\n"
-                f"  · 用户抠图偏好: {'抠' if user_cut else '原图(用户已点开关)'}"
+                f"  · 用户抠图偏好: {'抠' if user_cut else '原图(用户已点开关 — cutout=false 必传)'}"
             )
+        v_lines.append("</vision-pre-router 已分类>")
         v_lines.append(
-            "</vision-pre-router 已分类>\n"
-            "(基于这些 hint 直接走对应工具;不要再调 vision_classify。"
-            "若是 scrapbook 贴图但用户没指 anchor → 调 read_today_schedule 看 entry,"
-            "按 kind/描述 匹配最合的那段,不要问用户。)"
+            f"\nWORKFLOW(image + scrapbook 类 hint):\n"
+            f"  1. 已有 vision hint — 不要再调 vision_classify\n"
+            f"  2. 用户消息里若已含 entry ref [date time] → 直接拿 anchor_time + date,跳到第 4\n"
+            f"  3. 否则: read_today_schedule(date='{view_date}') → 按 hint 描述匹配 entry → 拿 anchor_time\n"
+            f"     匹配不出来(hint 跟所有 entry 都不沾边)才反问'贴到哪段?'\n"
+            f"  4. place_scrapbook_image(attachment_url=..., date='{view_date}',\n"
+            f"     anchor_time='HH:MM', cutout=<按用户抠图偏好>)\n"
+            f"  5. 一句话告诉用户贴到了哪段(例: '贴到 12:30 那条午饭旁边了')"
         )
-        full_user_text = full_user_text + "\n".join(v_lines)
+        pre_sections.append("\n".join(v_lines))
+
+    if ocr_results:
+        ocr_section_lines = ["<图片 OCR 识别结果>"]
+        for r in ocr_results:
+            text = r["ocr_text"] or "(图中无可识别文字 / OCR 未配置)"
+            ocr_section_lines.append(f"\n图片 [{r['filename']}]:\n```\n{text}\n```")
+        ocr_section_lines.append("</图片 OCR 识别结果>")
+        pre_sections.append("\n".join(ocr_section_lines))
+
+    pre_block = ("\n\n".join(pre_sections) + "\n\n") if pre_sections else ""
+    full_user_text = (
+        f"{time_hint}\n{view_date_hint}\n\n"
+        f"<context>\n{ctx_str}\n</context>\n\n"
+        f"{pre_block}"
+        f"{user_msg}"
+    )
 
     # ── history processing: strip OCR + sliding-window summarize ──
     cleaned_history = []
@@ -2163,6 +2187,10 @@ async def scrapbook_upsert(req: Request):
         for k in ("src", "x_pct", "y_px", "w", "h", "rotation", "anchor_time", "z", "align", "x", "y"):
             if k in body:
                 item[k] = body[k]
+        # 用户拖完后传上来的 y_px 是真实值 → 清掉 auto_y,
+        # 之后 reload 不再用 anchor 重算覆盖用户的拖拽
+        if "y_px" in body:
+            item["auto_y"] = False
         items[idx] = item
     else:
         # create — 新数据默认用 x_pct/y_px;legacy 字段不再写
