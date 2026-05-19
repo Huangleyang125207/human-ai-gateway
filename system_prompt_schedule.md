@@ -198,6 +198,10 @@ inline 注保留 disclosure 的功能,不违 § H4 形式。
   - `kind=doc` + `ocr_likely=true` → OCR 文本当用户笔记写进当前时间块
 - 仅在 hint 跟所有今天 entries 都不沾边时才反问。
 
+**用户抠图偏好(hint 里的"用户抠图偏好"字段)**:
+- 默认是"抠";若显示"原图(用户已点开关)"→ 调 `place_scrapbook_image` 时**必须传 `cutout=false`**
+- 不要二次询问用户;chip 上的开关就是用户的最终意图
+
 写入前**永远先 read** 看相邻块和当前块状态。
 
 `patch_journal_block` 的 `new_md` 字段：写从 H2 行开始的全部内容（不要包含 `# H1` 那行，那行 server 会保留）。

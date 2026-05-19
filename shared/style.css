@@ -874,6 +874,16 @@ body.thread-resizing { transition: none; }
   width: 28px; height: 28px; border-radius: 6px; object-fit: cover;
   display: block;
 }
+.pending-ref .cut-toggle {
+  font: 10px var(--sans); cursor: pointer;
+  background: transparent; border: 1px solid var(--ink-4);
+  color: var(--ink-4); border-radius: 8px;
+  padding: 1px 6px; line-height: 1.4; margin: 0 2px 0 0;
+}
+.pending-ref .cut-toggle.on {
+  background: #b87a4f; border-color: #b87a4f; color: #fffaf0;
+}
+.pending-ref .cut-toggle:hover { filter: brightness(0.95); }
 .t-ref-image { padding: 4px 8px; }
 .t-ref-image .ref-thumb {
   width: 36px; height: 36px; border-radius: 6px; object-fit: cover;

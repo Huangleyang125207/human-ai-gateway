@@ -1573,10 +1573,15 @@ def _refs_to_vision_hints(refs):
             except Exception as e:
                 log.warning(f"sync vision failed for {url}: {e}")
         if vision:
+            # 用户 chip 上的"抠/原"开关传过来的偏好(default true)
+            cutout_pref = (r.get("payload") or {}).get("cutout")
+            if cutout_pref is None:
+                cutout_pref = True
             out.append({
                 "filename": (r.get("payload") or {}).get("original") or f.name,
                 "url": url,
                 "vision": vision,
+                "user_cutout_pref": bool(cutout_pref),
             })
     if dirty:
         try:
@@ -1627,11 +1632,13 @@ async def chat(req: Request):
             suggested = v.get("suggested_action", "")
             ocr_likely = v.get("ocr_likely", False)
             pill_count = v.get("pill_count", 0)
+            user_cut = h.get("user_cutout_pref", True)
             v_lines.append(
                 f"图片 [{h['filename']}] ({h['url']}):\n"
                 f"  · kind={kind} | 描述={desc} | 品牌={brand or '-'}\n"
                 f"  · OCR有文字={ocr_likely} | 颗数={pill_count or '-'}\n"
-                f"  · 建议下游路径: {suggested or '-'}"
+                f"  · 建议下游路径: {suggested or '-'}\n"
+                f"  · 用户抠图偏好: {'抠' if user_cut else '原图(用户已点开关)'}"
             )
         v_lines.append(
             "</vision-pre-router 已分类>\n"

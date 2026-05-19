@@ -175,9 +175,22 @@
     for (const r of state.pending) {
       const chip = document.createElement("span");
       chip.className = r.kind === "image" ? "pending-ref pending-image" : "pending-ref";
+      const cutOn = (r.payload?.cutout !== false);  // image 默认 true,非 image 没此选项
       if (r.kind === "image" && r.payload?.url) {
-        chip.innerHTML = `<img class="pending-thumb" alt=""><span class="ref-label"></span><span class="x">×</span>`;
+        chip.innerHTML = `<img class="pending-thumb" alt=""><span class="ref-label"></span><button class="cut-toggle" title="抠图开关(默认抠 — 切换后 AI 落原图)"></button><span class="x">×</span>`;
         chip.querySelector(".pending-thumb").src = r.payload.url;
+        const btn = chip.querySelector(".cut-toggle");
+        const paint = () => {
+          const on = (r.payload.cutout !== false);
+          btn.textContent = on ? "抠" : "原";
+          btn.classList.toggle("on", on);
+        };
+        paint();
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          r.payload.cutout = !(r.payload.cutout !== false);  // toggle, default-true 翻 false
+          paint();
+        });
       } else {
         chip.innerHTML = `<span class="ref-label"></span><span class="x">×</span>`;
       }
@@ -227,7 +240,8 @@
       addRef({
         kind: "image",
         label: data.original || data.filename,
-        payload: { url: data.url, filename: data.filename, original: data.original, size: data.size },
+        // cutout 默认 true(对水杯/补剂/scrapbook 都该抠);用户可点 chip 上的 "抠/原" 切换
+        payload: { url: data.url, filename: data.filename, original: data.original, size: data.size, cutout: true },
       });
       return data;
     } catch (e) {
