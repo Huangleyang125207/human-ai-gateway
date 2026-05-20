@@ -211,11 +211,101 @@ def _safe_write_text(path: Path, content: str, rotate: bool = False, encoding: s
 ALLOWED_IMAGE_EXT = {"jpg", "jpeg", "png", "gif", "webp", "heic"}
 MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
 
+# ── env loader ───────────────────────────────────────────────────────
+# 把 secret 从 gateway-config.json 抽出来,搬到 .env 文件 — config.json 只放
+# 结构(models / base URLs / defaults),.env 放 key。两个 .env 候选位置:
+#   1. APP_STATE_DIR/config/.env  — 用户机的 production(.app 安装后用)
+#   2. <gateway dir>/.env         — dev 时
+# 读优先级:os.environ > .env 文件 > gateway-config.json > 默认值
+
+def _load_env_file(path: Path) -> dict:
+    """简易 .env 解析:KEY=value 一行一条,#注释 / 空行跳过。引号包裹的去引号。"""
+    if not path.exists():
+        return {}
+    out = {}
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            v = v.strip().strip("'\"")
+            if k:
+                out[k] = v
+    except Exception as e:
+        log.warning(f".env load failed at {path}: {e}")
+    return out
+
+
+def _env_overlay() -> dict:
+    """合并 env 来源 → 字典。优先级:os.environ > APP_STATE .env > gateway/.env"""
+    merged = {}
+    for p in (GATEWAY_DIR / ".env", CONFIG_DIR / ".env"):
+        merged.update(_load_env_file(p))
+    for k in (
+        "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_DEFAULT_MODEL",
+        "DASHSCOPE_API_KEY", "DASHSCOPE_BASE_URL", "DASHSCOPE_VISION_MODEL",
+        "BAIDU_OCR_API_KEY", "BAIDU_OCR_SECRET_KEY",
+        "BAIDU_CUTOUT_API_KEY", "BAIDU_CUTOUT_SECRET_KEY",
+        "GEMINI_API_KEY",
+    ):
+        ev = os.environ.get(k)
+        if ev:
+            merged[k] = ev
+    return merged
+
+
 # ── config ───────────────────────────────────────────────────────────
 def load_config():
-    if not CONFIG_PATH.exists():
-        return None
-    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    """读 gateway-config.json,然后用 env 覆盖 secret 字段。
+    返合并后的 dict。env 不存在的字段沿用 config.json。
+    """
+    if CONFIG_PATH.exists():
+        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    else:
+        cfg = {}
+    env = _env_overlay()
+    # 顶层 chat 主 key
+    if env.get("DEEPSEEK_API_KEY"):
+        cfg["api_key"] = env["DEEPSEEK_API_KEY"]
+    if env.get("DEEPSEEK_BASE_URL"):
+        cfg["base_url"] = env["DEEPSEEK_BASE_URL"]
+    if env.get("DEEPSEEK_DEFAULT_MODEL"):
+        cfg["model"] = env["DEEPSEEK_DEFAULT_MODEL"]
+        cfg.setdefault("default_model_id", env["DEEPSEEK_DEFAULT_MODEL"])
+    # vision 路
+    if env.get("DASHSCOPE_API_KEY"):
+        cfg["dashscope_api_key"] = env["DASHSCOPE_API_KEY"]
+    if env.get("DASHSCOPE_BASE_URL"):
+        cfg["dashscope_base_url"] = env["DASHSCOPE_BASE_URL"]
+    if env.get("DASHSCOPE_VISION_MODEL"):
+        cfg["dashscope_vision_model"] = env["DASHSCOPE_VISION_MODEL"]
+    # 百度 / Gemini 可选
+    for env_k, cfg_k in [
+        ("BAIDU_OCR_API_KEY", "baidu_ocr_api_key"),
+        ("BAIDU_OCR_SECRET_KEY", "baidu_ocr_secret_key"),
+        ("BAIDU_CUTOUT_API_KEY", "baidu_cutout_api_key"),
+        ("BAIDU_CUTOUT_SECRET_KEY", "baidu_cutout_secret_key"),
+        ("GEMINI_API_KEY", "gemini_api_key"),
+    ]:
+        if env.get(env_k):
+            cfg[cfg_k] = env[env_k]
+    # models[].api_key — 若顶层 deepseek/dashscope key 给了 env,同步覆盖匹配 base_url 的 profile
+    if cfg.get("models"):
+        ds_key = env.get("DEEPSEEK_API_KEY")
+        ds_url = env.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
+        bl_key = env.get("DASHSCOPE_API_KEY")
+        bl_url = env.get("DASHSCOPE_BASE_URL") or "dashscope.aliyuncs.com"
+        for p in cfg["models"]:
+            pb = (p.get("base_url") or "")
+            if ds_key and "deepseek" in pb:
+                p["api_key"] = ds_key
+            elif bl_key and "dashscope" in pb:
+                p["api_key"] = bl_key
+    return cfg or None
 
 # ── model profiles (多模型切换) ─────────────────────────────────────
 # config 支持 `models: [{id, label, base_url, api_key, model, vision_model?}]` 数组,
