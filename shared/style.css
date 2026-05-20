@@ -2656,6 +2656,26 @@ body.thread-resizing { transition: none; }
 .setup-aliyun-howto a:hover { color: #8a5712; }
 .setup-aliyun-howto small { color: var(--ink-4); font-size: 11px; display: block; margin-top: 6px; }
 
+/* v3 ritual setup — DeepSeek 主对话 + 百炼视觉助手 + 折叠百度 */
+.setup-section-primary h3 { font-size: 15px; color: var(--ink); }
+.setup-role { color: #b4731e; font-weight: 500; }
+.setup-howto {
+  background: rgba(255, 248, 224, 0.55);
+  border: 1px solid rgba(180, 130, 30, 0.25);
+  border-radius: 8px;
+  padding: 10px 14px; margin: 0 0 10px;
+  font: 12.5px var(--sans); color: var(--ink-2); line-height: 1.6;
+}
+.setup-howto ol { margin: 6px 0 4px; padding-left: 22px; }
+.setup-howto li { margin: 3px 0; }
+.setup-howto a { color: #b4731e; text-decoration: underline; }
+.setup-howto a:hover { color: #8a5712; }
+.setup-howto-secondary { background: rgba(248, 248, 248, 0.6); border-color: rgba(58, 52, 44, 0.12); }
+.setup-details { border-top: 1px dashed rgba(58, 52, 44, 0.15); padding-top: 14px; margin-top: 18px; }
+.setup-details > summary { cursor: pointer; font: 13px var(--sans); color: var(--ink-3); padding: 4px 0; user-select: none; }
+.setup-details > summary:hover { color: var(--ink-2); }
+.setup-details[open] > summary { color: var(--ink-2); margin-bottom: 10px; }
+
 /* 百炼 1-key 卡 — v2 setup 主区 */
 .bailian-card {
   background: rgba(255, 252, 242, 0.6);

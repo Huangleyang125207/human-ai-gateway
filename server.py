@@ -3988,25 +3988,27 @@ def _parse_tag_aggregate(text: str):
 
 
 # ── 初次配置 / setup 向导 ────────────────────────────────────────────
-BAILIAN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-# 阿里云百炼:一个 base_url + 一个 api_key,model 字段切换
-# 涵盖:Qwen 全家 + DeepSeek 全系列 + GLM-5 + Kimi K2.5 + MiniMax M2.5 + Qwen-VL-OCR
-# 走它就替代原来 6 个独立 provider + 百度 OCR(用 qwen-vl-ocr)+ Gemini vision(用 qwen3-vl)。
-# 文档:https://help.aliyun.com/zh/model-studio/
-BAILIAN_MODELS = [
-    {"id": "qwen3-max",         "label": "Qwen3 Max",         "tag": "旗舰对话", "default": True},
-    {"id": "qwen3-coder-plus",  "label": "Qwen3 Coder Plus",  "tag": "代码"},
-    {"id": "deepseek-v4-pro",   "label": "DeepSeek V4 Pro",   "tag": "强推理",   "default": True},
+# Ritual 双角色:
+#   · DeepSeek 直连 = 说话的(主对话,给 deepseek 直接充值的情绪价值)
+#   · 阿里云百炼   = 给 deepseek 装上眼睛(vision/OCR)
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+DEEPSEEK_MODELS = [
+    {"id": "deepseek-v4-pro",   "label": "DeepSeek V4 Pro",   "tag": "强推理 · 默认", "default": True},
     {"id": "deepseek-v4-flash", "label": "DeepSeek V4 Flash", "tag": "快"},
     {"id": "deepseek-r1",       "label": "DeepSeek R1",       "tag": "深度思考"},
-    {"id": "glm-5",             "label": "GLM-5",             "tag": ""},
-    {"id": "kimi-k2.5",         "label": "Kimi K2.5",         "tag": "200K context"},
-    {"id": "minimax-m2.5",      "label": "MiniMax M2.5",      "tag": ""},
-    {"id": "qwen3-vl-plus",     "label": "Qwen3 VL Plus",     "tag": "图像理解(vision router)", "default": True},
-    {"id": "qwen-vl-ocr-latest","label": "Qwen VL OCR",       "tag": "文字识别"},
+    {"id": "deepseek-chat",     "label": "DeepSeek Chat",     "tag": "兼容老命名"},
+    {"id": "deepseek-reasoner", "label": "DeepSeek Reasoner", "tag": "推理"},
 ]
-# 历史 PROVIDER_TEMPLATES(每 model 一条独立 provider)已废 — 前端改成"1 key + 多 model 复选"
-# 形态。setup/templates 现在分两段:bailian(单 key)+ custom_templates(自定义 OAI)。
+
+BAILIAN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# 百炼此处只作视觉助手 — 一个 vision model 够 99% 场景。要别的 model 自己加。
+BAILIAN_VISION_MODELS = [
+    {"id": "qwen3-vl-flash",    "label": "Qwen3 VL Flash",    "tag": "看图分类 · 默认(便宜+快)", "default": True},
+    {"id": "qwen3-vl-plus",     "label": "Qwen3 VL Plus",     "tag": "更精细"},
+    {"id": "qwen-vl-ocr-latest","label": "Qwen VL OCR",       "tag": "长截图文字"},
+]
+# 兼容老 setup.js 还在 fetch 这个名字
+BAILIAN_MODELS = BAILIAN_VISION_MODELS
 
 
 @app.get("/api/setup-status")
@@ -4028,18 +4030,25 @@ def setup_status():
 
 @app.get("/api/setup/templates")
 def setup_templates():
-    """新 setup UI 分两段:阿里云百炼(1 key 多 model 复选)+ 自定义 OAI provider 列表。"""
+    """新 setup UI 分两段(ritual):
+    · deepseek: 主对话(说话的那个)— api.deepseek.com 直连
+    · bailian: 视觉助手(给 deepseek 装眼睛)— 阿里云百炼,仅 vision model
+    """
     return {
+        "deepseek": {
+            "base_url": DEEPSEEK_BASE_URL,
+            "label": "DeepSeek 直连",
+            "models": DEEPSEEK_MODELS,
+        },
         "bailian": {
             "base_url": BAILIAN_BASE_URL,
-            "label": "阿里云百炼",
-            "models": BAILIAN_MODELS,
+            "label": "阿里云百炼(视觉助手)",
+            "models": BAILIAN_VISION_MODELS,
         },
-        "custom_templates": [],  # 自定义 provider 走前端 onAddProvider("custom") 分支
-        # 兼容旧 setup.js(里面仍 fetch .templates):返一份合并列表
+        "custom_templates": [],
         "templates": [
-            {"label": f"阿里云百炼 · {m['label']}", "base_url": BAILIAN_BASE_URL, "model": m["id"]}
-            for m in BAILIAN_MODELS
+            {"label": f"DeepSeek · {m['label']}", "base_url": DEEPSEEK_BASE_URL, "model": m["id"]}
+            for m in DEEPSEEK_MODELS
         ],
     }
 
@@ -4208,16 +4217,27 @@ async def setup_save(req: Request):
         seen_ids.add(p["id"])
 
     cfg_out = {
-        "_comment": "由 setup 向导生成。手动改也 OK,跑 gateway 时会重读。",
+        "_comment": "由 setup 向导生成。secret 优先走 .env,这里是 fallback。手动改也 OK,跑 gateway 时会重读。",
         "default_model_id": body.get("default_model_id") or profiles[0]["id"],
         "models": profiles,
     }
+    # 顶层 chat 主 key/url(取 default profile 的)
+    def_profile = next((p for p in profiles if p.get("id") == cfg_out["default_model_id"]), profiles[0])
+    cfg_out["api_key"] = def_profile.get("api_key", "")
+    cfg_out["base_url"] = def_profile.get("base_url", "")
+    cfg_out["model"]    = def_profile.get("model", def_profile.get("id"))
+    # 视觉助手(百炼)单独存,跟 chat 主 key 隔开
+    dk = body.get("dashscope_api_key")
+    if dk and not dk.startswith("YOUR_"):
+        cfg_out["dashscope_api_key"] = dk
+        cfg_out["dashscope_base_url"] = body.get("dashscope_base_url", BAILIAN_BASE_URL)
+        cfg_out["dashscope_vision_model"] = body.get("dashscope_vision_model", "qwen3-vl-flash")
     # 百度可选段
     for k in ("baidu_ocr_api_key", "baidu_ocr_secret_key", "baidu_cutout_api_key", "baidu_cutout_secret_key"):
         v = body.get(k)
         if v and not v.startswith("YOUR_"):
             cfg_out[k] = v
-    # Gemini key (vision 路由用)
+    # Gemini key — UI 不再露,但若有人通过 env 注入这里也接(向后兼容)
     gk = body.get("gemini_api_key")
     if gk and not gk.startswith("YOUR_"):
         cfg_out["gemini_api_key"] = gk
