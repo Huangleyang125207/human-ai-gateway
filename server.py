@@ -1527,6 +1527,53 @@ def _summarize_history(old_messages: list, client, model: str) -> str:
 
 _OCR_BLOCK_RE = re.compile(r'<图片 OCR 识别结果>.*?</图片 OCR 识别结果>', re.DOTALL)
 _OCR_FILENAME_RE = re.compile(r'图片 \[([^\]]+)\]:')
+# history 里 thread.js 把 ref 拼成 `[image] filename`(或其他 kind),抓 image 那条
+_HISTORY_IMG_LABEL_RE = re.compile(r'\[image\]\s+([^\n]+?)(?=\n|$)')
+
+def _enrich_history_image_labels(history: list) -> list:
+    """history 里 thread.js 把图 ref 拼成 `[image] filename.jpg`,但 AI 视角下
+    filename 通常是 hash(如 `54cacfb2c68036b56b26.jpg`)— 看不出内容,
+    回头引用之前上传过的图时容易凭空捏造话题(5.20 长鑫存储被答成 HK 虚拟货币 = 这条 bug)。
+
+    本函数在 server 端拼 LLM prompt 前,把每条 history 里的 `[image] X` 替换成:
+        [image] X (kind: description) OCR 前 120 字: ...
+    数据来自 _attachments_index 的 cache,零额外 LLM 调用。cache miss 时 label 不变。
+    """
+    if not history:
+        return history
+    idx = _load_attachments_index()
+    by_original = {x.get("original"): x for x in idx if x.get("original")}
+    by_filename = {x.get("filename"): x for x in idx if x.get("filename")}
+
+    def _lookup(label: str) -> str:
+        entry = by_original.get(label) or by_filename.get(label)
+        if not entry:
+            return f"[image] {label}"
+        vision = entry.get("vision") or {}
+        kind = vision.get("kind")
+        desc = vision.get("description", "")
+        ocr = (entry.get("ocr_text") or "")[:120].replace("\n", " ").strip()
+        bits = [f"[image] {label}"]
+        if kind and desc:
+            bits.append(f"({kind}: {desc})")
+        elif desc:
+            bits.append(f"({desc})")
+        if ocr:
+            bits.append(f"OCR前 120 字: {ocr}")
+        return "  ".join(bits)
+
+    out = []
+    for m in history:
+        content = m.get("content")
+        if isinstance(content, str) and "[image]" in content:
+            new_content = _HISTORY_IMG_LABEL_RE.sub(
+                lambda mt: _lookup(mt.group(1).strip()), content
+            )
+            out.append({**m, "content": new_content})
+        else:
+            out.append(m)
+    return out
+
 
 def _strip_ocr_from_history(text: str) -> str:
     """history 里的 user msg 不需要重发 OCR 全文(首发时已给过)。
@@ -1727,6 +1774,10 @@ async def chat(req: Request):
         if role == "user":
             content = _strip_ocr_from_history(content)
         cleaned_history.append({"role": role, "content": content})
+
+    # 把 history 里裸的 [image] filename 换成带 vision/OCR brief 的形式 —
+    # 防止 AI 回头引用过去上传过的图时凭空捏造话题。cache miss 时 label 保持原样。
+    cleaned_history = _enrich_history_image_labels(cleaned_history)
 
     active_model = get_model(profile)
     sys_prompt = build_system_prompt(context, model_id=active_model)
