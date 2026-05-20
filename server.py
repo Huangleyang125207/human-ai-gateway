@@ -299,9 +299,19 @@ def build_system_prompt(context: dict = None, model_id: str = None) -> str:
     (signature / inline disclosure 用),让 AI 用自己的真实模型 id 署名,
     而不是模板里 hard-code 的某个示例。
     """
-    parts = ["You are the Gateway AI for a personal diary system. "
-             "Stay terse, action-oriented. Default mode = co-author the user's 半小时复盘 diary. "
-             "When the user explicitly works on widgets, the widget skill is appended below."]
+    parts = [
+        "你是葱鸭(用户)的日记 AI 伙伴。你们用这套系统合作 16 天了,彼此熟悉。\n"
+        "\n"
+        "关系定位:\n"
+        "· 你是他的写作搭子 + 偶尔的对手 + 旁观他生活的人,**不是助理 / 不是客服 / 不是工具**。\n"
+        "· 主线是对话,把事记进日记是顺带的副作用 — 别把每次回复都做成「已完成,请刷新」那种工单结尾。\n"
+        "· 跟他说话的节奏:他用「卧槽」「shit」你就跟,他正经你稍正经。他不喜欢「为您处理」「请稍候」这种话术。\n"
+        "· 做完事别复述步骤,别提工具名,一句话点到 + 接着聊。\n"
+        "\n"
+        "下面有一组 tools 是你的手。用它们像伸手取东西一样自然 — \n"
+        "不要复述工具名,不要解释「我现在要调 X」,做完了一句话告诉他贴在哪里 / 改了什么就够了。\n"
+        "tools 的详细使用规则在下面的 skill 里。"
+    ]
 
     # schedule skill — 默认装载(90% 场景受益)
     if SCHEDULE_PROMPT_PATH.exists():
@@ -359,7 +369,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "add_widget",
-            "description": "Create a new widget by copying from a reference and adapting. Writes manifest.json, widget.html, widget.js to widgets/<name>/, and appends <name> to .user-widgets.json active.",
+            "description": "Create a new widget under widgets/<name>/ + activate it in .user-widgets.json.",
             "parameters": {
                 "type": "object",
                 "required": ["name", "title", "audience", "slot", "manifest_json", "widget_html", "widget_js"],
@@ -379,7 +389,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "patch_widget",
-            "description": "Modify an existing widget's HTML or JS (visual change, behavior change). Use sparingly — prefer add_widget for new functionality.",
+            "description": "Modify an existing widget's manifest/HTML/JS in place.",
             "parameters": {
                 "type": "object",
                 "required": ["name", "file", "new_content"],
@@ -395,7 +405,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "patch_journal_block",
-            "description": "Write or rewrite the body of a time block in today's 半小时复盘 md. Use when user dictates a new entry OR right-clicks a block to clean up. Preserves the # H1 line; replaces everything until next H1 or --- separator. Always read_today_schedule first to see what's already there.",
+            "description": "改写某时间块的正文。保留 H1,替换到下一个 H1 或 ---。格式: `## #tag short-title` 单行 + 散文(规则见 schedule protocol)。",
             "parameters": {
                 "type": "object",
                 "required": ["time", "new_md"],
@@ -410,7 +420,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "read_today_schedule",
-            "description": "Read today's (or a specific date's) 半小时复盘 md, returning parsed time-blocks with their H2 entries. Call this BEFORE patch_journal_block to see what's already there, OR when user asks 'what did I write today / on day X'.",
+            "description": "读今天(或指定日期)的 schedule md,返解析后的时间块 + H2 entries。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -423,7 +433,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "list_recent_days",
-            "description": "List recent schedule files (date + filename). Use when user asks 'what days do I have / list recent days'. Does not read the content — call read_today_schedule(date=...) for each day's content.",
+            "description": "列最近 N 天的 schedule 文件(只列日期 + 文件名,不读内容)。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -436,7 +446,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "insert_journal_block",
-            "description": "加新条目到日记。用户说'记一下饮食 / 加一条工作 / 投资笔记'等时调。tag 必填,默认时间是当前半小时(用户没说别的就用 default)。如果该时间块已存在,append 一条新 H2 不报错。",
+            "description": "在 schedule 加新 H2 条目。tag 必填;time 不填默认当前半小时(server 兜底);time 已有内容会 append。",
             "parameters": {
                 "type": "object",
                 "required": ["tag"],
@@ -453,7 +463,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "set_water_cup_image",
-            "description": "给「8 杯水」打卡的 cup 配上用户自己的水杯/水瓶照片。用户拖图 + 说'这是我的水杯/水瓶'时调。AI 抠图后用作 8 个 cup 的视觉(灰度=未喝,彩色=已喝)。",
+            "description": "为 8-cup 喝水打卡设置自定义水杯图标(灰度=未喝,彩色=已喝)。",
             "parameters": {
                 "type": "object",
                 "required": ["attachment_url"],
@@ -467,7 +477,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "set_daily_task_image",
-            "description": "给 daily task 配一张个人化照片(用户拍了水瓶/药瓶 → AI 去背 → 落到该 task 作为打卡图标)。用户在聊天里拖图 + 说'这是我的 X'时调。会调百度智能抠图 API,失败要解释 100 次/月配额或图片问题。",
+            "description": "为 daily task 配自定义打卡图标(去背景后落到 task_name 的图标位)。task_name 须精确匹配 md 顶部 - [ ] 行(含括号)。",
             "parameters": {
                 "type": "object",
                 "required": ["task_name", "attachment_url"],
@@ -498,7 +508,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "check_daily_task",
-            "description": "标记今天某个补剂/任务的打卡状态。用户说'我吃了鱼油 / 标记肌酸完成 / 取消南非醉茄打卡'时调。task_name 必须跟 vault/daily-tasks.md 里的项完全一致(空格中文括号都要对)。",
+            "description": "标记今天某个 daily task 的打卡状态。task_name 须精确匹配(空格 + 中文括号都要对)。",
             "parameters": {
                 "type": "object",
                 "required": ["task_name", "checked"],
@@ -513,7 +523,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "place_scrapbook_image",
-            "description": "把用户上传的照片嵌进对应时间块的正文里(浏览器 float wrap,文字自动绕图)。\n\n**anchor_time 怎么选**:\n- 用户明说('贴到 15:00 那段')→ 直接用\n- 用户没明说 → **不要瞎猜**。先调 read_today_schedule 看今天所有 entry(time + tags + title + body),再调 vision_classify 看图内容,最后基于'图内容 + entry 题材'匹配最合的那一段 anchor_time。两者都不显然匹配就问用户。\n- 落地后用户可直接拖到别条 entry / 旋转 / 缩放。",
+            "description": "把上传的图浮在指定时间块旁边(absolute layer + 文字绕图)。anchor_time 选择规则见 vision protocol。",
             "parameters": {
                 "type": "object",
                 "required": ["attachment_url", "date", "anchor_time"],
@@ -533,7 +543,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "vision_classify",
-            "description": "用 Gemini Flash 看图返回结构化分类(kind / brand / 描述 / 颗数 / OCR 概率 / 建议动作)。AI 拿到用户上传图后第一步可以调这个,根据返回值决定下一步走 supplement_track / scrapbook_paste / OCR 哪条路径,而不是瞎猜。",
+            "description": "对图跑结构化视觉分类,返 kind/brand/描述/颗数/OCR 概率。**通常不必调** — server 在 upload 时已经跑过并缓存,user message 里会注入 hint。这条只在 fallback 场景用。",
             "parameters": {
                 "type": "object",
                 "required": ["attachment_url"],
@@ -548,7 +558,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "list_my_uploads",
-            "description": "列用户历史上传过的图片(attachments)。AI 想引用'我之前给你 po 过的那张狗'这种需求时调。可按日期范围 / 数量限制。返每张图的 filename / date / 原文件名 / OCR 识别文本摘要。",
+            "description": "列用户历史上传过的图片,按日期范围 / 数量限制。返 filename / date / 原文件名 / OCR 摘要。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -563,7 +573,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_my_uploads",
-            "description": "按关键词搜历史上传图,grep 文件名 + 原文件名 + OCR 识别文字。AI 想找'前几天那张含 Swisse 字样的图'时调。",
+            "description": "关键词搜历史上传图(grep 文件名 + 原文件名 + OCR 文本)。",
             "parameters": {
                 "type": "object",
                 "required": ["query"],
@@ -578,7 +588,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "delete_attachment",
-            "description": "删一张已上传的图(从硬盘 + 索引)。用户明确说'删掉那张 xxx'时调,不要主动建议删。",
+            "description": "删一张已上传的图(硬盘 + 索引)。仅在用户明确要求时用,不主动建议。",
             "parameters": {
                 "type": "object",
                 "required": ["date", "filename"],
@@ -593,7 +603,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "set_daily_task_meta",
-            "description": "改 daily task 的剂量/瓶装总颗数。用户说'我每天吃 2 颗鱼油 / 这瓶鱼油 60 颗'或者上传药瓶图后 OCR 没读出颗数想让你帮录入时调。total_pills 是整瓶的颗数,daily_dose 是用户每天吃几颗(默认 1)。",
+            "description": "改 daily task 的剂量/瓶装总颗数。total_pills=整瓶颗数,daily_dose=每天吃几颗(默认 1)。",
             "parameters": {
                 "type": "object",
                 "required": ["task_name"],
