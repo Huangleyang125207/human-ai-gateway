@@ -199,18 +199,26 @@ user message 头部有 `[view-date] 用户当前浏览: YYYY-MM-DD` 行 — **sc
 
 **看到 hint 时**:
 - **不要再调** `vision_classify` — 已经跑过了
-- **照 WORKFLOW 步骤走**,不要先用文字回复用户(用户已经说"贴一下"等
-  含糊话了,他要的就是动作不是聊天)
+- **不再 pin-by-default** — 先判 user 意图,再决定走哪条 path
 - 分类决策树:
   - `kind=supplement` + 用户没说哪个 task → 列 daily tasks 让用户选
-  - `kind=food / object / place` + 用户含糊话("贴一下" / "看这个" / 等):
-    1. 若用户 message 里已含 entry ref `[date time]` → 直接拿 anchor_time + date
-    2. 否则: `read_today_schedule(date=<view-date>)` → 按 hint 描述匹配最合 entry
-       → 拿那条的 anchor_time
-    3. `place_scrapbook_image(attachment_url=..., date=<view-date>,
-       anchor_time='HH:MM', cutout=<按用户抠图偏好>)`
-    4. 一句话告诉用户贴到了哪段(例: "贴到 12:30 那条午饭旁边了")
-    - **匹配不出来才反问** "贴到哪段?"
+  - `kind=food / object / place`:
+    - **判 pin 意图**(看用户消息文字 + entry ref 两路):
+      - explicit-pin:"贴/po/放/记下/留个底/上墙/钉/pin" 或 entry ref `[date time]` → pin path
+      - explicit-discuss:"看看/识别/这是/好不好/是啥/什么/帮我看" → discuss path
+      - ambiguous:无文字 / 含糊话("哈哈"/"今天的"/"诶") → ask path
+    - **pin path**:
+      1. 若消息含 entry ref `[date time]` → 直接拿 anchor_time + date
+      2. 否则 `read_today_schedule(date=<view-date>)` → 按 hint 描述匹配 entry → 拿 anchor_time
+      3. `place_scrapbook_image(date=<view-date>, anchor_time='HH:MM', cutout=...)`
+      4. 一句话告诉用户贴到了哪段
+    - **discuss path**:
+      1. 直接根据 hint + 用户问题回复,**不要调** `place_scrapbook_image`
+      2. 末尾加一句 "想贴到日记上的话告诉我" — 给 user 留 escape hatch
+    - **ask path**:
+      1. 描述 hint 看到的内容(例: "看到一份羊排紫米饭的午餐")
+      2. 跟一句 "要贴到日记上吗?要的话我贴在 X 块旁边"(X = 按 hint 匹配的 entry)
+      3. **不要调** `place_scrapbook_image`,等用户答
   - `kind=doc` + `ocr_likely=true` → OCR 文本当用户笔记写进当前时间块
 
 **用户抠图偏好**:
