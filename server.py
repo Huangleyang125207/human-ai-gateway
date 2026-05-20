@@ -278,7 +278,14 @@ def get_vision_model():
         return "deepseek-chat"
     return p.get("vision_model") or p.get("model", "deepseek-chat")
 
-SCHEDULE_PROMPT_PATH = GATEWAY_DIR / "system_prompt_schedule.md"
+PROTOCOLS_DIR = GATEWAY_DIR / "protocols"
+
+# protocol 文件名 → 索引描述,baseline preamble 给 AI 看的目录
+PROTOCOLS = {
+    "schedule": "编辑日记格式 / 时间块 / 标签 / commit 双签 / 1-year test 等规则",
+    # 未来再加:"vision", "widgets", "forensics" — 当前 vision 是 per-msg 注入,widgets 走 _wants_widget_skill
+}
+
 
 def _wants_widget_skill(context: dict) -> bool:
     """是否需要装载 widget skill。default 不装(省 ~6.7K tokens)。
@@ -293,11 +300,26 @@ def _wants_widget_skill(context: dict) -> bool:
             return True
     return False
 
+
+def load_protocol(name: str, model_id: str = None) -> str:
+    """读 protocols/{name}.md 并返内容。{model_id} 占位符会被替换为传入的 model_id。
+    AI 通过 load_protocol tool 触发;build_system_prompt 也可以预 load 某 protocol。
+    """
+    if name not in PROTOCOLS:
+        return f"(unknown protocol: {name}. available: {', '.join(PROTOCOLS.keys())})"
+    f = PROTOCOLS_DIR / f"{name}.md"
+    if not f.exists():
+        return f"(protocol file missing: {f})"
+    text = f.read_text(encoding="utf-8")
+    if model_id:
+        text = text.replace("{model_id}", model_id)
+    return text
+
+
 # ── system prompt builder ────────────────────────────────────────────
 def build_system_prompt(context: dict = None, model_id: str = None) -> str:
-    """构造 system prompt。model_id 用于替换 prompt 模板里的 {model_id} 占位符
-    (signature / inline disclosure 用),让 AI 用自己的真实模型 id 署名,
-    而不是模板里 hard-code 的某个示例。
+    """构造 system prompt。Lean baseline + protocol 索引;具体协议 AI 用
+    load_protocol tool 按需拉。model_id 用于替换 prompt 模板里的 {model_id}。
     """
     parts = [
         "你是葱鸭(用户)的日记 AI 伙伴。你们用这套系统合作 16 天了,彼此熟悉。\n"
@@ -308,17 +330,20 @@ def build_system_prompt(context: dict = None, model_id: str = None) -> str:
         "· 跟他说话的节奏:他用「卧槽」「shit」你就跟,他正经你稍正经。他不喜欢「为您处理」「请稍候」这种话术。\n"
         "· 做完事别复述步骤,别提工具名,一句话点到 + 接着聊。\n"
         "\n"
-        "下面有一组 tools 是你的手。用它们像伸手取东西一样自然 — \n"
-        "不要复述工具名,不要解释「我现在要调 X」,做完了一句话告诉他贴在哪里 / 改了什么就够了。\n"
-        "tools 的详细使用规则在下面的 skill 里。"
+        "tools 是你的手。用它们像伸手取东西一样自然,不复述工具名 / 不解释步骤。"
     ]
 
-    # schedule skill — 默认装载(90% 场景受益)
-    if SCHEDULE_PROMPT_PATH.exists():
-        schedule_md = SCHEDULE_PROMPT_PATH.read_text(encoding='utf-8')
-        if model_id:
-            schedule_md = schedule_md.replace("{model_id}", model_id)
-        parts.append(f"\n\n=== Schedule co-author skill (always loaded) ===\n{schedule_md}")
+    # protocol 目录 — AI 知道有这些协议可 load
+    protocol_index = "\n\n=== 可用 protocols(用 load_protocol(name=...) 按需拉详细规则)===\n"
+    for name, desc in PROTOCOLS.items():
+        protocol_index += f"· {name}: {desc}\n"
+    protocol_index += (
+        "\n何时调 load_protocol:\n"
+        "· 要 patch_journal_block / insert_journal_block / 写 #commit 之前 → 先 load 'schedule'\n"
+        "· 普通聊天 / 拖图回复 / 简单 read_today_schedule → 不必 load\n"
+        "· vision 工作流 hint 在用户消息里 server 已注入,不必单独 load\n"
+    )
+    parts.append(protocol_index)
 
     # widget skill — 按需装载(省 6.7K tokens / 普通对话)
     if _wants_widget_skill(context):
@@ -629,6 +654,20 @@ TOOLS = [
                 "properties": {
                     "query": {"type": "string", "description": "搜索关键词,中英文均可"},
                     "max_results": {"type": "integer", "description": "返回多少条(默认 5,上限 10)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "load_protocol",
+            "description": "拉某个协议的详细规则(目前只有 'schedule')。要写 / 改日记 entry 之前调一次,普通聊天不调。",
+            "parameters": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "description": "protocol 名,目前可选 'schedule'"},
                 },
             },
         },
@@ -1219,6 +1258,15 @@ def tool_web_search(args):
     return {"ok": True, "query": q, "results": _do_web_search(q, n)}
 
 
+def tool_load_protocol(args):
+    """读 protocols/{name}.md 给 AI。延迟加载详细协议规则,baseline prompt 保持精简。"""
+    name = (args.get("name") or "").strip()
+    if not name:
+        return {"error": "need name", "available": list(PROTOCOLS.keys())}
+    content = load_protocol(name)
+    return {"name": name, "content": content}
+
+
 TOOL_IMPL = {
     "list_widgets":         lambda args: tool_list_widgets(),
     "add_widget":           tool_add_widget,
@@ -1238,6 +1286,7 @@ TOOL_IMPL = {
     "delete_attachment":    tool_delete_attachment,
     "vision_classify":      tool_vision_classify,
     "web_search":           tool_web_search,
+    "load_protocol":        tool_load_protocol,
 }
 
 # ── app ──────────────────────────────────────────────────────────────

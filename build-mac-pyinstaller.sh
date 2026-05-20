@@ -64,7 +64,7 @@ ADDS=(
   --add-data "widgets:widgets"
   --add-data "vendor:vendor"
   --add-data "brand:brand"
-  --add-data "system_prompt_schedule.md:."
+  --add-data "protocols:protocols"
   --add-data ".gateway-config.example.json:."
   --add-data "vault_config.py:."
   --add-data "cutout.py:."
