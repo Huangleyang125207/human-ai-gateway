@@ -444,6 +444,21 @@ def build_system_prompt(context: dict = None, model_id: str = None) -> str:
     )
     parts.append(protocol_index)
 
+    # tool group 目录 — 默认 bootstrap(read+meta),write 类按需 load
+    tool_catalog = (
+        "\n=== 工具按需加载 ===\n"
+        "默认能用(read + 搜):read_today_schedule / list_recent_days / "
+        "list_my_uploads / search_my_uploads / web_search / vision_classify / "
+        "load_protocol / load_tool_group\n"
+        "\n要写 / 改东西,先 load_tool_group(group_name=...):\n"
+        "· write_journal — patch_journal_block / insert_journal_block / check_daily_task\n"
+        "· images — place_scrapbook_image / delete_attachment / set_*_image\n"
+        "· widgets_and_tasks — widget 增删改 / task 改名改剂量\n"
+        "\n注意:server 见到图 ref → 自动 load 'images';见到「记一下/写进去」类关键词 → 自动 load 'write_journal'。"
+        "其他场景你想用 write 工具 → 必须先调 load_tool_group。\n"
+    )
+    parts.append(tool_catalog)
+
     # widget skill — 按需装载(省 6.7K tokens / 普通对话)
     if _wants_widget_skill(context):
         for fname in ["SKILL.md", "WIDGET_AUTHORING.md", "STYLE_GUIDE.md"]:
@@ -767,6 +782,24 @@ TOOLS = [
                 "required": ["name"],
                 "properties": {
                     "name": {"type": "string", "description": "protocol 名,目前可选 'schedule'"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "load_tool_group",
+            "description": "按需加载一组工具。bootstrap 只装 read + meta;要写 / 贴图 / 改 widget 之前先 load 对应组。一次 chat 只需 load 一次。",
+            "parameters": {
+                "type": "object",
+                "required": ["group_name"],
+                "properties": {
+                    "group_name": {
+                        "type": "string",
+                        "enum": ["write_journal", "images", "widgets_and_tasks"],
+                        "description": "write_journal=写日记块/切勾daily task; images=贴图/删图/改task配图; widgets_and_tasks=widget增删改/task配置改名",
+                    },
                 },
             },
         },
@@ -1388,6 +1421,69 @@ TOOL_IMPL = {
     "load_protocol":        tool_load_protocol,
 }
 
+
+# ── lazy tool loading ───────────────────────────────────────────────
+# 19 个 tool 一次性甩给 model 会有"affordance bias" — 看见 write 工具就想写。
+# 改成:bootstrap(read + meta)默认在,write/mutating 工具按 group 按需加载。
+# 触发方式 2 种:(a) server 根据 user_msg/context 自动 load(图片→images,
+# "记一下"→write_journal),(b) model 主动调 load_tool_group(name)。
+TOOL_GROUPS = {
+    "write_journal": [
+        "patch_journal_block", "insert_journal_block", "check_daily_task",
+    ],
+    "images": [
+        "place_scrapbook_image", "delete_attachment",
+        "set_water_cup_image", "set_daily_task_image",
+    ],
+    "widgets_and_tasks": [
+        "list_widgets", "add_widget", "patch_widget",
+        "manage_daily_task", "set_daily_task_meta",
+    ],
+}
+
+BOOTSTRAP_TOOL_NAMES = {
+    # read-only / meta — 任意 chat 都该能用
+    "read_today_schedule", "list_recent_days",
+    "list_my_uploads", "search_my_uploads", "vision_classify",
+    "web_search", "load_protocol", "load_tool_group",
+}
+
+_INITIAL_LOAD_KEYWORDS = re.compile(
+    r'(记一下|记一笔|记下|写进|写到|加进|append|更新.*?日记|改.*?日记)'
+)
+
+def _initial_groups(user_msg: str, context: dict) -> set:
+    """server 端预判要哪些 group。降低 model 必须先调 load_tool_group 的轮数。"""
+    groups = set()
+    refs = (context or {}).get("refs", []) if isinstance(context, dict) else []
+    if any((r or {}).get("kind") == "image" for r in refs):
+        groups.add("images")
+    if user_msg and _INITIAL_LOAD_KEYWORDS.search(user_msg):
+        groups.add("write_journal")
+    return groups
+
+def _active_tools(loaded_groups: set) -> list:
+    """根据已加载 group 算出本轮要传给 API 的 tools 列表。"""
+    names = set(BOOTSTRAP_TOOL_NAMES)
+    for g in loaded_groups:
+        names.update(TOOL_GROUPS.get(g, []))
+    return [t for t in TOOLS if t.get("function", {}).get("name") in names]
+
+def _dispatch_tool(fn: str, args: dict, loaded_groups: set):
+    """统一 tool 调用入口。特判 load_tool_group(改 loaded_groups state)。"""
+    if fn == "load_tool_group":
+        g = (args or {}).get("group_name", "").strip()
+        if g in TOOL_GROUPS:
+            loaded_groups.add(g)
+            return {"loaded": g, "now_available": TOOL_GROUPS[g]}
+        return {"error": f"unknown group: {g}; available: {list(TOOL_GROUPS.keys())}"}
+    try:
+        return TOOL_IMPL[fn](args)
+    except KeyError:
+        return {"error": f"unknown tool: {fn}"}
+    except Exception as e:
+        return {"error": str(e)}
+
 # ── app ──────────────────────────────────────────────────────────────
 app = FastAPI(title="gateway v0.4")
 
@@ -1960,13 +2056,15 @@ async def chat(req: Request):
         messages.append(m)
     messages.append({"role": "user", "content": full_user_text})
 
-    # web_search 现在是 function tool(走 ddgs 后端),所有 provider 都用同一份 — 不再 per-provider 过滤
-    active_tools = [t for t in TOOLS if t.get("type") == "function"]
+    # lazy tool loading:bootstrap(read+meta)默认在;write 类按 user msg / refs 自动 load,
+    # 或 model 调 load_tool_group 主动 load。loaded_groups 是 mutable set,会被 _dispatch_tool
+    # 改写,所以本轮算 active_tools 之后,后面每轮都重新算一遍。
+    loaded_groups = _initial_groups(user_msg, context)
 
     # ── streaming 模式:SSE 事件流(action / delta / done / error)──
     if stream_mode:
         return StreamingResponse(
-            _chat_stream_generator(client, active_model, messages, active_tools),
+            _chat_stream_generator(client, active_model, messages, loaded_groups),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -1980,7 +2078,8 @@ async def chat(req: Request):
         try:
             kwargs = {"model": active_model, "messages": messages}
             if not is_last_round:
-                kwargs["tools"] = active_tools
+                # 每轮重算 — load_tool_group 上一轮可能改了 loaded_groups
+                kwargs["tools"] = _active_tools(loaded_groups)
                 kwargs["tool_choice"] = "auto"
             # 最后一轮:不传 tools / tool_choice → 模型必须给文本
             resp = client.chat.completions.create(**kwargs)
@@ -2025,7 +2124,7 @@ async def chat(req: Request):
         messages.append(asst_msg)
 
         if synth_calls:
-            _exec_synth_calls(synth_calls, messages, last_actions)
+            _exec_synth_calls(synth_calls, messages, last_actions, loaded_groups)
             continue
 
         if not msg.tool_calls:
@@ -2045,10 +2144,7 @@ async def chat(req: Request):
                 continue
             fn = tc.function.name
             args = json.loads(tc.function.arguments or "{}")
-            try:
-                result = TOOL_IMPL[fn](args)
-            except Exception as e:
-                result = {"error": str(e)}
+            result = _dispatch_tool(fn, args, loaded_groups)
             tool_results.append({"name": fn, "args": args, "result": result})
             messages.append({
                 "role": "tool",
@@ -2124,15 +2220,10 @@ def _extract_synthetic_tool_calls(content: str):
     stripped = _SYNTH_WRAPPER_RE.sub("", content).strip()
     return stripped, calls
 
-def _exec_synth_calls(synth_calls, messages, last_actions):
+def _exec_synth_calls(synth_calls, messages, last_actions, loaded_groups):
     """执行 synth_calls,把 tool result 写进 messages + last_actions。"""
     for c in synth_calls:
-        try:
-            result = TOOL_IMPL[c["name"]](c["args"])
-        except KeyError:
-            result = {"error": f"unknown tool: {c['name']}"}
-        except Exception as e:
-            result = {"error": str(e)}
+        result = _dispatch_tool(c["name"], c["args"], loaded_groups)
         last_actions.append({"name": c["name"], "args": c["args"], "result": result})
         messages.append({
             "role": "tool",
@@ -2153,9 +2244,10 @@ def _truncate_tool_result(content: str) -> str:
     return f"{keep}\n…(truncated, {omitted} chars omitted; re-call tool with narrower args if needed)"
 
 
-def _chat_stream_generator(client, active_model, messages, active_tools):
+def _chat_stream_generator(client, active_model, messages, loaded_groups):
     """跑跟非 stream 一样的 tool loop,但最后一轮(无 tool_calls 那一次)
     用 stream=True 把 text 一段段 yield 出去。tool 调用之间 yield action 事件。
+    active_tools 每轮重算(load_tool_group 可能改 loaded_groups)。
     """
     last_actions = []
     MAX_ROUNDS = 6
@@ -2186,12 +2278,7 @@ def _chat_stream_generator(client, active_model, messages, active_tools):
                 } for c in synth_calls]
                 messages.append(asst_msg)
                 for c in synth_calls:
-                    try:
-                        result = TOOL_IMPL[c["name"]](c["args"])
-                    except KeyError:
-                        result = {"error": f"unknown tool: {c['name']}"}
-                    except Exception as e:
-                        result = {"error": str(e)}
+                    result = _dispatch_tool(c["name"], c["args"], loaded_groups)
                     last_actions.append({"name": c["name"], "args": c["args"], "result": result})
                     yield _sse({"type": "action", "name": c["name"], "args": c["args"], "result": result})
                     messages.append({"role": "tool", "tool_call_id": c["id"],
@@ -2225,11 +2312,11 @@ def _chat_stream_generator(client, active_model, messages, active_tools):
             yield _sse({"type": "done", "actions": last_actions})
             return
 
-        # tool round:非 stream
+        # tool round:非 stream;每轮重算 tools(load_tool_group 可能改 loaded_groups)
         try:
             resp = client.chat.completions.create(
                 model=active_model, messages=messages,
-                tools=active_tools, tool_choice="auto",
+                tools=_active_tools(loaded_groups), tool_choice="auto",
             )
         except Exception as e:
             yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
@@ -2258,12 +2345,7 @@ def _chat_stream_generator(client, active_model, messages, active_tools):
 
         if synth_calls:
             for c in synth_calls:
-                try:
-                    result = TOOL_IMPL[c["name"]](c["args"])
-                except KeyError:
-                    result = {"error": f"unknown tool: {c['name']}"}
-                except Exception as e:
-                    result = {"error": str(e)}
+                result = _dispatch_tool(c["name"], c["args"], loaded_groups)
                 last_actions.append({"name": c["name"], "args": c["args"], "result": result})
                 yield _sse({"type": "action", "name": c["name"], "args": c["args"], "result": result})
                 messages.append({
@@ -2307,10 +2389,7 @@ def _chat_stream_generator(client, active_model, messages, active_tools):
                 args = json.loads(tc.function.arguments or "{}")
             except Exception:
                 pass
-            try:
-                result = TOOL_IMPL[fn](args)
-            except Exception as e:
-                result = {"error": str(e)}
+            result = _dispatch_tool(fn, args, loaded_groups)
             action_payload = {"name": fn, "args": args, "result": result}
             last_actions.append(action_payload)
             yield _sse({"type": "action", **action_payload})
