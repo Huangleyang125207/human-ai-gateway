@@ -384,8 +384,16 @@
   function removeProcessing() {
     document.getElementById("tProcessing")?.remove();
   }
+  // dedup pending rAF — streaming 时这个被狂调,不 dedup 每秒 30+ scrollTop 写入,
+  // 跟 IME 抢主线程触发输入法卡顿(5.21 21:30 诊断)
+  let _scrollPending = false;
   function scrollToBottom() {
-    requestAnimationFrame(() => { stream.scrollTop = stream.scrollHeight; });
+    if (_scrollPending) return;
+    _scrollPending = true;
+    requestAnimationFrame(() => {
+      _scrollPending = false;
+      stream.scrollTop = stream.scrollHeight;
+    });
   }
 
   // initial render of history(先用 LS 给即时画面,然后再 initSync 校准:
@@ -478,6 +486,7 @@
     const SCHEDULE_MUTATING = /^(patch_journal_block|insert_journal_block)$/;
     const SCRAPBOOK_MUTATING = /^place_scrapbook_image$/;
     let streamMsgEl = null;
+    let streamBodyEl = null;
     let accumText = "";
     let needTaskRefresh = false, needScheduleRefresh = false, needScrapbookRefresh = false;
 
@@ -538,9 +547,15 @@
             if (!streamMsgEl) {
               removeProcessing();
               streamMsgEl = appendStreamingMsg();
+              streamBodyEl = streamMsgEl.querySelector(".body");
             }
-            accumText += data.text || "";
-            streamMsgEl.querySelector(".body").textContent = accumText;
+            const chunk = data.text || "";
+            accumText += chunk;
+            // append-only text node — 不重写整段 textContent。
+            // 旧实现每个 delta tear down + 重建所有 text nodes,30/s 节奏下
+            // layout reflow 锁主线程,macOS IME composition 事件被延迟 → 输入法抽。
+            // append textNode 只触发 incremental layout(成本 ~O(new chars))。
+            if (chunk) streamBodyEl.appendChild(document.createTextNode(chunk));
             scrollToBottom();
           } else if (data.type === "action") {
             const summary = `tool · ${data.name} → ${JSON.stringify(data.result).slice(0, 140)}`;
