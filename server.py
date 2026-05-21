@@ -30,6 +30,12 @@ from pathlib import Path
 import secrets
 
 log = logging.getLogger("gateway")
+log.setLevel(logging.INFO)  # 让 log.info 真的能出来,默认 WARNING 把 cache/quota 等观测吃掉
+if not log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(levelname)s:gateway: %(message)s"))
+    log.addHandler(_h)
+    log.propagate = False  # 不再 bubble 到 root,避免 uvicorn 重复打
 import requests
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
