@@ -2120,7 +2120,9 @@ async def chat(req: Request):
                 kwargs["tools"] = _active_tools(loaded_groups)
                 kwargs["tool_choice"] = "auto"
             # 最后一轮:不传 tools / tool_choice → 模型必须给文本
-            resp = client.chat.completions.create(**kwargs)
+            # sync OpenAI 调用丢 threadpool — 不阻塞 asyncio event loop,
+            # eval/board 类同时跑的 endpoint 不再被锁死(详 5.21 21:30 事故)
+            resp = await asyncio.to_thread(client.chat.completions.create, **kwargs)
         except Exception as e:
             # 把 OpenAI/Anthropic 等 client 异常转成结构化 JSON,前端能解析
             err_text = str(e)
@@ -2199,7 +2201,9 @@ async def chat(req: Request):
     # msg.content 还含原始 DSML 文本 → 多打一次 bonus 拿干净 reply
     if messages and messages[-1].get("role") == "tool":
         try:
-            bonus = client.chat.completions.create(model=active_model, messages=messages)
+            bonus = await asyncio.to_thread(client.chat.completions.create,
+                                            model=active_model, messages=messages)
+            _log_cache_usage(bonus, "chat/non-stream-bonus")
             final_reply = (bonus.choices[0].message.content or "").strip()
         except Exception as e:
             final_reply = f"(tool loop 用完;synthesis call 失败:{type(e).__name__})"
