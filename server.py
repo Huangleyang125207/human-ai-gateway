@@ -422,6 +422,13 @@ def build_system_prompt(context: dict = None, model_id: str = None) -> str:
         "· 跟他说话的节奏:他用「卧槽」「shit」你就跟,他正经你稍正经。他不喜欢「为您处理」「请稍候」这种话术。\n"
         "· 做完事别复述步骤,别提工具名,一句话点到 + 接着聊。\n"
         "\n"
+        "默认行为(硬规则,别越):\n"
+        "· **不写默认** — 用户没明说「记一下 / 记一笔 / 写进去 / append」→ 不调 patch_journal_block / insert_journal_block。\n"
+        "· **不贴默认** — 用户没传图 → 不调 place_scrapbook_image。\n"
+        "· 想到「这条值得记」「要不要存一笔」→ 一句话问「要记进 X 块吗?」,**别先写后通知**。\n"
+        "· 写完别在 reply 里复述写了啥(「我已经把它记进 14:30 块了」是禁忌)— 一句话点过 + 继续话题。\n"
+        "· 回复结尾不要给「建议你记下」「要不要我帮你 X」这种工单式收尾 — 用户讨厌。\n"
+        "\n"
         "tools 是你的手。用它们像伸手取东西一样自然,不复述工具名 / 不解释步骤。"
     ]
 
@@ -2046,7 +2053,7 @@ async def chat(req: Request):
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": json.dumps(result, ensure_ascii=False),
+                "content": _truncate_tool_result(json.dumps(result, ensure_ascii=False)),
             })
 
         # save side-effect summary for the client
@@ -2130,8 +2137,20 @@ def _exec_synth_calls(synth_calls, messages, last_actions):
         messages.append({
             "role": "tool",
             "tool_call_id": c["id"],
-            "content": json.dumps(result, ensure_ascii=False),
+            "content": _truncate_tool_result(json.dumps(result, ensure_ascii=False)),
         })
+
+
+# tool result 上限:multi-round 时同一 result 跨轮重发,大 JSON 会把 token 拉爆。
+# 3000 char ≈ 1500 token,普通 read 类够用;真要全文 model 可再调一次同 tool。
+_TOOL_RESULT_CAP = 3000
+
+def _truncate_tool_result(content: str) -> str:
+    if len(content) <= _TOOL_RESULT_CAP:
+        return content
+    keep = content[:_TOOL_RESULT_CAP]
+    omitted = len(content) - _TOOL_RESULT_CAP
+    return f"{keep}\n…(truncated, {omitted} chars omitted; re-call tool with narrower args if needed)"
 
 
 def _chat_stream_generator(client, active_model, messages, active_tools):
@@ -2176,7 +2195,7 @@ def _chat_stream_generator(client, active_model, messages, active_tools):
                     last_actions.append({"name": c["name"], "args": c["args"], "result": result})
                     yield _sse({"type": "action", "name": c["name"], "args": c["args"], "result": result})
                     messages.append({"role": "tool", "tool_call_id": c["id"],
-                                     "content": json.dumps(result, ensure_ascii=False)})
+                                     "content": _truncate_tool_result(json.dumps(result, ensure_ascii=False))})
                 # 再 stream 拿真正回复
                 try:
                     stream_resp = client.chat.completions.create(
@@ -2250,7 +2269,7 @@ def _chat_stream_generator(client, active_model, messages, active_tools):
                 messages.append({
                     "role": "tool",
                     "tool_call_id": c["id"],
-                    "content": json.dumps(result, ensure_ascii=False),
+                    "content": _truncate_tool_result(json.dumps(result, ensure_ascii=False)),
                 })
             continue  # 下一轮让 model 补 reply
 
@@ -2298,7 +2317,7 @@ def _chat_stream_generator(client, active_model, messages, active_tools):
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": json.dumps(result, ensure_ascii=False),
+                "content": _truncate_tool_result(json.dumps(result, ensure_ascii=False)),
             })
 
     # MAX_ROUNDS 用完都没出文本
