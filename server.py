@@ -2257,20 +2257,75 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups):
     for round_idx in range(MAX_ROUNDS):
         is_last_round = (round_idx == MAX_ROUNDS - 1)
         # 非最后轮:先非 stream 让模型决定要不要 tool;
-        # 最后轮:直接 stream — typing 一致体验优先于 DSML 兜底(rounds 1-5 仍兜底)。
-        # 第 6 轮才漏 DSML 的概率小,愿意吃这点风险换 UX。
+        # 最后轮:stream + mid-stream DSML 检测。8-char lookahead 留尾巴扫
+        # ｜｜DSML 标记,一旦出现切 suppress mode + 兜底执行 + bonus stream。
+        # 既保 typing 一致又兜 DSML(5.21 21:48 实测 #25 漏的真因)。
         if is_last_round:
             try:
                 stream_resp = client.chat.completions.create(
                     model=active_model, messages=messages, stream=True,
                 )
+                buffer = ""        # 完整累积,扫 DSML + 末尾 lookahead
+                yielded_len = 0    # 已 yield 到 buffer 的哪个位置
+                suppress = False   # 一旦 detect 到 DSML 就 true,后续 delta 全憋住
                 emitted = False
+                LOOKAHEAD = 8      # 末尾留 8 char 等 ｜｜DSML 完整出现再判
                 for chunk in stream_resp:
                     if not chunk.choices: continue
                     delta = chunk.choices[0].delta
-                    if delta and delta.content:
+                    if not (delta and delta.content): continue
+                    buffer += delta.content
+                    if suppress: continue
+                    # ｜｜DSML 是 deepseek 自家假 tool-call wrapper 的 telltale
+                    if "｜｜DSML" in buffer or "<function_calls" in buffer:
+                        suppress = True
+                        continue
+                    safe_end = max(yielded_len, len(buffer) - LOOKAHEAD)
+                    if safe_end > yielded_len:
+                        text = buffer[yielded_len:safe_end]
+                        yielded_len = safe_end
                         emitted = True
-                        yield _sse({"type": "delta", "text": delta.content})
+                        yield _sse({"type": "delta", "text": text})
+
+                # 流收尾
+                if suppress:
+                    # buffer 含 DSML,parse + 执行 + bonus stream 拿真正回复
+                    stripped, synth_calls = _extract_synthetic_tool_calls(buffer)
+                    if synth_calls:
+                        asst_msg = {"role": "assistant", "content": stripped,
+                                    "tool_calls": [{
+                                        "id": c["id"], "type": "function",
+                                        "function": {"name": c["name"],
+                                                     "arguments": json.dumps(c["args"], ensure_ascii=False)},
+                                    } for c in synth_calls]}
+                        messages.append(asst_msg)
+                        for c in synth_calls:
+                            result = _dispatch_tool(c["name"], c["args"], loaded_groups)
+                            last_actions.append({"name": c["name"], "args": c["args"], "result": result})
+                            yield _sse({"type": "action", "name": c["name"], "args": c["args"], "result": result})
+                            messages.append({"role": "tool", "tool_call_id": c["id"],
+                                             "content": _truncate_tool_result(json.dumps(result, ensure_ascii=False))})
+                        # bonus stream — model 看到 tool result 后给真正答复
+                        try:
+                            bonus = client.chat.completions.create(
+                                model=active_model, messages=messages, stream=True,
+                            )
+                            for chunk in bonus:
+                                if not chunk.choices: continue
+                                delta = chunk.choices[0].delta
+                                if delta and delta.content:
+                                    emitted = True
+                                    yield _sse({"type": "delta", "text": delta.content})
+                        except Exception as e:
+                            yield _sse({"type": "error", "text": f"bonus stream 失败: {type(e).__name__}: {str(e)[:200]}"})
+                else:
+                    # 没 DSML — flush 末尾 lookahead 留的尾巴
+                    if yielded_len < len(buffer):
+                        tail = buffer[yielded_len:]
+                        if tail:
+                            emitted = True
+                            yield _sse({"type": "delta", "text": tail})
+
                 if not emitted and last_actions:
                     names = ", ".join(a.get("name", "?") for a in last_actions)
                     yield _sse({"type": "delta", "text": f"(已执行 {names},模型未补充文字)"})
