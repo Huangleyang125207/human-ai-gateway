@@ -1472,8 +1472,32 @@ def _active_tools(loaded_groups: set) -> list:
         names.update(TOOL_GROUPS.get(g, []))
     return [t for t in TOOLS if t.get("function", {}).get("name") in names]
 
-def _dispatch_tool(fn: str, args: dict, loaded_groups: set):
-    """统一 tool 调用入口。特判 load_tool_group(改 loaded_groups state)。"""
+# PATTERN: api — per-tool quota with hard cap per chat turn
+# USE WHEN: model 容易死循环调同一 tool(web_search loop, list 类反复 read)
+# COPY THIS: 改 TOOL_QUOTA 数字 / 加新 tool 进 dict
+# 没在 dict 里的 tool = 无限(write/admin 类用户授权过的别卡)
+TOOL_QUOTA = {
+    "web_search":          3,
+    "read_today_schedule": 5,
+    "list_recent_days":    2,
+    "list_my_uploads":     2,
+    "search_my_uploads":   3,
+    "vision_classify":     3,
+    "load_protocol":       3,
+    "load_tool_group":     5,
+}
+
+def _dispatch_tool(fn: str, args: dict, loaded_groups: set, quota_used: dict):
+    """统一 tool 调用入口。
+    - 特判 load_tool_group(改 loaded_groups state)
+    - 检查 TOOL_QUOTA 配额,超了返 error 让 model 用已有 result 凑活
+    """
+    cap = TOOL_QUOTA.get(fn)
+    if cap is not None:
+        used = quota_used.get(fn, 0)
+        if used >= cap:
+            return {"error": f"{fn} 本轮 chat 已用 {used}/{cap} 次,quota 用完。用已有 result 答,别再调。"}
+        quota_used[fn] = used + 1
     if fn == "load_tool_group":
         g = (args or {}).get("group_name", "").strip()
         if g in TOOL_GROUPS:
@@ -2063,11 +2087,12 @@ async def chat(req: Request):
     # 或 model 调 load_tool_group 主动 load。loaded_groups 是 mutable set,会被 _dispatch_tool
     # 改写,所以本轮算 active_tools 之后,后面每轮都重新算一遍。
     loaded_groups = _initial_groups(user_msg, context)
+    quota_used = {}  # per-chat-turn tool 用量,跟 loaded_groups 一样跨 round 共享
 
     # ── streaming 模式:SSE 事件流(action / delta / done / error)──
     if stream_mode:
         return StreamingResponse(
-            _chat_stream_generator(client, active_model, messages, loaded_groups),
+            _chat_stream_generator(client, active_model, messages, loaded_groups, quota_used),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -2127,7 +2152,7 @@ async def chat(req: Request):
         messages.append(asst_msg)
 
         if synth_calls:
-            _exec_synth_calls(synth_calls, messages, last_actions, loaded_groups)
+            _exec_synth_calls(synth_calls, messages, last_actions, loaded_groups, quota_used)
             continue
 
         if not msg.tool_calls:
@@ -2147,7 +2172,7 @@ async def chat(req: Request):
                 continue
             fn = tc.function.name
             args = json.loads(tc.function.arguments or "{}")
-            result = _dispatch_tool(fn, args, loaded_groups)
+            result = _dispatch_tool(fn, args, loaded_groups, quota_used)
             tool_results.append({"name": fn, "args": args, "result": result})
             messages.append({
                 "role": "tool",
@@ -2223,10 +2248,10 @@ def _extract_synthetic_tool_calls(content: str):
     stripped = _SYNTH_WRAPPER_RE.sub("", content).strip()
     return stripped, calls
 
-def _exec_synth_calls(synth_calls, messages, last_actions, loaded_groups):
+def _exec_synth_calls(synth_calls, messages, last_actions, loaded_groups, quota_used):
     """执行 synth_calls,把 tool result 写进 messages + last_actions。"""
     for c in synth_calls:
-        result = _dispatch_tool(c["name"], c["args"], loaded_groups)
+        result = _dispatch_tool(c["name"], c["args"], loaded_groups, quota_used)
         last_actions.append({"name": c["name"], "args": c["args"], "result": result})
         messages.append({
             "role": "tool",
@@ -2247,7 +2272,7 @@ def _truncate_tool_result(content: str) -> str:
     return f"{keep}\n…(truncated, {omitted} chars omitted; re-call tool with narrower args if needed)"
 
 
-def _chat_stream_generator(client, active_model, messages, loaded_groups):
+def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_used):
     """跑跟非 stream 一样的 tool loop,但最后一轮(无 tool_calls 那一次)
     用 stream=True 把 text 一段段 yield 出去。tool 调用之间 yield action 事件。
     active_tools 每轮重算(load_tool_group 可能改 loaded_groups)。
@@ -2300,7 +2325,7 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups):
                                     } for c in synth_calls]}
                         messages.append(asst_msg)
                         for c in synth_calls:
-                            result = _dispatch_tool(c["name"], c["args"], loaded_groups)
+                            result = _dispatch_tool(c["name"], c["args"], loaded_groups, quota_used)
                             last_actions.append({"name": c["name"], "args": c["args"], "result": result})
                             yield _sse({"type": "action", "name": c["name"], "args": c["args"], "result": result})
                             messages.append({"role": "tool", "tool_call_id": c["id"],
@@ -2367,7 +2392,7 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups):
 
         if synth_calls:
             for c in synth_calls:
-                result = _dispatch_tool(c["name"], c["args"], loaded_groups)
+                result = _dispatch_tool(c["name"], c["args"], loaded_groups, quota_used)
                 last_actions.append({"name": c["name"], "args": c["args"], "result": result})
                 yield _sse({"type": "action", "name": c["name"], "args": c["args"], "result": result})
                 messages.append({
@@ -2411,7 +2436,7 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups):
                 args = json.loads(tc.function.arguments or "{}")
             except Exception:
                 pass
-            result = _dispatch_tool(fn, args, loaded_groups)
+            result = _dispatch_tool(fn, args, loaded_groups, quota_used)
             action_payload = {"name": fn, "args": args, "result": result}
             last_actions.append(action_payload)
             yield _sse({"type": "action", **action_payload})
