@@ -1487,6 +1487,25 @@ TOOL_QUOTA = {
     "load_tool_group":     5,
 }
 
+# PATTERN: util — observability log for LLM cache hit rate
+# USE WHEN: 想看 DeepSeek prompt_cache_hit_tokens 实际命中率(stable prefix 假设验证)
+# COPY THIS: 改 source 字符串区分调用位置
+def _log_cache_usage(resp, source: str):
+    """log DeepSeek cache hit metrics. fail silently if SDK 不返这字段(老 API / 其他 provider)。"""
+    try:
+        usage = getattr(resp, "usage", None)
+        if not usage:
+            return
+        hit  = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
+        miss = getattr(usage, "prompt_cache_miss_tokens", 0) or 0
+        total = hit + miss
+        if total == 0:
+            return
+        ratio = hit / total * 100
+        log.info(f"[cache:{source}] hit={hit} miss={miss} ratio={ratio:.0f}% (total prompt={total})")
+    except Exception:
+        pass  # observability 不能因为它崩
+
 def _dispatch_tool(fn: str, args: dict, loaded_groups: set, quota_used: dict):
     """统一 tool 调用入口。
     - 特判 load_tool_group(改 loaded_groups state)
@@ -2118,6 +2137,7 @@ async def chat(req: Request):
                 },
             )
         msg = resp.choices[0].message
+        _log_cache_usage(resp, "chat/non-stream")
         # 用 model_dump 完整转,保留所有 provider 特有字段(尤其 DeepSeek V4 Pro 的
         # reasoning_content,thinking 模式下下一轮必须回传,否则 400)
         asst_msg = msg.model_dump(exclude_none=True)
@@ -2361,6 +2381,7 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
             return
 
         msg = resp.choices[0].message
+        _log_cache_usage(resp, "chat/stream-tool-round")
         asst_msg = msg.model_dump(exclude_none=True)
         asst_msg["role"] = "assistant"
         if not msg.tool_calls:
