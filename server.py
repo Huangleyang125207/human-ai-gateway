@@ -2257,62 +2257,26 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups):
     for round_idx in range(MAX_ROUNDS):
         is_last_round = (round_idx == MAX_ROUNDS - 1)
         # 非最后轮:先非 stream 让模型决定要不要 tool;
-        # 最后轮:也先非 stream 一次 → 扫 DSML(避免原文漏到 UI)→ 再 stream 拿真正文本
+        # 最后轮:直接 stream — typing 一致体验优先于 DSML 兜底(rounds 1-5 仍兜底)。
+        # 第 6 轮才漏 DSML 的概率小,愿意吃这点风险换 UX。
         if is_last_round:
             try:
-                resp = client.chat.completions.create(
-                    model=active_model, messages=messages,  # 不传 tools
+                stream_resp = client.chat.completions.create(
+                    model=active_model, messages=messages, stream=True,
                 )
+                emitted = False
+                for chunk in stream_resp:
+                    if not chunk.choices: continue
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        emitted = True
+                        yield _sse({"type": "delta", "text": delta.content})
+                if not emitted and last_actions:
+                    names = ", ".join(a.get("name", "?") for a in last_actions)
+                    yield _sse({"type": "delta", "text": f"(已执行 {names},模型未补充文字)"})
+                yield _sse({"type": "done", "actions": last_actions})
             except Exception as e:
                 yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
-                return
-            msg = resp.choices[0].message
-            content = msg.content or ""
-            stripped, synth_calls = _extract_synthetic_tool_calls(content)
-            if synth_calls:
-                # 执行 synth tools(用户不该看见 DSML 原文)
-                asst_msg = msg.model_dump(exclude_none=True)
-                asst_msg["role"] = "assistant"
-                asst_msg["content"] = stripped
-                asst_msg["tool_calls"] = [{
-                    "id": c["id"], "type": "function",
-                    "function": {"name": c["name"],
-                                 "arguments": json.dumps(c["args"], ensure_ascii=False)},
-                } for c in synth_calls]
-                messages.append(asst_msg)
-                for c in synth_calls:
-                    result = _dispatch_tool(c["name"], c["args"], loaded_groups)
-                    last_actions.append({"name": c["name"], "args": c["args"], "result": result})
-                    yield _sse({"type": "action", "name": c["name"], "args": c["args"], "result": result})
-                    messages.append({"role": "tool", "tool_call_id": c["id"],
-                                     "content": _truncate_tool_result(json.dumps(result, ensure_ascii=False))})
-                # 再 stream 拿真正回复
-                try:
-                    stream_resp = client.chat.completions.create(
-                        model=active_model, messages=messages, stream=True,
-                    )
-                    emitted = False
-                    for chunk in stream_resp:
-                        if not chunk.choices: continue
-                        delta = chunk.choices[0].delta
-                        if delta and delta.content:
-                            emitted = True
-                            yield _sse({"type": "delta", "text": delta.content})
-                    if not emitted:
-                        names = ", ".join(a.get("name", "?") for a in last_actions)
-                        yield _sse({"type": "delta", "text": f"(已执行 {names},模型未补充文字)"})
-                    yield _sse({"type": "done", "actions": last_actions})
-                except Exception as e:
-                    yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
-                return
-            # 无 DSML — 直接把 content 当 single delta(失去 typing 但内容正确)
-            cleaned = re.sub(r"<think>.*?</think>\s*", "", stripped, flags=re.DOTALL).strip()
-            if cleaned:
-                yield _sse({"type": "delta", "text": cleaned})
-            elif last_actions:
-                names = ", ".join(a.get("name", "?") for a in last_actions)
-                yield _sse({"type": "delta", "text": f"(已执行 {names},模型未补充文字)"})
-            yield _sse({"type": "done", "actions": last_actions})
             return
 
         # tool round:非 stream;每轮重算 tools(load_tool_group 可能改 loaded_groups)
