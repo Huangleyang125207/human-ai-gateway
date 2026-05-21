@@ -356,7 +356,9 @@ def get_client(profile=None):
     return OpenAI(
         api_key=p["api_key"],
         base_url=p.get("base_url", "https://api.deepseek.com/v1"),
-        timeout=60.0,     # 单次 HTTP 最多 30s,防 worker hang 死(过去靠 SIGKILL 救场)
+        timeout=120.0,     # 单次 HTTP 最多 120s。DeepSeek V4 Pro thinking 阶段不出 token,
+                          # 长 context synthesis 实测 30-60s,30/60s 太紧会切死。
+                          # 防 worker hang 死(过去靠 SIGKILL 救场)+ 给 reasoning 余地。
         max_retries=1,    # tool loop 已有重试,这里只兜一次
     )
 
@@ -1214,7 +1216,7 @@ def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
     base_url = cfg.get("dashscope_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 
     try:
-        client = OpenAI(api_key=key, base_url=base_url, timeout=60.0, max_retries=1)
+        client = OpenAI(api_key=key, base_url=base_url, timeout=120.0, max_retries=1)
         resp = client.chat.completions.create(
             model=model_id,
             messages=[{
@@ -1225,7 +1227,7 @@ def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
                 ],
             }],
             response_format={"type": "json_object"},
-            timeout=60.0,
+            timeout=120.0,
         )
     except Exception as e:
         return {"error": f"qwen vision call failed: {type(e).__name__}: {e}"}
