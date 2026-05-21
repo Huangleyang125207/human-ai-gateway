@@ -356,6 +356,8 @@ def get_client(profile=None):
     return OpenAI(
         api_key=p["api_key"],
         base_url=p.get("base_url", "https://api.deepseek.com/v1"),
+        timeout=30.0,     # 单次 HTTP 最多 30s,防 worker hang 死(过去靠 SIGKILL 救场)
+        max_retries=1,    # tool loop 已有重试,这里只兜一次
     )
 
 def get_model(profile=None):
@@ -1171,7 +1173,7 @@ def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
     base_url = cfg.get("dashscope_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 
     try:
-        client = OpenAI(api_key=key, base_url=base_url)
+        client = OpenAI(api_key=key, base_url=base_url, timeout=30.0, max_retries=1)
         resp = client.chat.completions.create(
             model=model_id,
             messages=[{
@@ -1962,10 +1964,10 @@ async def chat(req: Request):
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    # multi-turn tool loop (max 4 rounds);最后一轮 force-no-tool 逼出文本回复,
+    # multi-turn tool loop (max 6 rounds);最后一轮 force-no-tool 逼出文本回复,
     # 避免某些模型(如 DeepSeek)search 完仍想继续 search 撞 loop 上限返空 reply。
     last_actions = []
-    MAX_ROUNDS = 4
+    MAX_ROUNDS = 6
     for round_idx in range(MAX_ROUNDS):
         is_last_round = (round_idx == MAX_ROUNDS - 1)
         try:
@@ -2001,7 +2003,23 @@ async def chat(req: Request):
         # content 不能是 None
         if asst_msg.get("content") is None:
             asst_msg["content"] = ""
+
+        # ── DSML fallback:model 把 tool_call 当文本吐时,提取 + 升级成真 tool_calls ──
+        synth_calls = []
+        if not msg.tool_calls and asst_msg["content"]:
+            asst_msg["content"], synth_calls = _extract_synthetic_tool_calls(asst_msg["content"])
+            if synth_calls:
+                asst_msg["tool_calls"] = [{
+                    "id": c["id"], "type": "function",
+                    "function": {"name": c["name"],
+                                 "arguments": json.dumps(c["args"], ensure_ascii=False)},
+                } for c in synth_calls]
+
         messages.append(asst_msg)
+
+        if synth_calls:
+            _exec_synth_calls(synth_calls, messages, last_actions)
+            continue
 
         if not msg.tool_calls:
             # 防 reply 空 + 有 action 时前端啥都不显示
@@ -2035,7 +2053,17 @@ async def chat(req: Request):
         if tool_results:
             last_actions = tool_results
 
-    final_reply = re.sub(r"<think>.*?</think>\s*", "", msg.content or "", flags=re.DOTALL).strip()
+    # last round 若 synth 兜底执行了 tool,messages 末尾是 tool result,
+    # msg.content 还含原始 DSML 文本 → 多打一次 bonus 拿干净 reply
+    if messages and messages[-1].get("role") == "tool":
+        try:
+            bonus = client.chat.completions.create(model=active_model, messages=messages)
+            final_reply = (bonus.choices[0].message.content or "").strip()
+        except Exception as e:
+            final_reply = f"(tool loop 用完;synthesis call 失败:{type(e).__name__})"
+    else:
+        final_reply = msg.content or ""
+    final_reply = re.sub(r"<think>.*?</think>\s*", "", final_reply, flags=re.DOTALL).strip()
     return {"reply": final_reply or "(no reply, tool loop hit max iterations)", "actions": last_actions}
 
 # ── chat SSE streaming generator ────────────────────────────────────
@@ -2048,31 +2076,134 @@ def _sse(obj: dict) -> str:
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
 
+# ── synthetic-tool-call fallback ────────────────────────────────────
+# 目击于 deepseek-v4-pro:模型把 tool 调用当 content 文本吐,不用 OpenAI 的
+# tool_calls 字段。格式 mimic Claude 的 antml,但带 ｜｜DSML｜｜ 命名空间
+# (｜ = U+FF5C 全角竖线,见过 1-2 个;偶尔也见纯 ASCII | 或省略 DSML)。
+# 不解析的话前端会看见 <｜｜DSML｜｜tool_calls>...</> 这一坨原文,journal 也没落。
+_DSML_NS = r'<[｜|]{1,2}(?:DSML[｜|]{1,2})?'
+_SYNTH_INVOKE_RE = re.compile(
+    r'<[｜|]{1,2}DSML[｜|]{1,2}invoke\s+name="([^"]+)"\s*>(.*?)</[｜|]{1,2}DSML[｜|]{1,2}invoke>',
+    re.DOTALL,
+)
+_SYNTH_PARAM_RE = re.compile(
+    r'<[｜|]{1,2}DSML[｜|]{1,2}parameter\s+name="([^"]+)"[^>]*>(.*?)</[｜|]{1,2}DSML[｜|]{1,2}parameter>',
+    re.DOTALL,
+)
+_SYNTH_WRAPPER_RE = re.compile(
+    r'<[｜|]{1,2}DSML[｜|]{1,2}tool_calls>.*?</[｜|]{1,2}DSML[｜|]{1,2}tool_calls>',
+    re.DOTALL,
+)
+
+def _extract_synthetic_tool_calls(content: str):
+    """提 content 里 Claude-antml 风格的伪 tool_calls。
+    返回 (stripped_content, [{"id","name","args"}])。无匹配则 ([], original)。
+    """
+    if not content or "DSML" not in content:
+        return content, []
+    calls = []
+    for m in _SYNTH_INVOKE_RE.finditer(content):
+        name = m.group(1).strip()
+        body = m.group(2)
+        args = {pm.group(1).strip(): pm.group(2).strip()
+                for pm in _SYNTH_PARAM_RE.finditer(body)}
+        calls.append({
+            "id": f"call_synth_{secrets.token_hex(12)}",
+            "name": name,
+            "args": args,
+        })
+    if not calls:
+        return content, []
+    stripped = _SYNTH_WRAPPER_RE.sub("", content).strip()
+    return stripped, calls
+
+def _exec_synth_calls(synth_calls, messages, last_actions):
+    """执行 synth_calls,把 tool result 写进 messages + last_actions。"""
+    for c in synth_calls:
+        try:
+            result = TOOL_IMPL[c["name"]](c["args"])
+        except KeyError:
+            result = {"error": f"unknown tool: {c['name']}"}
+        except Exception as e:
+            result = {"error": str(e)}
+        last_actions.append({"name": c["name"], "args": c["args"], "result": result})
+        messages.append({
+            "role": "tool",
+            "tool_call_id": c["id"],
+            "content": json.dumps(result, ensure_ascii=False),
+        })
+
+
 def _chat_stream_generator(client, active_model, messages, active_tools):
     """跑跟非 stream 一样的 tool loop,但最后一轮(无 tool_calls 那一次)
     用 stream=True 把 text 一段段 yield 出去。tool 调用之间 yield action 事件。
     """
     last_actions = []
-    MAX_ROUNDS = 4
+    MAX_ROUNDS = 6
     for round_idx in range(MAX_ROUNDS):
         is_last_round = (round_idx == MAX_ROUNDS - 1)
         # 非最后轮:先非 stream 让模型决定要不要 tool;
-        # 最后轮:直接 stream(强制无 tool 出文本)
+        # 最后轮:也先非 stream 一次 → 扫 DSML(避免原文漏到 UI)→ 再 stream 拿真正文本
         if is_last_round:
-            # 直接 stream
             try:
-                stream_resp = client.chat.completions.create(
-                    model=active_model, messages=messages, stream=True,
+                resp = client.chat.completions.create(
+                    model=active_model, messages=messages,  # 不传 tools
                 )
-                for chunk in stream_resp:
-                    if not chunk.choices:
-                        continue
-                    delta = chunk.choices[0].delta
-                    if delta and delta.content:
-                        yield _sse({"type": "delta", "text": delta.content})
-                yield _sse({"type": "done", "actions": last_actions})
             except Exception as e:
                 yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
+                return
+            msg = resp.choices[0].message
+            content = msg.content or ""
+            stripped, synth_calls = _extract_synthetic_tool_calls(content)
+            if synth_calls:
+                # 执行 synth tools(用户不该看见 DSML 原文)
+                asst_msg = msg.model_dump(exclude_none=True)
+                asst_msg["role"] = "assistant"
+                asst_msg["content"] = stripped
+                asst_msg["tool_calls"] = [{
+                    "id": c["id"], "type": "function",
+                    "function": {"name": c["name"],
+                                 "arguments": json.dumps(c["args"], ensure_ascii=False)},
+                } for c in synth_calls]
+                messages.append(asst_msg)
+                for c in synth_calls:
+                    try:
+                        result = TOOL_IMPL[c["name"]](c["args"])
+                    except KeyError:
+                        result = {"error": f"unknown tool: {c['name']}"}
+                    except Exception as e:
+                        result = {"error": str(e)}
+                    last_actions.append({"name": c["name"], "args": c["args"], "result": result})
+                    yield _sse({"type": "action", "name": c["name"], "args": c["args"], "result": result})
+                    messages.append({"role": "tool", "tool_call_id": c["id"],
+                                     "content": json.dumps(result, ensure_ascii=False)})
+                # 再 stream 拿真正回复
+                try:
+                    stream_resp = client.chat.completions.create(
+                        model=active_model, messages=messages, stream=True,
+                    )
+                    emitted = False
+                    for chunk in stream_resp:
+                        if not chunk.choices: continue
+                        delta = chunk.choices[0].delta
+                        if delta and delta.content:
+                            emitted = True
+                            yield _sse({"type": "delta", "text": delta.content})
+                    if not emitted:
+                        names = ", ".join(a.get("name", "?") for a in last_actions)
+                        yield _sse({"type": "delta", "text": f"(已执行 {names},模型未补充文字)"})
+                    yield _sse({"type": "done", "actions": last_actions})
+                except Exception as e:
+                    yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
+                return
+            # 无 DSML — 直接把 content 当 single delta(失去 typing 但内容正确)
+            cleaned = re.sub(r"<think>.*?</think>\s*", "", stripped, flags=re.DOTALL).strip()
+            if cleaned:
+                yield _sse({"type": "delta", "text": cleaned})
+            elif last_actions:
+                names = ", ".join(a.get("name", "?") for a in last_actions)
+                yield _sse({"type": "delta", "text": f"(已执行 {names},模型未补充文字)"})
+            yield _sse({"type": "done", "actions": last_actions})
             return
 
         # tool round:非 stream
@@ -2092,7 +2223,36 @@ def _chat_stream_generator(client, active_model, messages, active_tools):
             asst_msg.pop("tool_calls", None)
         if asst_msg.get("content") is None:
             asst_msg["content"] = ""
+
+        # ── DSML fallback(同非 stream 路径)──
+        synth_calls = []
+        if not msg.tool_calls and asst_msg["content"]:
+            asst_msg["content"], synth_calls = _extract_synthetic_tool_calls(asst_msg["content"])
+            if synth_calls:
+                asst_msg["tool_calls"] = [{
+                    "id": c["id"], "type": "function",
+                    "function": {"name": c["name"],
+                                 "arguments": json.dumps(c["args"], ensure_ascii=False)},
+                } for c in synth_calls]
+
         messages.append(asst_msg)
+
+        if synth_calls:
+            for c in synth_calls:
+                try:
+                    result = TOOL_IMPL[c["name"]](c["args"])
+                except KeyError:
+                    result = {"error": f"unknown tool: {c['name']}"}
+                except Exception as e:
+                    result = {"error": str(e)}
+                last_actions.append({"name": c["name"], "args": c["args"], "result": result})
+                yield _sse({"type": "action", "name": c["name"], "args": c["args"], "result": result})
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": c["id"],
+                    "content": json.dumps(result, ensure_ascii=False),
+                })
+            continue  # 下一轮让 model 补 reply
 
         if not msg.tool_calls:
             # 模型不要 tool 了 — pop 出已收的 asst 消息,改用 stream=True 真流
@@ -2256,6 +2416,25 @@ def quit_gateway():
         os._exit(0)
     threading.Thread(target=_shutdown, daemon=True).start()
     return {"ok": True, "message": "gateway shutting down"}
+
+
+@app.post("/api/abort")
+def abort_worker():
+    """panic 按钮:worker hang 时强制重启。
+    实现细节:--reload 模式下 uvicorn parent 不会 respawn 崩溃的 worker
+    (只响应文件变化)。所以这里 touch 自己一下触发 file watcher,然后再 exit。
+    跟 /api/quit 区别:quit 干掉整个 server;abort 只杀当前 worker,几秒自愈。"""
+    server_file = Path(__file__)
+    def _kill():
+        import time as _t
+        _t.sleep(0.3)
+        # 1) touch 触发 uvicorn file watcher → 它会准备 spawn 新 worker
+        server_file.touch()
+        _t.sleep(0.2)
+        # 2) 再 exit 让当前(hung)worker 死掉,新 worker 接管
+        os._exit(1)
+    threading.Thread(target=_kill, daemon=True).start()
+    return {"ok": True, "message": "worker aborting; server will respawn in ~2s"}
 
 
 @app.get("/api/user-widgets")
