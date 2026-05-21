@@ -569,6 +569,13 @@
           } else if (data.type === "error") {
             removeProcessing();
             appendAction(`⚠ AI 错: ${data.text}`);
+            // PATTERN: chat — error-state placeholder
+            // USE WHEN: stream 中断,model 没出完文 → 下次 turn model 看不到"上次崩了"会失忆
+            // COPY THIS: 改 reason 字符串
+            // 占位也进 history,让 model 下次能看见上次 turn 的状态
+            const errMsg = { role: "assistant", content: `(上次回复出错: ${data.text} — 可重新问)` };
+            state.history.push(errMsg);
+            saveHistory();
           } else if (data.type === "done") {
             // 收尾 — streamingMsg 升级成正式消息(渲 markdown)进 history
             if (streamMsgEl && accumText) {
@@ -582,6 +589,11 @@
             }
             if (accumText) {
               state.history.push({ role: "assistant", content: accumText });
+              saveHistory();
+            } else if ((data.actions || []).length > 0) {
+              // 纯 tool 调用 + 0 文本 — 也进 history,model 下次知道上轮跑过 tool
+              const summary = `(上轮执行了 ${data.actions.map(a => a.name).join(", ")},未出文字)`;
+              state.history.push({ role: "assistant", content: summary });
               saveHistory();
             }
           }
@@ -597,6 +609,10 @@
         ? "90s 没新字 — 可能 server 卡 / 网慢 / API down。打开 /reset.html 重置或刷新重试。"
         : e.message;
       appendAction(`请求失败 · ${reason}`);
+      // 网络层 / abort 错误也进 history(同 error event 兜底)
+      const errMsg = { role: "assistant", content: `(请求失败: ${reason})` };
+      state.history.push(errMsg);
+      saveHistory();
     } finally {
       if (chunkTimer) clearTimeout(chunkTimer);
       removeProcessing();
