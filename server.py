@@ -2063,20 +2063,11 @@ async def chat(req: Request):
     active_model = get_model(profile)
     sys_prompt = build_system_prompt(context, model_id=active_model)
 
-    # split: 旧 + 最近 RECENT_KEEP 条原文
-    if len(cleaned_history) > RECENT_KEEP + SUMMARY_MIN_OLD:
-        old = cleaned_history[:-RECENT_KEEP]
-        recent = cleaned_history[-RECENT_KEEP:]
-        summary = _summarize_history(old, client, active_model)
-        if summary:
-            sys_prompt = (
-                f"{sys_prompt}\n\n=== Conversation summary (older context, "
-                f"{len(old)} messages compressed) ===\n{summary}"
-            )
-        else:
-            recent = cleaned_history  # 摘要失败 → fallback 全发,不丢消息
-    else:
-        recent = cleaned_history
+    # decision: chat 路径不再做 sliding-window 摘要(client MAX_HISTORY=100 已截)。
+    # DeepSeek prompt cache hit input ~$0.0036/M token,no-compress 全发用稳定 prefix
+    # 比 compress 重算 summary 便宜 ~17×。详细论证 see 5.21 21:18 实测命中率。
+    # _summarize_history fn 留着给 eval/board 路径用。
+    recent = cleaned_history
 
     messages = [{"role": "system", "content": sys_prompt}]
     for m in recent:
