@@ -356,7 +356,7 @@ def get_client(profile=None):
     return OpenAI(
         api_key=p["api_key"],
         base_url=p.get("base_url", "https://api.deepseek.com/v1"),
-        timeout=30.0,     # 单次 HTTP 最多 30s,防 worker hang 死(过去靠 SIGKILL 救场)
+        timeout=60.0,     # 单次 HTTP 最多 30s,防 worker hang 死(过去靠 SIGKILL 救场)
         max_retries=1,    # tool loop 已有重试,这里只兜一次
     )
 
@@ -428,6 +428,7 @@ def build_system_prompt(context: dict = None, model_id: str = None) -> str:
         "· 想到「这条值得记」「要不要存一笔」→ 一句话问「要记进 X 块吗?」,**别先写后通知**。\n"
         "· 写完别在 reply 里复述写了啥(「我已经把它记进 14:30 块了」是禁忌)— 一句话点过 + 继续话题。\n"
         "· 回复结尾不要给「建议你记下」「要不要我帮你 X」这种工单式收尾 — 用户讨厌。\n"
+        "· **web_search 最多调 2 次** — 搜超 2 次还不够就用已有信息凑活答 + 一句「再搜也是这些,要更深得自己看链接」。死循环 narrow 是最大坑。\n"
         "\n"
         "tools 是你的手。用它们像伸手取东西一样自然,不复述工具名 / 不解释步骤。"
     ]
@@ -1213,7 +1214,7 @@ def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
     base_url = cfg.get("dashscope_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 
     try:
-        client = OpenAI(api_key=key, base_url=base_url, timeout=30.0, max_retries=1)
+        client = OpenAI(api_key=key, base_url=base_url, timeout=60.0, max_retries=1)
         resp = client.chat.completions.create(
             model=model_id,
             messages=[{
@@ -1224,7 +1225,7 @@ def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
                 ],
             }],
             response_format={"type": "json_object"},
-            timeout=30.0,
+            timeout=60.0,
         )
     except Exception as e:
         return {"error": f"qwen vision call failed: {type(e).__name__}: {e}"}
