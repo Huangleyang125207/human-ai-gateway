@@ -770,13 +770,27 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "搜索互联网获取最新信息(post-training-cutoff 的事件、公司动态、政策、技术新闻等)。返结构化结果(标题+url+摘要)给你消化后再回复用户。",
+            "description": "渐进披露第一步:只返标题 + URL + ~80 char 摘要。**看完决定要不要 fetch_url 看正文,别只凭摘要答** — 摘要常没料。",
             "parameters": {
                 "type": "object",
                 "required": ["query"],
                 "properties": {
                     "query": {"type": "string", "description": "搜索关键词,中英文均可"},
                     "max_results": {"type": "integer", "description": "返回多少条(默认 5,上限 10)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_url",
+            "description": "渐进披露第二步:拉某 URL 正文(HTML stripped → text,最多 3000 char)。先 web_search 看标题再 fetch,别盲 fetch。同一 URL 不要 fetch 多次。",
+            "parameters": {
+                "type": "object",
+                "required": ["url"],
+                "properties": {
+                    "url": {"type": "string", "description": "完整 URL,带 http(s)://"},
                 },
             },
         },
@@ -1383,7 +1397,8 @@ def _do_web_search(query: str, max_results: int = 5) -> str:
         for r in results:
             title = r.get("title", "")
             href = r.get("href", "")
-            body = (r.get("body") or "")[:300]
+            # 短摘要(~80 char)— 只够判断要不要 fetch_url 进一步看
+            body = (r.get("body") or "")[:80]
             parts.append(f"- {title}\n  {href}\n  {body}")
         return "\n".join(parts)
     if last_err:
@@ -1397,6 +1412,47 @@ def tool_web_search(args):
         return {"error": "need query"}
     n = args.get("max_results", 5)
     return {"ok": True, "query": q, "results": _do_web_search(q, n)}
+
+
+# PATTERN: util — minimal HTML → text(no deps)
+# USE WHEN: 给 LLM 看网页正文,但不想拉 BeautifulSoup
+# COPY THIS: 调 strip 顺序 / 截断长度
+_HTML_SCRIPT_RE = re.compile(r"<script[^>]*>.*?</script>", re.DOTALL | re.IGNORECASE)
+_HTML_STYLE_RE  = re.compile(r"<style[^>]*>.*?</style>", re.DOTALL | re.IGNORECASE)
+_HTML_TAG_RE    = re.compile(r"<[^>]+>")
+_HTML_WS_RE     = re.compile(r"\s+")
+import html as _html_mod
+
+def _html_to_text(html: str) -> str:
+    s = _HTML_SCRIPT_RE.sub("", html)
+    s = _HTML_STYLE_RE.sub("", s)
+    s = _HTML_TAG_RE.sub(" ", s)
+    s = _html_mod.unescape(s)
+    s = _HTML_WS_RE.sub(" ", s).strip()
+    return s
+
+
+_FETCH_CAP = 3000  # 单次 fetch 最多塞 3000 char 进 messages
+
+def tool_fetch_url(args):
+    """拉某 URL 正文(HTML strip → text,truncate 到 _FETCH_CAP)。
+    渐进披露第二步:web_search 拿标题决定 fetch 哪条,再用这个工具看正文。
+    """
+    url = (args.get("url") or "").strip()
+    if not url or not url.startswith(("http://", "https://")):
+        return {"error": "need valid http(s):// URL"}
+    try:
+        r = requests.get(url, timeout=15,
+                         headers={"User-Agent": "Mozilla/5.0 (gateway-fetch)"})
+        r.raise_for_status()
+    except Exception as e:
+        return {"error": f"fetch failed: {type(e).__name__}: {str(e)[:200]}"}
+    text = _html_to_text(r.text)
+    truncated = False
+    if len(text) > _FETCH_CAP:
+        text = text[:_FETCH_CAP] + f"…(+{len(text)-_FETCH_CAP} chars omitted)"
+        truncated = True
+    return {"ok": True, "url": url, "text": text, "truncated": truncated}
 
 
 def tool_load_protocol(args):
@@ -1427,6 +1483,7 @@ TOOL_IMPL = {
     "delete_attachment":    tool_delete_attachment,
     "vision_classify":      tool_vision_classify,
     "web_search":           tool_web_search,
+    "fetch_url":            tool_fetch_url,
     "load_protocol":        tool_load_protocol,
 }
 
@@ -1454,7 +1511,7 @@ BOOTSTRAP_TOOL_NAMES = {
     # read-only / meta — 任意 chat 都该能用
     "read_today_schedule", "list_recent_days",
     "list_my_uploads", "search_my_uploads", "vision_classify",
-    "web_search", "load_protocol", "load_tool_group",
+    "web_search", "fetch_url", "load_protocol", "load_tool_group",
 }
 
 _INITIAL_LOAD_KEYWORDS = re.compile(
@@ -1484,6 +1541,7 @@ def _active_tools(loaded_groups: set) -> list:
 # 没在 dict 里的 tool = 无限(write/admin 类用户授权过的别卡)
 TOOL_QUOTA = {
     "web_search":          3,
+    "fetch_url":           5,   # 比 search 多 — 一次 search 可能 fetch 2-3 个有料的
     "read_today_schedule": 5,
     "list_recent_days":    2,
     "list_my_uploads":     2,
