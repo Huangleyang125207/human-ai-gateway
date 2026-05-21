@@ -3938,17 +3938,19 @@ async def eval_test(req: Request):
         raise HTTPException(503, "API client not configured")
     active_model = get_model(profile)
 
-    def _call_json(messages):
-        """同款 try/fallback 包装。返 (raw_text, parsed_or_none)。"""
-        try:
-            r = client.chat.completions.create(
-                model=active_model,
-                messages=messages,
-                response_format={"type": "json_object"},
-            )
-        except Exception as e:
-            log.info(f"eval json_object 失败 ({e}), 重试无 response_format")
-            r = client.chat.completions.create(model=active_model, messages=messages)
+    async def _call_json(messages):
+        """同款 try/fallback 包装。返 (raw_text, parsed_or_none)。
+        sync OpenAI 调用丢 threadpool 防阻塞 event loop(详 /api/eval/run 处注释)。"""
+        def _blocking():
+            try:
+                return client.chat.completions.create(
+                    model=active_model, messages=messages,
+                    response_format={"type": "json_object"},
+                )
+            except Exception as e:
+                log.info(f"eval json_object 失败 ({e}), 重试无 response_format")
+                return client.chat.completions.create(model=active_model, messages=messages)
+        r = await asyncio.to_thread(_blocking)
         text = (r.choices[0].message.content or "").strip()
         # 容忍 <think>...</think> 和 ```json fence
         cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
@@ -3960,10 +3962,10 @@ async def eval_test(req: Request):
             return text, None
 
     # call 1: 主 eval
-    eval_raw, eval_parsed = _call_json(_eval_build_messages(target, model_id=active_model))
+    eval_raw, eval_parsed = await _call_json(_eval_build_messages(target, model_id=active_model))
 
     # call 2: feature_intro 单独
-    fi_raw, fi_parsed = _call_json(_eval_build_feature_intro_messages(target))
+    fi_raw, fi_parsed = await _call_json(_eval_build_feature_intro_messages(target))
 
     # merge: eval_parsed 加 feature_intro 字段
     merged = dict(eval_parsed) if eval_parsed else {}
@@ -4096,14 +4098,18 @@ async def eval_run(req: Request):
         raise HTTPException(503, "API client not configured")
     active_model = get_model(profile)
 
-    def _call_json(messages):
-        try:
-            r = client.chat.completions.create(
-                model=active_model, messages=messages,
-                response_format={"type": "json_object"})
-        except Exception as e:
-            log.info(f"json_object failed ({e}), fallback")
-            r = client.chat.completions.create(model=active_model, messages=messages)
+    async def _call_json(messages):
+        # OpenAI SDK 是 sync 的,直接调会阻塞 event loop —— 21:30 eval 跑的时候
+        # 整个 server 60-120s 失联(包括 chat endpoint),就是这个锅。丢 threadpool。
+        def _blocking():
+            try:
+                return client.chat.completions.create(
+                    model=active_model, messages=messages,
+                    response_format={"type": "json_object"})
+            except Exception as e:
+                log.info(f"json_object failed ({e}), fallback")
+                return client.chat.completions.create(model=active_model, messages=messages)
+        r = await asyncio.to_thread(_blocking)
         text = (r.choices[0].message.content or "").strip()
         cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
         cleaned = re.sub(r"^```(json)?\s*", "", cleaned).strip()
@@ -4113,8 +4119,8 @@ async def eval_run(req: Request):
         except Exception:
             return text, None
 
-    eval_raw, eval_parsed = _call_json(_eval_build_messages(target, model_id=active_model))
-    fi_raw, fi_parsed = _call_json(_eval_build_feature_intro_messages(target))
+    eval_raw, eval_parsed = await _call_json(_eval_build_messages(target, model_id=active_model))
+    fi_raw, fi_parsed = await _call_json(_eval_build_feature_intro_messages(target))
 
     merged = dict(eval_parsed) if eval_parsed else {}
     if fi_parsed and "feature_intro" in fi_parsed:
