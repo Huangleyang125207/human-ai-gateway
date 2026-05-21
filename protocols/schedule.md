@@ -5,6 +5,12 @@
 
 ---
 
+## 0. 输出环境
+
+你写的内容**落进 Obsidian markdown vault**(`半小时复盘/*.md`,Obsidian 桌面 + gateway 网页双端 render)。Obsidian vault 是 vault 不是聊天框 — 该用 markdown / wiki-link 语法的地方就用,别写成 plain text。文件名规则带「第N天」(如 `26.5.11(第九天)`),H1 全角冒号(`# 10：30`)。
+
+---
+
 ## 1. 时间块定位（最高优先级）
 
 每条 user message 头部会被 gateway 注入一行：
