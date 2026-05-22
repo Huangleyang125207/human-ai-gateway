@@ -2533,6 +2533,17 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
 # ── journal parser ───────────────────────────────────────────────────
 TIME_H1_RE = re.compile(r'^# (\d{1,2})[：:](\d{2})\s*$')
 
+# PATTERN: util — authorship boundary marker parse
+# USE WHEN: any tool that patches existing H2 needs to check who owns it
+# COPY THIS: marker syntax is `@user` / `@ai`(行内任何位置都认)
+_AUTHOR_RE = re.compile(r"@(user|ai)\b")
+
+def _check_author(h2_line: str) -> str:
+    """parse '## #tag title @user' → 'user' / 'ai'。
+    无 marker → 'user'(失败安全:旧 entry 默认受保护,AI 不能改)。"""
+    m = _AUTHOR_RE.search(h2_line or "")
+    return m.group(1) if m else "user"
+
 def find_today_journal(today=None):
     today = today or datetime.now()
     # filename pattern: 26.5.12(第十天).md  → prefix 26.5.12
@@ -5056,12 +5067,15 @@ async def journal_insert_block(req: Request):
     return result
 
 
-def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "") -> dict:
+def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "", author: str = "ai") -> dict:
     """加新条目。
     - 块不存在 → 新建 H1 + 一个 ## #tag title 的 H2
     - 块已存在 → append 新的 H2 到该块下(同时间多条目)
     tag/title 都可空,空时落 "## #新" 占位让 parser 不过滤(模板裸 ## 会被过滤)
     Time can be HH:MM (half-width) or HH：MM (full-width). Stored as full-width.
+
+    author='ai' (默认) 或 'user',新 H2 末尾 stamp @{author}。owner 决定后续 patch
+    权限(详 _patch_block authorship boundary)。
     """
     m = re.fullmatch(r'\s*(\d{1,2})\s*[：:]\s*(\d{2})\s*', time_str)
     if not m:
@@ -5074,9 +5088,9 @@ def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "") -> dic
     text = f.read_text(encoding="utf-8")
     lines = text.splitlines()
 
-    # 拼新 H2: tag 优先,兜底 #新
+    # 拼新 H2: tag 优先,兜底 #新;末尾 stamp @author 给 authorship boundary 用
     tag_clean = tag.strip().lstrip("#") or "新"
-    h2_line = f"## #{tag_clean}" + (f" {title.strip()}" if title.strip() else "")
+    h2_line = f"## #{tag_clean}" + (f" {title.strip()}" if title.strip() else "") + f" @{author}"
 
     # 找现有同时间块 + 找按时序插入位置
     existing_h1_idx = None
@@ -5308,9 +5322,12 @@ async def journal_patch(req: Request):
         raise HTTPException(404, f"no journal file for {date_arg or 'today'}")
     return _patch_block(f, time_label, new_block_md)
 
-def _patch_block(f: Path, time_label: str, new_md: str) -> dict:
+def _patch_block(f: Path, time_label: str, new_md: str, author: str = "ai") -> dict:
     """Replace the body between `# {time}` and the next `# H1` or `---` boundary.
     new_md should NOT include the H1 line itself — only what comes after it.
+
+    author='ai' (默认,最严格) — 撞 @user 块拒绝。author='user' 可改任何块。
+    @marker 解析:看时间块内第一个 H2 行的 @user/@ai。无 marker → @user(失败安全)。
     """
     text = f.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -5333,9 +5350,54 @@ def _patch_block(f: Path, time_label: str, new_md: str) -> dict:
             end = j
             break
 
+    # authorship boundary:扫块内首条 H2,看 owner。AI 调不能改 @user 块。
+    if author != "user":
+        for k in range(start + 1, end):
+            if lines[k].startswith("## "):
+                owner = _check_author(lines[k])
+                if owner == "user":
+                    return {"error": f"block @ {time_label} 是 @user 所有,AI 不能 patch。"
+                                     f"想加评论用 append_journal_comment;想新加 entry 用 insert_journal_block。"}
+                break  # 只看第一个 H2
+
     new_lines = lines[:start + 1] + [""] + new_md.rstrip().splitlines() + [""] + lines[end:]
     f.write_text("\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
     return {"patched": time_label, "file": _pretty_rel(f)}
+
+
+# PATTERN: util — append-only journal comment (authorship boundary 安全旁路)
+# USE WHEN: AI 想给 @user 块留评论但不能动原文 — append 到 body 末尾
+# COPY THIS: 改 prefix 标记(默认 *AI:* 给 user 看出来是 AI 加的)
+def _append_comment_to_block(f: Path, time_label: str, comment_md: str) -> dict:
+    """在指定时间块 body 末尾 append 一段 comment。**不修改原 H2 / 原 body**。
+    给 @user 块写"穿线 / 回看 / AI 注"用 — _patch_block 拒绝 @user 时的合法替代路径。
+    """
+    text = f.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    h, m = time_label.split(":")
+    re_h1 = re.compile(rf'^# {int(h)}[：:]{m}\s*$')
+
+    start = None
+    for i, ln in enumerate(lines):
+        if re_h1.match(ln):
+            start = i
+            break
+    if start is None:
+        return {"error": f"time block # {time_label} not found in {f.name}"}
+
+    # 找块结束:next H1 / `---`
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if TIME_H1_RE.match(lines[j]) or lines[j].strip() == "---":
+            end = j
+            break
+
+    # 在 end 之前插入 comment(保留原 body)。前留个空行让 markdown 段落分开。
+    comment_lines = comment_md.rstrip().splitlines()
+    new_lines = lines[:end] + [""] + comment_lines + [""] + lines[end:]
+    f.write_text("\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
+    return {"appended": time_label, "file": _pretty_rel(f)}
+
 
 # ── vault config (Obsidian-style 选址) ──────────────────────────────
 @app.get("/api/vault")
