@@ -9,6 +9,17 @@
 
 你写的内容**落进 Obsidian markdown vault**(`半小时复盘/*.md`,Obsidian 桌面 + gateway 网页双端 render)。Obsidian vault 是 vault 不是聊天框 — 该用 markdown / wiki-link 语法的地方就用,别写成 plain text。文件名规则带「第N天」(如 `26.5.11(第九天)`),H1 全角冒号(`# 10：30`)。
 
+### Authorship boundary(硬合同,出过事故就这一条)
+
+每个 H2 末尾带 `@user` 或 `@ai` 标记 owner。**AI 写型工具的硬规则**:
+
+- `patch_journal_block` 只能改 `@ai` 块。撞 `@user` 块 server 会 fail-closed 拒绝。
+- `insert_journal_block` 写新 H2,自动 stamp `@ai`(无需你手动加)。
+- 想给 `@user` 块留评论 / 穿线 / 回看?**用 `append_journal_comment`** — 它只在 body 末尾 append,**不动原文**。建议评论加 `*AI:*` 或 `>` callout 前缀让人区分。
+- 无 marker 的旧 entry → 默认按 `@user` 处理(失败安全,你不能改)。
+
+简言之:**人手输入永远不可被你覆盖,只能被你 append 评论**。
+
 ---
 
 ## 1. 时间块定位（最高优先级）

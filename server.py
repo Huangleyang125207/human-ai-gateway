@@ -594,7 +594,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "insert_journal_block",
-            "description": "在 schedule 加新 H2 条目。tag 必填;time 不填默认当前半小时(server 兜底);time 已有内容会 append。",
+            "description": "在 schedule 加新 H2 条目(AI 写的会自动 stamp @ai,不冲撞 @user 块)。tag 必填;time 不填默认当前半小时;time 已有内容会 append 新 H2。",
             "parameters": {
                 "type": "object",
                 "required": ["tag"],
@@ -602,6 +602,22 @@ TOOLS = [
                     "tag": {"type": "string", "description": "条目 tag,不带 #。例 '饮食' '工作' '探索'"},
                     "title": {"type": "string", "description": "可选标题(短)。例 '吃了肠粉'"},
                     "time": {"type": "string", "description": "HH:MM。omit 默认用当前半小时(server 兜底)。可任意 0:00-23:59,不必整 30 分"},
+                    "date": {"type": "string", "description": "optional YYYY-MM-DD,omit for today"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "append_journal_comment",
+            "description": "在已存在的时间块 body **末尾 append** 一段评论,**不修改原 H2/原内容**。撞 @user 块时 patch_journal_block 会拒,用这个留'穿线/回看/AI 注'。",
+            "parameters": {
+                "type": "object",
+                "required": ["time", "comment_md"],
+                "properties": {
+                    "time": {"type": "string", "description": "目标时间块 HH:MM"},
+                    "comment_md": {"type": "string", "description": "评论 markdown。建议带 *AI:* 或 callout 前缀让人区分"},
                     "date": {"type": "string", "description": "optional YYYY-MM-DD,omit for today"},
                 },
             },
@@ -869,7 +885,7 @@ def tool_patch_journal_block(args):
     f = find_today_journal()
     if not f:
         return {"error": "no journal file for today"}
-    return _patch_block(f, args["time"], args["new_md"])
+    return _patch_block(f, args["time"], args["new_md"], author="ai")
 
 def tool_read_today_schedule(args):
     return _journal_for_date(args.get("date"))
@@ -898,7 +914,31 @@ def tool_insert_journal_block(args):
         f = find_today_journal()
     if not f:
         return {"error": "no journal file for that date"}
-    return _insert_block(f, time_str, tag=tag, title=title)
+    return _insert_block(f, time_str, tag=tag, title=title, author="ai")
+
+
+def tool_append_journal_comment(args):
+    """append-only AI 评论:在指定时间块 body 末尾 append 一段,**不动原 H2 / 原 body**。
+    撞 @user 块时 patch_journal_block 会拒绝 → 用这个工具留评论"穿线/回看/AI 注"。"""
+    date_arg = (args.get("date") or "").strip()
+    time_str = (args.get("time") or "").strip()
+    comment = (args.get("comment_md") or "").strip()
+    if not time_str:
+        return {"error": "need time HH:MM"}
+    if not comment:
+        return {"error": "need comment_md"}
+    if date_arg:
+        try:
+            target = datetime.strptime(date_arg, "%Y-%m-%d")
+        except ValueError:
+            return {"error": f"bad date: {date_arg}"}
+        f = find_today_journal(target)
+    else:
+        f = find_today_journal()
+    if not f:
+        return {"error": "no journal file for that date"}
+    return _append_comment_to_block(f, time_str, comment)
+
 
 def tool_check_daily_task(args):
     """直接调 daily_task_check 内部逻辑(不走 HTTP)"""
@@ -1472,6 +1512,7 @@ TOOL_IMPL = {
     "read_today_schedule":  tool_read_today_schedule,
     "list_recent_days":     tool_list_recent_days,
     "insert_journal_block": tool_insert_journal_block,
+    "append_journal_comment": tool_append_journal_comment,
     "manage_daily_task":    tool_manage_daily_task,
     "check_daily_task":     tool_check_daily_task,
     "set_daily_task_image": tool_set_daily_task_image,
@@ -1495,7 +1536,7 @@ TOOL_IMPL = {
 # "记一下"→write_journal),(b) model 主动调 load_tool_group(name)。
 TOOL_GROUPS = {
     "write_journal": [
-        "patch_journal_block", "insert_journal_block", "check_daily_task",
+        "patch_journal_block", "insert_journal_block", "append_journal_comment", "check_daily_task",
     ],
     "images": [
         "place_scrapbook_image", "delete_attachment",
@@ -1542,6 +1583,7 @@ def _active_tools(loaded_groups: set) -> list:
 TOOL_QUOTA = {
     "web_search":          3,
     "fetch_url":           5,   # 比 search 多 — 一次 search 可能 fetch 2-3 个有料的
+    "append_journal_comment": 5,  # 留评论本来就该克制,5 次/turn 够了
     "read_today_schedule": 5,
     "list_recent_days":    2,
     "list_my_uploads":     2,
@@ -5061,7 +5103,8 @@ async def journal_insert_block(req: Request):
     if not f:
         raise HTTPException(404, "no journal file for that date")
 
-    result = _insert_block(f, time_str, tag=tag, title=title)
+    # HTTP endpoint = user 自己点 UI 加 entry → 标 @user(authorship boundary 用)
+    result = _insert_block(f, time_str, tag=tag, title=title, author="user")
     if "error" in result:
         return JSONResponse(status_code=400, content=result)
     return result
@@ -5320,7 +5363,8 @@ async def journal_patch(req: Request):
         f = find_today_journal()
     if not f:
         raise HTTPException(404, f"no journal file for {date_arg or 'today'}")
-    return _patch_block(f, time_label, new_block_md)
+    # HTTP endpoint = user 自己改 UI → author='user' 可改任何块(含 @ai)
+    return _patch_block(f, time_label, new_block_md, author="user")
 
 def _patch_block(f: Path, time_label: str, new_md: str, author: str = "ai") -> dict:
     """Replace the body between `# {time}` and the next `# H1` or `---` boundary.
