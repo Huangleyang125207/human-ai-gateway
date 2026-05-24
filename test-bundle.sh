@@ -172,6 +172,24 @@ else
   FAIL=$((FAIL+1))
 fi
 
+# history.html 页面 200(static asset 真打进 _MEIPASS)
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$TEST_PORT/history.html")
+if [ "$HTTP" = "200" ]; then
+  echo "  ${GREEN}✓${RESET} GET /history.html → 200(asset 在 bundle 里)"
+  PASS=$((PASS+1))
+else
+  echo "  ${RED}✗${RESET} GET /history.html → $HTTP(asset 没打进 bundle?)"
+  FAIL=$((FAIL+1))
+fi
+
+# /api/history/stats(vault 没 git 时返 error JSON,但 200)
+R=$(curl -s "http://127.0.0.1:$TEST_PORT/api/history/stats")
+check "/api/history/stats 返 JSON" "$R" '"(error|total)"'
+
+# /api/history/recent(同上)
+R=$(curl -s "http://127.0.0.1:$TEST_PORT/api/history/recent?limit=5")
+check "/api/history/recent 返 JSON" "$R" '"(error|commits)"'
+
 # ── 3. 结果 ────────────────────────────────────────
 echo
 echo "════════════════════════════════════════════"
