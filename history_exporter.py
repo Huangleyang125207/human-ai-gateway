@@ -61,6 +61,14 @@ DEFAULT_APP_STATE = _app_state_dir()
 DEFAULT_THREAD_HISTORY = DEFAULT_APP_STATE / "data" / "thread-history.json"
 DEFAULT_OUT_DIR = DEFAULT_APP_STATE / "data" / "history-exports"
 DEFAULT_OUTCOMES = DEFAULT_APP_STATE / "data" / "outcomes.json"
+DEFAULT_PULSE_DIR = DEFAULT_APP_STATE / "pulse-mirror"
+DEFAULT_OUTCOMES_PULSE = DEFAULT_APP_STATE / "data" / "outcomes-pulse.json"
+# 多 repo:每个 repo 一个 (source_name, path, outcomes_path)。
+# source_name 进 jsonl row 的 source 字段,前端 UI 用作 badge 区分。
+DEFAULT_REPOS = [
+    ("vault", DEFAULT_VAULT, DEFAULT_OUTCOMES),
+    ("pulse", DEFAULT_PULSE_DIR, DEFAULT_OUTCOMES_PULSE),
+]
 
 # ── git 操作 ──────────────────────────────────────────────────────
 
@@ -208,7 +216,7 @@ DIFF_CAP = 4000  # jsonl 单行 diff 截到 4k,full diff 想要再去 git show
 
 
 def commit_to_row(vault: Path, commit: dict, thread: list[dict],
-                  outcomes: dict | None = None) -> dict:
+                  outcomes: dict | None = None, source: str = "vault") -> dict:
     detail = commit_detail(vault, commit["hash"])
     author = parse_author(commit["subject"])
     tags = extract_tags_from_diff(detail["diff"])
@@ -219,6 +227,7 @@ def commit_to_row(vault: Path, commit: dict, thread: list[dict],
 
     row = {
         "commit": commit["hash"],
+        "source": source,  # "vault" | "pulse" — 前端 badge 用
         "ts": commit["ts"],
         "author": author,
         "action": strip_action_trailer(commit["subject"]),
@@ -245,51 +254,65 @@ def export(vault: Path = DEFAULT_VAULT,
            thread_path: Path = DEFAULT_THREAD_HISTORY,
            out_dir: Path = DEFAULT_OUT_DIR,
            since: str | None = None,
-           outcomes_path: Path = DEFAULT_OUTCOMES) -> dict:
-    """主入口。返 {commits, tags, authors, out_dir} 统计。
-    outcomes_path: 若存在则给每行附 outcome 字段(由 outcome_tracker.py 产生)。
+           outcomes_path: Path = DEFAULT_OUTCOMES,
+           repos: list | None = None) -> dict:
+    """主入口。返 {commits, tags, authors, sources, out_dir} 统计。
+
+    repos: list[(source_name, vault_path, outcomes_path)] — 多 repo 时用。
+           默认 None → 仅扫单 vault(向后兼容)。传 DEFAULT_REPOS 扫 vault + pulse。
     """
-    if not vault.exists():
-        return {"error": f"vault not found: {vault}"}
-    if not _is_repo(vault):
-        return {"error": f"vault is not a git repo: {vault} — run server first to ensure_repo"}
+    # 兼容路径:若没传 repos 用单 vault 模式
+    if repos is None:
+        repos = [("vault", vault, outcomes_path)]
+
+    # 任一 repo 不可用就 skip 该 repo,但其他 repo 继续
+    usable_repos = []
+    for src_name, vpath, opath in repos:
+        if not vpath.exists() or not _is_repo(vpath):
+            continue
+        usable_repos.append((src_name, vpath, opath))
+    if not usable_repos:
+        return {"error": f"no usable git repos in {[str(r[1]) for r in repos]}"}
 
     thread = load_thread(thread_path)
-    commits = list_commits(vault, since=since)
-    if not commits:
-        return {"commits": 0, "tags": [], "authors": [], "out_dir": str(out_dir)}
-
-    # Z outcome 数据(可选 — 没就 None)
-    outcomes_map = {}
-    if outcomes_path and outcomes_path.exists():
-        try:
-            outcomes_map = json.loads(outcomes_path.read_text(encoding="utf-8")).get("outcomes", {})
-        except Exception:
-            outcomes_map = {}
 
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "by-tag").mkdir(exist_ok=True)
     (out_dir / "by-author").mkdir(exist_ok=True)
+    (out_dir / "by-source").mkdir(exist_ok=True)  # 新:按 source 分桶,training 时 filter 用
 
     all_path = out_dir / "all.jsonl"
     by_tag_handles: dict[str, list[str]] = {}
     by_author_handles: dict[str, list[str]] = {}
+    by_source_handles: dict[str, list[str]] = {}
 
-    rows = []
-    for c in commits:
-        row = commit_to_row(vault, c, thread, outcomes=outcomes_map)
-        rows.append(row)
-        line = json.dumps(row, ensure_ascii=False)
-        # baseline / bulk-import commits 不进 by-tag / by-author 索引:
-        # 它们的 tags 是历史快照而非"这次写了什么",会污染训练数据
-        is_bulk = row["action"].startswith("baseline:") or len(row["tags"]) > 20
-        if is_bulk:
-            continue
-        for tag in row["tags"]:
-            by_tag_handles.setdefault(tag, []).append(line)
-        by_author_handles.setdefault(row["author"], []).append(line)
+    all_rows = []
+    per_source_count = {}
+    for src_name, vpath, opath in usable_repos:
+        commits = list_commits(vpath, since=since)
+        outcomes_map = {}
+        if opath and opath.exists():
+            try:
+                outcomes_map = json.loads(opath.read_text(encoding="utf-8")).get("outcomes", {})
+            except Exception:
+                outcomes_map = {}
+        per_source_count[src_name] = len(commits)
+        for c in commits:
+            row = commit_to_row(vpath, c, thread, outcomes=outcomes_map, source=src_name)
+            all_rows.append(row)
+            line = json.dumps(row, ensure_ascii=False)
+            by_source_handles.setdefault(src_name, []).append(line)
+            # baseline / bulk-import 不进 tag/author 索引(避免污染)
+            is_bulk = row["action"].startswith("baseline:") or len(row["tags"]) > 20
+            if is_bulk:
+                continue
+            for tag in row["tags"]:
+                by_tag_handles.setdefault(tag, []).append(line)
+            by_author_handles.setdefault(row["author"], []).append(line)
 
-    all_path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+    # 按 ts 排序所有 rows(跨 repo 时间线交织)
+    all_rows.sort(key=lambda r: r.get("ts") or "")
+    all_path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in all_rows) + "\n",
                         encoding="utf-8")
     for tag, lines in by_tag_handles.items():
         # sub-tag `配置系统/ctrl-c-v` 不能直接当 filename — 把 / 替成 _
@@ -298,13 +321,16 @@ def export(vault: Path = DEFAULT_VAULT,
             "\n".join(lines) + "\n", encoding="utf-8")
     for author, lines in by_author_handles.items():
         (out_dir / "by-author" / f"{author}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    for src, lines in by_source_handles.items():
+        (out_dir / "by-source" / f"{src}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     return {
-        "commits": len(rows),
+        "commits": len(all_rows),
+        "per_source": per_source_count,
         "tags": sorted(by_tag_handles.keys()),
         "authors": sorted(by_author_handles.keys()),
+        "sources": sorted(by_source_handles.keys()),
         "out_dir": str(out_dir),
-        "vault": str(vault),
         "thread_msgs": len(thread),
     }
 

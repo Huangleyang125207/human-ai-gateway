@@ -3653,87 +3653,117 @@ def vault_repair():
 import history_exporter as _he
 import outcome_tracker as _ot
 
+def _active_repos():
+    """返当前可用 repo 列表 [(source, path, outcomes_path), ...]。"""
+    pulse_dir = APP_STATE_DIR / "pulse-mirror"
+    out = []
+    if (VAULT_DIR / ".git").exists():
+        out.append(("vault", VAULT_DIR, DATA_DIR / "outcomes.json"))
+    if pulse_dir.exists() and (pulse_dir / ".git").exists():
+        out.append(("pulse", pulse_dir, DATA_DIR / "outcomes-pulse.json"))
+    return out
+
+
 @app.get("/api/history/stats")
 def history_stats():
-    """count + by_author + by_class + by_day(最近 30 天)。"""
+    """count + by_author + by_class + by_day(最近 30 天)+ by_source。"""
     from collections import Counter
-    if not (VAULT_DIR / ".git").exists():
-        return {"error": "vault not a git repo"}
-    commits = _he.list_commits(VAULT_DIR)
-    outcomes_map = _ot.load_outcomes().get("outcomes", {})
-    by_author, by_class, by_day = Counter(), Counter(), Counter()
-    for c in commits:
-        author = _he.parse_author(c["subject"])
-        by_author[author] += 1
-        day = c["ts"][:10]
-        by_day[day] += 1
-        o = outcomes_map.get(c["hash"])
-        if o:
-            by_class[o.get("outcome_class") or "unknown"] += 1
+    repos = _active_repos()
+    if not repos:
+        return {"error": "no git repos available"}
+    by_author, by_class, by_day, by_source = Counter(), Counter(), Counter(), Counter()
+    total = 0
+    outcomes_computed_any = False
+    for src, vpath, opath in repos:
+        commits = _he.list_commits(vpath)
+        outcomes_map = _ot.load_outcomes(opath).get("outcomes", {})
+        if outcomes_map:
+            outcomes_computed_any = True
+        for c in commits:
+            total += 1
+            by_source[src] += 1
+            by_author[_he.parse_author(c["subject"])] += 1
+            by_day[c["ts"][:10]] += 1
+            o = outcomes_map.get(c["hash"])
+            if o:
+                by_class[o.get("outcome_class") or "unknown"] += 1
     return {
-        "total": len(commits),
+        "total": total,
+        "by_source": dict(by_source),
         "by_author": dict(by_author),
         "by_class": dict(by_class),
         "by_day": dict(sorted(by_day.items())[-30:]),
-        "outcomes_computed": bool(outcomes_map),
+        "outcomes_computed": outcomes_computed_any,
     }
 
 
 @app.get("/api/history/recent")
 def history_recent(limit: int = 50):
-    """最近 N commits 的 brief(不带 diff body,前端列表用)。"""
-    if not (VAULT_DIR / ".git").exists():
-        return {"error": "vault not a git repo"}
-    commits = _he.list_commits(VAULT_DIR)
-    outcomes_map = _ot.load_outcomes().get("outcomes", {})
-    # 新在前(commits 是老到新)
-    commits = list(reversed(commits))[: max(1, min(limit, 500))]
-    rows = []
-    for c in commits:
-        author = _he.parse_author(c["subject"])
-        o = outcomes_map.get(c["hash"], {})
-        rows.append({
-            "commit": c["hash"][:12],
-            "full_hash": c["hash"],
-            "ts": c["ts"],
-            "author": author,
-            "action": _he.strip_action_trailer(c["subject"]),
-            "outcome_class": o.get("outcome_class"),
-            "later_touch_count": o.get("later_touch_count", 0),
-        })
-    return {"commits": rows, "limit": limit}
+    """最近 N commits brief。跨 repo 按 ts 排序,前端列表用。"""
+    repos = _active_repos()
+    if not repos:
+        return {"error": "no git repos available"}
+    all_brief = []
+    for src, vpath, opath in repos:
+        commits = _he.list_commits(vpath)
+        outcomes_map = _ot.load_outcomes(opath).get("outcomes", {})
+        for c in commits:
+            o = outcomes_map.get(c["hash"], {})
+            all_brief.append({
+                "commit": c["hash"][:12],
+                "full_hash": c["hash"],
+                "source": src,
+                "ts": c["ts"],
+                "author": _he.parse_author(c["subject"]),
+                "action": _he.strip_action_trailer(c["subject"]),
+                "outcome_class": o.get("outcome_class"),
+                "later_touch_count": o.get("later_touch_count", 0),
+            })
+    # ts 倒序(新在前)
+    all_brief.sort(key=lambda r: r["ts"] or "", reverse=True)
+    return {"commits": all_brief[: max(1, min(limit, 500))], "limit": limit}
 
 
 @app.get("/api/history/commit/{commit_hash}")
 def history_commit(commit_hash: str):
-    """单 commit 的完整信息(diff + outcome + 时间窗 join 的 chat context)。"""
-    if not (VAULT_DIR / ".git").exists():
-        return {"error": "vault not a git repo"}
-    # commit 元
-    detail = _he.commit_detail(VAULT_DIR, commit_hash)
-    if not detail["files"] and not detail["diff"]:
-        return {"error": f"commit not found: {commit_hash}"}
-    # ts + subject from log -1
-    info = _he._run_git(["log", "-1", "--format=%aI%x09%s", commit_hash], VAULT_DIR)
-    parts = info.strip().split("\t", 1)
-    ts = parts[0] if parts else ""
-    subject = parts[1] if len(parts) > 1 else ""
-    thread = _he.load_thread(_he.DEFAULT_THREAD_HISTORY)
-    outcomes_map = _ot.load_outcomes().get("outcomes", {})
-    row = _he.commit_to_row(VAULT_DIR, {"hash": commit_hash, "ts": ts, "subject": subject},
-                            thread, outcomes=outcomes_map)
-    return row
+    """单 commit 完整(跨 repo 查找)。"""
+    repos = _active_repos()
+    if not repos:
+        return {"error": "no git repos available"}
+    for src, vpath, opath in repos:
+        detail = _he.commit_detail(vpath, commit_hash)
+        if detail["files"] or detail["diff"]:
+            info = _he._run_git(["log", "-1", "--format=%aI%x09%s", commit_hash], vpath)
+            parts = info.strip().split("\t", 1)
+            ts = parts[0] if parts else ""
+            subject = parts[1] if len(parts) > 1 else ""
+            thread = _he.load_thread(_he.DEFAULT_THREAD_HISTORY)
+            outcomes_map = _ot.load_outcomes(opath).get("outcomes", {})
+            return _he.commit_to_row(vpath, {"hash": commit_hash, "ts": ts, "subject": subject},
+                                     thread, outcomes=outcomes_map, source=src)
+    return {"error": f"commit not found in any repo: {commit_hash}"}
 
 
 @app.post("/api/history/rebuild")
 def history_rebuild():
-    """重新跑 outcome_tracker + history_exporter,刷新 jsonl 输出。"""
-    if not (VAULT_DIR / ".git").exists():
-        return {"error": "vault not a git repo"}
-    data = _ot.compute_all(VAULT_DIR)
-    _ot.save_outcomes(data)
-    r = _he.export(vault=VAULT_DIR)
-    return {"outcomes_count": data["count"], "export": r}
+    """重新跑 outcome_tracker(每个 repo 各一份)+ history_exporter(multi-repo)。"""
+    repos = []
+    pulse_dir = APP_STATE_DIR / "pulse-mirror"
+    if (VAULT_DIR / ".git").exists():
+        repos.append(("vault", VAULT_DIR, DATA_DIR / "outcomes.json"))
+    if pulse_dir.exists() and (pulse_dir / ".git").exists():
+        repos.append(("pulse", pulse_dir, DATA_DIR / "outcomes-pulse.json"))
+    if not repos:
+        return {"error": "no git repos found (run /api/pulse/refresh-mirror first?)"}
+
+    outcome_counts = {}
+    for src, vpath, opath in repos:
+        data = _ot.compute_all(vpath)
+        _ot.save_outcomes(data, opath)
+        outcome_counts[src] = data["count"]
+
+    r = _he.export(repos=repos)
+    return {"outcomes_counts": outcome_counts, "export": r}
 
 
 # 启动时跑一次老路径 → APP_STATE_DIR 迁移
@@ -3772,12 +3802,22 @@ def _startup_vault_audit():
 
 @app.on_event("startup")
 def _startup_vault_git_init():
-    """vault 写入自动版本史 — 首次启动 init repo + .gitignore + baseline."""
+    """vault 写入自动版本史 — 首次启动 init repo + .gitignore + baseline。
+    pulse-mirror 也装独立 git(PULSE updates 进 training corpus 用)。"""
     try:
         status = vault_git.ensure_repo(VAULT_DIR)
-        log.info(f"[vault_git] ensure_repo: {status} at {VAULT_DIR}")
+        log.info(f"[vault_git] vault ensure_repo: {status} at {VAULT_DIR}")
     except Exception as e:
-        log.warning(f"[vault_git] ensure_repo failed: {type(e).__name__}: {e}")
+        log.warning(f"[vault_git] vault ensure_repo failed: {type(e).__name__}: {e}")
+    try:
+        # PULSE_DIR 在 line 3929 定义,这里 startup 时还没加载到 — 用全局解析
+        from pathlib import Path as _P
+        _pulse = APP_STATE_DIR / "pulse-mirror"
+        if _pulse.exists():
+            status = vault_git.ensure_repo(_pulse)
+            log.info(f"[vault_git] pulse-mirror ensure_repo: {status} at {_pulse}")
+    except Exception as e:
+        log.warning(f"[vault_git] pulse ensure_repo failed: {type(e).__name__}: {e}")
 
 
 # ── chat thread history(server-side 持久化,跨浏览器/跨设备同步源)──
@@ -4557,6 +4597,60 @@ def pulse_detail(name: str):
     if not f.exists():
         raise HTTPException(404, f"PULSE for '{name}' not found")
     return {"name": name, "markdown": f.read_text(encoding="utf-8")}
+
+
+@app.post("/api/pulse/refresh-mirror")
+def pulse_refresh_mirror():
+    """从真源 PULSE.md 同步到 pulse-mirror,变化的 file 自动 git commit。
+    源路径:扫常见位置(可后续做 config)。
+      - ~/agents创作平台/PULSE.md → INDEX 候选(若有)
+      - ~/agents创作平台/agents/*/PULSE.md → 各 project 一个
+    """
+    import shutil
+    sources = []
+    candidates = [
+        Path.home() / "agents创作平台",
+    ]
+    for root in candidates:
+        if not root.exists():
+            continue
+        # 项目级 PULSE
+        agents_dir = root / "agents"
+        if agents_dir.exists():
+            for p in agents_dir.glob("*/PULSE.md"):
+                sources.append((p.parent.name, p))
+        # monorepo 根级 PULSE(如果 user 在 root 也放了)
+        root_pulse = root / "PULSE.md"
+        if root_pulse.exists():
+            sources.append(("_root", root_pulse))
+
+    if not sources:
+        return {"updated": 0, "scanned": 0, "warning": "no source PULSE.md found"}
+
+    PULSE_DIR.mkdir(parents=True, exist_ok=True)
+    updated_files = []
+    for name, src in sources:
+        dest = PULSE_DIR / f"{name}.md"
+        src_content = src.read_text(encoding="utf-8")
+        if dest.exists() and dest.read_text(encoding="utf-8") == src_content:
+            continue  # 没变,skip
+        dest.write_text(src_content, encoding="utf-8")
+        updated_files.append(dest)
+
+    if updated_files:
+        rel_names = ", ".join(f.stem for f in updated_files)
+        vault_git.commit_after_write(
+            PULSE_DIR,
+            f"pulse refresh-mirror: {rel_names}",
+            author="system",
+            paths=updated_files,
+        )
+
+    return {
+        "scanned": len(sources),
+        "updated": len(updated_files),
+        "files": [f.stem for f in updated_files],
+    }
 
 
 @app.get("/api/pulse")
