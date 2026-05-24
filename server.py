@@ -74,6 +74,7 @@ else:
 CODE_ROOT = GATEWAY_DIR.parent          # = ~/human-ai-dev/ (代码 root,放 skill/scripts/etc)
 
 import vault_config
+import vault_git
 DATA_HOME = vault_config.resolve_vault_root()
 VAULT_DIR = DATA_HOME / "vault"
 
@@ -3667,6 +3668,16 @@ def _startup_vault_audit():
         log.warning(f"[vault audit] startup audit failed: {e}")
 
 
+@app.on_event("startup")
+def _startup_vault_git_init():
+    """vault 写入自动版本史 — 首次启动 init repo + .gitignore + baseline."""
+    try:
+        status = vault_git.ensure_repo(VAULT_DIR)
+        log.info(f"[vault_git] ensure_repo: {status} at {VAULT_DIR}")
+    except Exception as e:
+        log.warning(f"[vault_git] ensure_repo failed: {type(e).__name__}: {e}")
+
+
 # ── chat thread history(server-side 持久化,跨浏览器/跨设备同步源)──
 THREAD_HISTORY_PATH = DATA_DIR / "thread-history.json"
 _THREAD_LOCK = threading.Lock()
@@ -4906,6 +4917,9 @@ def _refresh_tag_aggregate() -> dict:
     # 在它之后插入新行(无表则不动 — 这种情况不常见)。
     new_text = _append_rows_to_aggregate(text, new_rows)
     TAG_AGGREGATE_PATH.write_text(new_text, encoding="utf-8")
+    per_tag_summary = "+".join(f"#{t}" for t, rs in new_rows.items() if rs) or "none"
+    vault_git.commit_after_write(VAULT_DIR, f"aggregate refresh +{total_added} rows {per_tag_summary}",
+                                 author="system", paths=[TAG_AGGREGATE_PATH])
 
     return {
         "added": total_added,
@@ -5035,6 +5049,8 @@ async def tag_aggregate_register(req: Request):
         sep += "\n"
     new_text = text + sep + section
     TAG_AGGREGATE_PATH.write_text(new_text, encoding="utf-8")
+    vault_git.commit_after_write(VAULT_DIR, f"aggregate register #{tag}",
+                                 author="system", paths=[TAG_AGGREGATE_PATH])
 
     return {"ok": True, "tag": tag, "with_sub": with_sub}
 
@@ -5249,6 +5265,7 @@ def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "", author
 
         new_text = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
         f.write_text(new_text, encoding="utf-8")
+        vault_git.commit_after_write(VAULT_DIR, f"insert {f.stem} {hh}:{mm:02d} #{tag_clean}", author=author, paths=[f])
         return {"ok": True, "appended_to_existing": True, "h2": h2_line,
                 "file": _pretty_rel(f)}
 
@@ -5261,6 +5278,7 @@ def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "", author
 
     new_text = "\n".join(new_lines) + ("\n" if text.endswith("\n") else "")
     f.write_text(new_text, encoding="utf-8")
+    vault_git.commit_after_write(VAULT_DIR, f"insert {f.stem} {hh}:{mm:02d} #{tag_clean}", author=author, paths=[f])
     return {"ok": True, "inserted": new_h1, "file": _pretty_rel(f)}
 
 
@@ -5479,6 +5497,7 @@ def _patch_block(f: Path, time_label: str, new_md: str, author: str = "ai") -> d
 
     new_lines = lines[:start + 1] + [""] + new_md.rstrip().splitlines() + [""] + lines[end:]
     f.write_text("\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
+    vault_git.commit_after_write(VAULT_DIR, f"patch {f.stem} {time_label}", author=author, paths=[f])
     return {"patched": time_label, "file": _pretty_rel(f)}
 
 
@@ -5513,6 +5532,7 @@ def _append_comment_to_block(f: Path, time_label: str, comment_md: str) -> dict:
     comment_lines = comment_md.rstrip().splitlines()
     new_lines = lines[:end] + [""] + comment_lines + [""] + lines[end:]
     f.write_text("\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
+    vault_git.commit_after_write(VAULT_DIR, f"append-comment {f.stem} {time_label}", author="ai", paths=[f])
     return {"appended": time_label, "file": _pretty_rel(f)}
 
 
