@@ -881,10 +881,34 @@ def tool_patch_widget(args):
     target.write_text(args["new_content"], encoding="utf-8")
     return {"patched": f"{name}/{args['file']}"}
 
+def _resolve_date_arg(date_arg: str, days_back_max: int = 7):
+    """统一 date 参数解析 + sanity 校验。
+    无 date → today;格式错 / 未来 / 距今 > N 天 → error。
+    返回 (datetime, error_str)。error_str 空表示通过。
+    """
+    today = datetime.now()
+    if not date_arg:
+        return today, ""
+    try:
+        d = datetime.strptime(date_arg.strip(), "%Y-%m-%d")
+    except ValueError:
+        return None, f"bad date format: {date_arg!r} (need YYYY-MM-DD)"
+    delta_days = (today.date() - d.date()).days
+    if delta_days < 0:
+        return None, f"date {date_arg} 在未来,拒"
+    if delta_days > days_back_max:
+        return None, (f"date {date_arg} 距今 {delta_days} 天太远,拒(超过 {days_back_max} 天保护线)。"
+                      f"想编辑老 entry 请用户在最近消息里明示日期,或直接走 obsidian。")
+    return d, ""
+
+
 def tool_patch_journal_block(args):
-    f = find_today_journal()
+    target, err = _resolve_date_arg((args.get("date") or "").strip())
+    if err:
+        return {"error": err}
+    f = find_today_journal(target)
     if not f:
-        return {"error": "no journal file for today"}
+        return {"error": f"no journal file for {target.strftime('%Y-%m-%d')}"}
     return _patch_block(f, args["time"], args["new_md"], author="ai")
 
 def tool_read_today_schedule(args):
@@ -896,7 +920,6 @@ def tool_list_recent_days(args):
     return {"days": days[-n:][::-1]}  # 倒序,最新在前
 
 def tool_insert_journal_block(args):
-    date_arg = (args.get("date") or "").strip()
     time_str = (args.get("time") or "").strip()
     tag = (args.get("tag") or "").strip()
     title = (args.get("title") or "").strip()
@@ -904,39 +927,30 @@ def tool_insert_journal_block(args):
     if not time_str:
         now = datetime.now()
         time_str = f"{now.hour}:{0 if now.minute < 30 else 30:02d}"
-    if date_arg:
-        try:
-            target = datetime.strptime(date_arg, "%Y-%m-%d")
-        except ValueError:
-            return {"error": f"bad date: {date_arg}"}
-        f = find_today_journal(target)
-    else:
-        f = find_today_journal()
+    target, err = _resolve_date_arg((args.get("date") or "").strip())
+    if err:
+        return {"error": err}
+    f = find_today_journal(target)
     if not f:
-        return {"error": "no journal file for that date"}
+        return {"error": f"no journal file for {target.strftime('%Y-%m-%d')}"}
     return _insert_block(f, time_str, tag=tag, title=title, author="ai")
 
 
 def tool_append_journal_comment(args):
     """append-only AI 评论:在指定时间块 body 末尾 append 一段,**不动原 H2 / 原 body**。
     撞 @user 块时 patch_journal_block 会拒绝 → 用这个工具留评论"穿线/回看/AI 注"。"""
-    date_arg = (args.get("date") or "").strip()
     time_str = (args.get("time") or "").strip()
     comment = (args.get("comment_md") or "").strip()
     if not time_str:
         return {"error": "need time HH:MM"}
     if not comment:
         return {"error": "need comment_md"}
-    if date_arg:
-        try:
-            target = datetime.strptime(date_arg, "%Y-%m-%d")
-        except ValueError:
-            return {"error": f"bad date: {date_arg}"}
-        f = find_today_journal(target)
-    else:
-        f = find_today_journal()
+    target, err = _resolve_date_arg((args.get("date") or "").strip())
+    if err:
+        return {"error": err}
+    f = find_today_journal(target)
     if not f:
-        return {"error": "no journal file for that date"}
+        return {"error": f"no journal file for {target.strftime('%Y-%m-%d')}"}
     return _append_comment_to_block(f, time_str, comment)
 
 
@@ -2282,6 +2296,7 @@ async def chat(req: Request):
             if not reply and last_actions:
                 names = ", ".join(a.get("name", "?") for a in last_actions)
                 reply = f"(已执行 {names},模型未补充文字)"
+            reply = _audit_unauthorized_claim(reply, last_actions)
             return {"reply": reply, "actions": last_actions}
 
         tool_results = []
@@ -2316,6 +2331,7 @@ async def chat(req: Request):
     else:
         final_reply = msg.content or ""
     final_reply = re.sub(r"<think>.*?</think>\s*", "", final_reply, flags=re.DOTALL).strip()
+    final_reply = _audit_unauthorized_claim(final_reply, last_actions)
     return {"reply": final_reply or "(no reply, tool loop hit max iterations)", "actions": last_actions}
 
 # ── chat SSE streaming generator ────────────────────────────────────
@@ -2346,10 +2362,22 @@ _SYNTH_WRAPPER_RE = re.compile(
     r'<[｜|]{1,2}DSML[｜|]{1,2}tool_calls>.*?</[｜|]{1,2}DSML[｜|]{1,2}tool_calls>',
     re.DOTALL,
 )
+# orphan 兜底:wrapper 缺失时单独的 <invoke>...</invoke> 整块剥掉
+_SYNTH_INVOKE_STRIP_RE = re.compile(
+    r'<[｜|]{1,2}DSML[｜|]{1,2}invoke[^>]*?>.*?</[｜|]{1,2}DSML[｜|]{1,2}invoke>',
+    re.DOTALL,
+)
+# 最后一道防线:任何残留的 <｜｜DSML｜｜foo> 或 </｜｜DSML｜｜foo> 孤立标签
+_DSML_TAG_RE = re.compile(r'</?[｜|]{1,2}DSML[｜|]{1,2}[^>]*?>', re.DOTALL)
 
 def _extract_synthetic_tool_calls(content: str):
     """提 content 里 Claude-antml 风格的伪 tool_calls。
-    返回 (stripped_content, [{"id","name","args"}])。无匹配则 ([], original)。
+    返回 (stripped_content, [{"id","name","args"}])。无匹配则 (content, [])。
+
+    3 层清理:
+      1) 先抠 invoke 块得 calls
+      2) wrapper / invoke / 任何 DSML 残留标签全 strip
+      3) 即使 calls 为空,只要原文含 DSML 残骸也清掉(防 5.22 msg 9 那种漏)
     """
     if not content or "DSML" not in content:
         return content, []
@@ -2364,9 +2392,10 @@ def _extract_synthetic_tool_calls(content: str):
             "name": name,
             "args": args,
         })
-    if not calls:
-        return content, []
-    stripped = _SYNTH_WRAPPER_RE.sub("", content).strip()
+    # 即使没抠到 calls 也做清理 — 防 regex 没认出的变体把原文 DSML 漏到 history
+    stripped = _SYNTH_WRAPPER_RE.sub("", content)
+    stripped = _SYNTH_INVOKE_STRIP_RE.sub("", stripped)
+    stripped = _DSML_TAG_RE.sub("", stripped).strip()
     return stripped, calls
 
 def _exec_synth_calls(synth_calls, messages, last_actions, loaded_groups, quota_used):
@@ -2379,6 +2408,29 @@ def _exec_synth_calls(synth_calls, messages, last_actions, loaded_groups, quota_
             "tool_call_id": c["id"],
             "content": _truncate_tool_result(json.dumps(result, ensure_ascii=False)),
         })
+
+
+# ── claim audit(Path X:防 AI 口头声称已写入但没真 tool call)─────────
+# 5.22 msg 5/7 事故:用户"帮我记一下" → AI 回"记进 17:30 了" → last_actions 空,
+# journal 文件没动。CC 的解法是 tool_use 结构化 block(说=做绑死);
+# 我们用 server 出口审计:claim 措辞 + actions 空 → 自动加 disclaimer,
+# 用户看到这条就知道"AI 在撒谎"。
+_CLAIM_PHRASE_RE = re.compile(
+    r'(记进|写进|搞定|已写[入好]|已加入|已添加|已保存|已记录|已贴|已落|已 ?patch|'
+    r'写好了|写完了|加好了|加完了|落进|saved|recorded|wrote|patched|done)',
+    re.IGNORECASE,
+)
+_CLAIM_DISCLAIMER = (
+    "\n\n*(server audit:本回合未触发任何 tool 调用,上面的「已写入/记进了」等措辞"
+    "未对应真实动作 — 日记 / 聚合页没改。要真落请说『重试』或换一句指令。)*"
+)
+
+def _audit_unauthorized_claim(content: str, actions: list) -> str:
+    if actions or not content:
+        return content
+    if not _CLAIM_PHRASE_RE.search(content):
+        return content
+    return content + _CLAIM_DISCLAIMER
 
 
 # tool result 上限:multi-round 时同一 result 跨轮重发,大 JSON 会把 token 拉爆。
@@ -2412,6 +2464,7 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
                     model=active_model, messages=messages, stream=True,
                 )
                 buffer = ""        # 完整累积,扫 DSML + 末尾 lookahead
+                reasoning_buf = "" # thinking 模式下回传必带,否则 bonus call 400
                 yielded_len = 0    # 已 yield 到 buffer 的哪个位置
                 suppress = False   # 一旦 detect 到 DSML 就 true,后续 delta 全憋住
                 emitted = False
@@ -2419,7 +2472,13 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
                 for chunk in stream_resp:
                     if not chunk.choices: continue
                     delta = chunk.choices[0].delta
-                    if not (delta and delta.content): continue
+                    if not delta: continue
+                    # DeepSeek reasoner / V4 thinking:delta.reasoning_content 跟
+                    # delta.content 分开发。不接 → bonus 回传时缺,400。
+                    rc = getattr(delta, "reasoning_content", None)
+                    if rc:
+                        reasoning_buf += rc
+                    if not delta.content: continue
                     buffer += delta.content
                     if suppress: continue
                     # ｜｜DSML 是 deepseek 自家假 tool-call wrapper 的 telltale
@@ -2444,6 +2503,8 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
                                         "function": {"name": c["name"],
                                                      "arguments": json.dumps(c["args"], ensure_ascii=False)},
                                     } for c in synth_calls]}
+                        if reasoning_buf:
+                            asst_msg["reasoning_content"] = reasoning_buf
                         messages.append(asst_msg)
                         for c in synth_calls:
                             result = _dispatch_tool(c["name"], c["args"], loaded_groups, quota_used)
@@ -2459,7 +2520,11 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
                             for chunk in bonus:
                                 if not chunk.choices: continue
                                 delta = chunk.choices[0].delta
-                                if delta and delta.content:
+                                if not delta: continue
+                                # reasoning_content thinking 模式下也得吸,这轮不发回但
+                                # 防 SDK 内部状态机出怪味
+                                _ = getattr(delta, "reasoning_content", None)
+                                if delta.content:
                                     emitted = True
                                     yield _sse({"type": "delta", "text": delta.content})
                         except Exception as e:
@@ -2475,6 +2540,9 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
                 if not emitted and last_actions:
                     names = ", ".join(a.get("name", "?") for a in last_actions)
                     yield _sse({"type": "delta", "text": f"(已执行 {names},模型未补充文字)"})
+                # Path X 出口审计:claim 措辞 + actions 空 → append disclaimer
+                if not last_actions and buffer and _CLAIM_PHRASE_RE.search(buffer):
+                    yield _sse({"type": "delta", "text": _CLAIM_DISCLAIMER})
                 yield _sse({"type": "done", "actions": last_actions})
             except Exception as e:
                 yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
@@ -2533,16 +2601,21 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
                     model=active_model, messages=messages, stream=True,
                 )
                 emitted = False
+                accum = ""  # 累积所有 content,end-of-stream 时做 claim audit
                 for chunk in stream_resp:
                     if not chunk.choices:
                         continue
                     delta = chunk.choices[0].delta
                     if delta and delta.content:
                         emitted = True
+                        accum += delta.content
                         yield _sse({"type": "delta", "text": delta.content})
                 if not emitted and last_actions:
                     names = ", ".join(a.get("name", "?") for a in last_actions)
                     yield _sse({"type": "delta", "text": f"(已执行 {names},模型未补充文字)"})
+                # Path X 出口审计:claim 措辞 + actions 空 → append disclaimer
+                if not last_actions and accum and _CLAIM_PHRASE_RE.search(accum):
+                    yield _sse({"type": "delta", "text": _CLAIM_DISCLAIMER})
                 yield _sse({"type": "done", "actions": last_actions})
             except Exception as e:
                 yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})

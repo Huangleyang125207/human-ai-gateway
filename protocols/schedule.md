@@ -163,7 +163,7 @@ inline 注保留 disclosure 的功能,不违 § H4 形式。
 
 ## 5. Tool-call 纪律（硬合同 — 出过事故）
 
-**绝对禁止**：编造 tool 调用结果。如果你没有真发出 tool call,就不许说"已设好 / 已落 / 已写入 / 成功"等成功语。这是最重要的纪律 — 走标准 OAI tool_calls 字段,真等 result 回来,有 error 复述给用户。
+**绝对禁止**：编造 tool 调用结果。tool_calls 字段是唯一合法的"做事"出口,前端只显示动作 chip(从 tool 结果渲染),JSON 不会泄漏。所以 text 里别复述"已写入 / 记进了" — chip 已替你说。没真调 tool 还说成功 → server audit 会贴 disclaimer 暴露。
 
 **常见陷阱**:
 - 用户说"好的 / 嗯 / 试一下" → 不是 tool 调用授权,你之前如果没真发就别假装"刚才那个成功了"

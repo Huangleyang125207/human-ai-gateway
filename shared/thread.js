@@ -16,6 +16,23 @@
   const MAX_HISTORY = 100;      // 发给 server 的总条数;server 取最近 20 原文,更早的做摘要
   const PERSIST_LIMIT = 200;    // localStorage 最多存 N 条
 
+  // 本地日期 YYYY-MM-DD,从不为 null。fallback for view_date,跨过午夜也始终是真今天
+  function todayLocalISO() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  }
+  // 跨午夜检测 — 页面不刷新一直开着的情况,view_date 别卡昨天
+  let _lastSeenDate = todayLocalISO();
+  setInterval(() => {
+    const t = todayLocalISO();
+    if (t !== _lastSeenDate) {
+      _lastSeenDate = t;
+      // 触发 journal refresh — 哪种回调存在用哪种,都不在也不抛
+      try { window.gateway?.journal?.refresh?.(); } catch {}
+      try { window.gateway?.journal?.loadToday?.(); } catch {}
+    }
+  }, 60_000);
+
   // ── state ────────────────────────────────────────────
   const state = {
     history: loadHistory(),   // [{role: 'user'|'assistant', content, refs?: [...]}]
@@ -503,8 +520,9 @@
       const context = {
         type: "thread",
         // 当前用户正在浏览的日期(YYYY-MM-DD)。给 AI 看,落 scrapbook / patch_journal
-        // 时默认走这一天,不是 today。不带 → server 兜底 today。
-        view_date: window.gateway?.journal?.current?.date || null,
+        // 时默认走这一天。null 会让 server 兜底 today,但前端跨午夜不刷新时
+        // current?.date 仍是昨天,所以这里直接拿本地真今天兜底(see todayLocalISO)。
+        view_date: window.gateway?.journal?.current?.date || todayLocalISO(),
         refs: sentRefs.map(r => ({ kind: r.kind, label: r.label, payload: r.payload })),
       };
       const history = state.history.slice(-MAX_HISTORY - 1, -1).map(m => ({
