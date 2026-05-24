@@ -61,6 +61,7 @@ ADDS=(
   --add-data "day.html:."
   --add-data "reset.html:."
   --add-data "history.html:."
+  --add-data "consent.html:."
   --add-data "shared:shared"
   --add-data "widgets:widgets"
   --add-data "vendor:vendor"

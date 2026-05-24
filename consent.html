@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>consent · 数据授权挑选</title>
+<style>
+  /* 跟 history.html 同 family — 老报纸 / 编辑设计 */
+  :root {
+    --ink: #1a1a1a;
+    --ink-soft: #4a4a4a;
+    --ink-faint: #888;
+    --paper: #faf8f3;
+    --paper-soft: #f4f0e8;
+    --rule: #d4cfc0;
+    --accent: #8a3a3a;
+    --ai: #4a6b8a;
+    --user: #6b4a3a;
+    --system: #5a5a5a;
+    --warn: #b07030;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Iowan Old Style', 'Source Han Serif SC', '宋体', Georgia, serif;
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  header {
+    padding: 36px 48px 18px;
+    border-bottom: 1px solid var(--rule);
+  }
+  header h1 { margin: 0 0 6px; font-size: 28px; font-weight: normal; letter-spacing: 1px; }
+  header .sub { color: var(--ink-faint); font-size: 13px; font-style: italic; }
+  header .nav { margin-top: 12px; font-size: 13px; }
+  header .nav a { color: var(--accent); text-decoration: none; margin-right: 14px; }
+  header .nav a:hover { text-decoration: underline; }
+
+  main {
+    display: grid;
+    grid-template-columns: 360px 1fr 360px;
+    gap: 0;
+    min-height: calc(100vh - 130px);
+  }
+  .panel { padding: 28px 36px; border-right: 1px solid var(--rule); overflow-y: auto; }
+  .panel:last-child { border-right: none; }
+  .panel h2 {
+    font-size: 16px; font-weight: normal; letter-spacing: 0.5px;
+    margin: 0 0 16px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule); color: var(--ink-soft);
+  }
+  .panel h2 .hint { font-size: 11px; color: var(--ink-faint); font-style: italic; }
+
+  /* filter form */
+  .filter-group { margin-bottom: 18px; }
+  .filter-group .label {
+    color: var(--ink-faint); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 6px;
+  }
+  .filter-group input[type=text], .filter-group input[type=date] {
+    width: 100%;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .filter-group input:focus { border-color: var(--accent); outline: none; }
+  .filter-group .checks { display: flex; flex-wrap: wrap; gap: 4px; }
+  .check {
+    display: inline-flex; align-items: center; gap: 4px;
+    border: 1px solid var(--rule); background: var(--paper);
+    padding: 3px 10px; font-size: 12px; cursor: pointer;
+    user-select: none;
+  }
+  .check.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .check.exclude.on { background: var(--warn); color: white; border-color: var(--warn); }
+  .filter-group .tag-input { display: flex; gap: 4px; margin-top: 4px; }
+  .filter-group .tag-input input { flex: 1; }
+  .filter-group .tag-input button {
+    border: 1px solid var(--rule); background: var(--paper); padding: 4px 10px;
+    font-family: inherit; font-size: 12px; cursor: pointer;
+  }
+  .filter-group .tag-input button:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* preview */
+  .preview-stat {
+    background: var(--paper-soft); padding: 16px 20px; margin-bottom: 16px;
+    border-left: 3px solid var(--accent);
+  }
+  .preview-stat .big {
+    font-size: 32px; font-weight: 300; letter-spacing: -1px;
+    font-variant-numeric: tabular-nums; line-height: 1.1;
+  }
+  .preview-stat .of {
+    color: var(--ink-faint); font-size: 13px; margin-top: 4px;
+  }
+  .sample-row {
+    border-bottom: 1px solid var(--rule); padding: 10px 0; font-size: 13px;
+  }
+  .sample-row .head {
+    display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px;
+  }
+  .sample-row .meta {
+    font-size: 11px; color: var(--ink-faint); font-variant-numeric: tabular-nums;
+  }
+  .badge {
+    display: inline-block; padding: 1px 8px; font-size: 11px; letter-spacing: 0.5px;
+  }
+  .badge.user { background: var(--user); color: white; }
+  .badge.ai { background: var(--ai); color: white; }
+  .badge.system { background: var(--system); color: white; }
+  .badge.src-vault { background: transparent; color: var(--ink-soft); border: 1px solid var(--rule); }
+  .badge.src-pulse { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+
+  /* meta inputs(label / buyer / expires)+ save button */
+  .save-form { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--rule); }
+  .save-form input[type=text], .save-form input[type=date] {
+    width: 100%; border: 1px solid var(--rule); padding: 6px 10px;
+    background: var(--paper); font-family: inherit; font-size: 13px; margin-bottom: 8px;
+  }
+  .save-btn {
+    background: var(--accent); color: white; border: none; padding: 8px 18px;
+    cursor: pointer; font-family: inherit; font-size: 13px; letter-spacing: 0.5px;
+    width: 100%;
+  }
+  .save-btn:hover { background: #6e2a2a; }
+
+  /* saved licenses list */
+  .lic-row {
+    border-bottom: 1px solid var(--rule); padding: 12px 0;
+  }
+  .lic-row .label-line {
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .lic-row .lic-label { font-weight: 600; }
+  .lic-row .lic-buyer {
+    font-size: 12px; color: var(--ink-faint); font-style: italic;
+    margin-top: 2px;
+  }
+  .lic-row .lic-stats {
+    margin-top: 6px;
+    display: flex; gap: 12px; font-size: 12px; color: var(--ink-soft);
+  }
+  .lic-row .lic-stats .num {
+    font-variant-numeric: tabular-nums; font-weight: 600; color: var(--accent);
+  }
+  .lic-row .del {
+    background: none; border: none; color: var(--ink-faint); font-size: 11px;
+    cursor: pointer; padding: 0;
+  }
+  .lic-row .del:hover { color: var(--warn); }
+  .empty { color: var(--ink-faint); font-style: italic; padding: 24px 0; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>consent · 数据授权挑选</h1>
+  <div class="sub">挑哪几个 source / tag / 作者的 commit 进 license bundle。MVP:存配置 + 算 preview,不真出包。</div>
+  <div class="nav">
+    <a href="./index.html">← gateway 主页</a>
+    <a href="./history.html">history corpus</a>
+  </div>
+</header>
+
+<main>
+  <!-- 左:filter form -->
+  <section class="panel">
+    <h2>① 挑数据 <span class="hint">改了立即 preview</span></h2>
+
+    <div class="filter-group">
+      <div class="label">source</div>
+      <div class="checks" id="src-checks">
+        <span class="check on" data-val="vault">vault(日记 + 聚合)</span>
+        <span class="check on" data-val="pulse">pulse(项目快照)</span>
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <div class="label">author</div>
+      <div class="checks" id="auth-checks">
+        <span class="check on" data-val="user">user</span>
+        <span class="check on" data-val="ai">ai</span>
+        <span class="check on" data-val="system">system</span>
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <div class="label">tags include(空 = 全要)</div>
+      <div class="tag-input">
+        <input type="text" id="tag-inc-input" placeholder="如 投资,加 enter" />
+        <button onclick="addTag('inc')">+</button>
+      </div>
+      <div class="checks" id="tag-inc-checks" style="margin-top:6px;"></div>
+    </div>
+
+    <div class="filter-group">
+      <div class="label">tags exclude(私人 / 敏感)</div>
+      <div class="tag-input">
+        <input type="text" id="tag-exc-input" placeholder="如 健康,enter" />
+        <button onclick="addTag('exc')">+</button>
+      </div>
+      <div class="checks" id="tag-exc-checks" style="margin-top:6px;"></div>
+    </div>
+
+    <div class="filter-group">
+      <div class="label">日期范围</div>
+      <input type="date" id="since" placeholder="since" />
+      <div style="height:6px"></div>
+      <input type="date" id="until" placeholder="until" />
+    </div>
+
+    <div class="save-form">
+      <div class="label" style="color:var(--ink-faint); font-size:11px; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">② 起名 + 存</div>
+      <input type="text" id="lic-label" placeholder="label,如 deepseek-2026Q2" />
+      <input type="text" id="lic-buyer" placeholder="buyer,如 DeepSeek / Anthropic / Open" />
+      <input type="date" id="lic-expires" placeholder="过期日(可空)" />
+      <button class="save-btn" onclick="saveLicense()">存 license 配置</button>
+      <div id="save-status" style="margin-top:6px; font-size:12px; color:var(--ink-faint);"></div>
+    </div>
+  </section>
+
+  <!-- 中:preview -->
+  <section class="panel">
+    <h2>preview <span class="hint">实时</span></h2>
+    <div id="preview">loading…</div>
+  </section>
+
+  <!-- 右:已存 licenses -->
+  <section class="panel">
+    <h2>已存 license</h2>
+    <div id="licenses">loading…</div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = {
+  filters: { sources: ['vault','pulse'], authors: ['user','ai','system'],
+             tags_include: [], tags_exclude: [], since: null, until: null }
+};
+
+// ── filter UI bindings ────────────────────────────────
+document.querySelectorAll('#src-checks .check').forEach(el => {
+  el.onclick = () => {
+    el.classList.toggle('on');
+    state.filters.sources = [...document.querySelectorAll('#src-checks .check.on')].map(e => e.dataset.val);
+    refreshPreview();
+  };
+});
+document.querySelectorAll('#auth-checks .check').forEach(el => {
+  el.onclick = () => {
+    el.classList.toggle('on');
+    state.filters.authors = [...document.querySelectorAll('#auth-checks .check.on')].map(e => e.dataset.val);
+    refreshPreview();
+  };
+});
+$('since').onchange = () => { state.filters.since = $('since').value || null; refreshPreview(); };
+$('until').onchange = () => { state.filters.until = $('until').value || null; refreshPreview(); };
+
+function addTag(kind) {
+  const input = $(`tag-${kind}-input`);
+  const val = input.value.trim().replace(/^#/, '');
+  if (!val) return;
+  const key = kind === 'inc' ? 'tags_include' : 'tags_exclude';
+  if (!state.filters[key].includes(val)) state.filters[key].push(val);
+  input.value = '';
+  renderTagChips(kind);
+  refreshPreview();
+}
+['inc','exc'].forEach(kind => {
+  $(`tag-${kind}-input`).onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(kind); } };
+});
+function renderTagChips(kind) {
+  const key = kind === 'inc' ? 'tags_include' : 'tags_exclude';
+  const cls = kind === 'exc' ? 'exclude' : '';
+  $(`tag-${kind}-checks`).innerHTML = state.filters[key].map(t =>
+    `<span class="check on ${cls}" onclick="removeTag('${kind}','${t}')">#${t} ✕</span>`
+  ).join('');
+}
+function removeTag(kind, tag) {
+  const key = kind === 'inc' ? 'tags_include' : 'tags_exclude';
+  state.filters[key] = state.filters[key].filter(t => t !== tag);
+  renderTagChips(kind);
+  refreshPreview();
+}
+
+// ── preview ───────────────────────────────────────────
+let previewDebounce = null;
+async function refreshPreview() {
+  clearTimeout(previewDebounce);
+  previewDebounce = setTimeout(async () => {
+    const body = JSON.stringify(state.filters);
+    const r = await fetch('/api/consent/preview', { method:'POST',
+      headers:{'Content-Type':'application/json'}, body });
+    const d = await r.json();
+    $('preview').innerHTML = `
+      <div class="preview-stat">
+        <div class="big">${d.matched_count.toLocaleString()}</div>
+        <div class="of">commits 进 license,共 ${d.total_rows.toLocaleString()} 行总语料 · 占 ${d.total_rows ? ((d.matched_count/d.total_rows)*100).toFixed(1) : 0}%</div>
+      </div>
+      <div style="font-size:11px; color:var(--ink-faint); text-transform:uppercase; letter-spacing:1px; margin:16px 0 8px;">sample(前 3 条)</div>
+      ${(d.sample||[]).map(s => `
+        <div class="sample-row">
+          <div class="head">
+            <span class="badge src-${s.source}">${s.source}</span>
+            <span class="badge ${s.author}">${s.author}</span>
+            <span class="meta">${s.commit} · ${(s.ts||'').slice(0,16).replace('T',' ')}</span>
+          </div>
+          <div>${escapeHtml(s.action||'')}</div>
+          ${(s.tags||[]).length ? `<div style="margin-top:4px;">${s.tags.map(t=>`<span style="color:var(--accent); margin-right:6px; font-size:12px;">#${t}</span>`).join('')}</div>` : ''}
+        </div>
+      `).join('') || '<div class="empty">没匹配上 — 改宽 filter 试试</div>'}
+    `;
+  }, 200);
+}
+
+// ── save ──────────────────────────────────────────────
+async function saveLicense() {
+  const label = $('lic-label').value.trim();
+  if (!label) { $('save-status').textContent = '需要 label'; $('save-status').style.color='var(--warn)'; return; }
+  const body = {
+    label,
+    buyer: $('lic-buyer').value.trim() || '—',
+    expires: $('lic-expires').value || null,
+    filters: state.filters,
+  };
+  const r = await fetch('/api/consent/licenses', { method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const d = await r.json();
+  if (d.id) {
+    $('save-status').textContent = `✓ 已存 ${d.id} (匹配 ${d.preview_count} commits)`;
+    $('save-status').style.color = 'var(--ink-soft)';
+    $('lic-label').value = '';
+    loadLicenses();
+  }
+}
+
+// ── load saved licenses ──────────────────────────────
+async function loadLicenses() {
+  const r = await fetch('/api/consent/licenses');
+  const d = await r.json();
+  const list = d.licenses || [];
+  $('licenses').innerHTML = list.length ? list.map(l => `
+    <div class="lic-row">
+      <div class="label-line">
+        <span class="lic-label">${escapeHtml(l.label)}</span>
+        <button class="del" onclick="deleteLicense('${l.id}')">删除</button>
+      </div>
+      <div class="lic-buyer">→ ${escapeHtml(l.buyer)}${l.expires ? ` · 到期 ${l.expires}` : ''}</div>
+      <div class="lic-stats">
+        <span><span class="num">${l.preview_count.toLocaleString()}</span> commits</span>
+        ${(l.filters?.sources||[]).length ? `<span>${l.filters.sources.join('+')}</span>` : ''}
+        ${(l.filters?.tags_include||[]).length ? `<span>#${l.filters.tags_include.join(' #')}</span>` : ''}
+        ${(l.filters?.tags_exclude||[]).length ? `<span style="color:var(--warn);">−#${l.filters.tags_exclude.join(' −#')}</span>` : ''}
+      </div>
+    </div>
+  `).join('') : '<div class="empty">还没存过 license — 左边挑数据 → 右下角存</div>';
+}
+
+async function deleteLicense(lid) {
+  if (!confirm('确定删除这条 license 配置?')) return;
+  await fetch(`/api/consent/licenses/${lid}`, { method:'DELETE' });
+  loadLicenses();
+}
+
+function escapeHtml(s) {
+  return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// init
+refreshPreview();
+loadLicenses();
+</script>
+</body>
+</html>

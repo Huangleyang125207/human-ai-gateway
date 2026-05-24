@@ -190,6 +190,23 @@ check "/api/history/stats 返 JSON" "$R" '"(error|total)"'
 R=$(curl -s "http://127.0.0.1:$TEST_PORT/api/history/recent?limit=5")
 check "/api/history/recent 返 JSON" "$R" '"(error|commits)"'
 
+# consent.html 200(asset 真打进 _MEIPASS)
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$TEST_PORT/consent.html")
+if [ "$HTTP" = "200" ]; then
+  echo "  ${GREEN}✓${RESET} GET /consent.html → 200"
+  PASS=$((PASS+1))
+else
+  echo "  ${RED}✗${RESET} GET /consent.html → $HTTP"
+  FAIL=$((FAIL+1))
+fi
+
+# consent endpoints
+R=$(curl -s "http://127.0.0.1:$TEST_PORT/api/consent/licenses")
+check "/api/consent/licenses 返 JSON" "$R" '"licenses"'
+
+R=$(curl -s -X POST -H 'Content-Type: application/json' -d '{}' "http://127.0.0.1:$TEST_PORT/api/consent/preview")
+check "/api/consent/preview 返 JSON(空 filter)" "$R" '"matched_count"'
+
 # ── 3. 结果 ────────────────────────────────────────
 echo
 echo "════════════════════════════════════════════"
