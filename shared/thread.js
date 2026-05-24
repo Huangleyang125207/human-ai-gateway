@@ -21,6 +21,10 @@
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   }
+  // 每条消息的时间戳 — 给 history_exporter 用作 commit↔chat 时间窗 join 的锚
+  function nowISO() {
+    return new Date().toISOString();
+  }
   // 跨午夜检测 — 页面不刷新一直开着的情况,view_date 别卡昨天
   let _lastSeenDate = todayLocalISO();
   setInterval(() => {
@@ -473,6 +477,7 @@
       role: "user",
       content: msg || "(看这里)",
       refs: state.pending.slice(),
+      ts: nowISO(),
     };
     state.history.push(userMsg);
     appendMsg(userMsg);
@@ -488,7 +493,7 @@
 
     if (state.apiOk === false) {
       removeProcessing();
-      const aiMsg = { role: "assistant", content: "（AI 没接上 — 起 server / 设 api key 后再来）" };
+      const aiMsg = { role: "assistant", content: "（AI 没接上 — 起 server / 设 api key 后再来）", ts: nowISO() };
       state.history.push(aiMsg);
       appendMsg(aiMsg);
       saveHistory();
@@ -591,7 +596,7 @@
             // USE WHEN: stream 中断,model 没出完文 → 下次 turn model 看不到"上次崩了"会失忆
             // COPY THIS: 改 reason 字符串
             // 占位也进 history,让 model 下次能看见上次 turn 的状态
-            const errMsg = { role: "assistant", content: `(上次回复出错: ${data.text} — 可重新问)` };
+            const errMsg = { role: "assistant", content: `(上次回复出错: ${data.text} — 可重新问)`, ts: nowISO() };
             state.history.push(errMsg);
             saveHistory();
           } else if (data.type === "done") {
@@ -605,13 +610,17 @@
                 appendAction("（已执行工具,模型未补充文字）");
               }
             }
+            // server done payload 可能带 reasoning_content + model_id — 都存,给 post-train 用
+            const meta = { ts: nowISO() };
+            if (data.reasoning_content) meta.reasoning_content = data.reasoning_content;
+            if (data.model_id) meta.model_id = data.model_id;
             if (accumText) {
-              state.history.push({ role: "assistant", content: accumText });
+              state.history.push({ role: "assistant", content: accumText, ...meta });
               saveHistory();
             } else if ((data.actions || []).length > 0) {
               // 纯 tool 调用 + 0 文本 — 也进 history,model 下次知道上轮跑过 tool
               const summary = `(上轮执行了 ${data.actions.map(a => a.name).join(", ")},未出文字)`;
-              state.history.push({ role: "assistant", content: summary });
+              state.history.push({ role: "assistant", content: summary, ...meta });
               saveHistory();
             }
           }
@@ -628,7 +637,7 @@
         : e.message;
       appendAction(`请求失败 · ${reason}`);
       // 网络层 / abort 错误也进 history(同 error event 兜底)
-      const errMsg = { role: "assistant", content: `(请求失败: ${reason})` };
+      const errMsg = { role: "assistant", content: `(请求失败: ${reason})`, ts: nowISO() };
       state.history.push(errMsg);
       saveHistory();
     } finally {
@@ -701,7 +710,7 @@
     toggle,
     isOpen: () => state.open,
     pushAI: (text) => {
-      const m = { role: "assistant", content: text };
+      const m = { role: "assistant", content: text, ts: nowISO() };
       state.history.push(m);
       appendMsg(m);
       saveHistory();

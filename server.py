@@ -2544,7 +2544,11 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
                 # Path X 出口审计:claim 措辞 + actions 空 → append disclaimer
                 if not last_actions and buffer and _CLAIM_PHRASE_RE.search(buffer):
                     yield _sse({"type": "delta", "text": _CLAIM_DISCLAIMER})
-                yield _sse({"type": "done", "actions": last_actions})
+                # done payload 带 reasoning_content + model_id 给前端存进 history(post-train 用)
+                done_payload = {"type": "done", "actions": last_actions, "model_id": active_model}
+                if reasoning_buf:
+                    done_payload["reasoning_content"] = reasoning_buf
+                yield _sse(done_payload)
             except Exception as e:
                 yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
             return
@@ -2603,11 +2607,17 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
                 )
                 emitted = False
                 accum = ""  # 累积所有 content,end-of-stream 时做 claim audit
+                reasoning_buf2 = ""  # thinking 模型 chain-of-thought 也存,post-train 用
                 for chunk in stream_resp:
                     if not chunk.choices:
                         continue
                     delta = chunk.choices[0].delta
-                    if delta and delta.content:
+                    if not delta:
+                        continue
+                    rc = getattr(delta, "reasoning_content", None)
+                    if rc:
+                        reasoning_buf2 += rc
+                    if delta.content:
                         emitted = True
                         accum += delta.content
                         yield _sse({"type": "delta", "text": delta.content})
@@ -2617,7 +2627,10 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
                 # Path X 出口审计:claim 措辞 + actions 空 → append disclaimer
                 if not last_actions and accum and _CLAIM_PHRASE_RE.search(accum):
                     yield _sse({"type": "delta", "text": _CLAIM_DISCLAIMER})
-                yield _sse({"type": "done", "actions": last_actions})
+                done_payload = {"type": "done", "actions": last_actions, "model_id": active_model}
+                if reasoning_buf2:
+                    done_payload["reasoning_content"] = reasoning_buf2
+                yield _sse(done_payload)
             except Exception as e:
                 yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
             return
