@@ -60,6 +60,7 @@ DEFAULT_VAULT = _vault_dir()
 DEFAULT_APP_STATE = _app_state_dir()
 DEFAULT_THREAD_HISTORY = DEFAULT_APP_STATE / "data" / "thread-history.json"
 DEFAULT_OUT_DIR = DEFAULT_APP_STATE / "data" / "history-exports"
+DEFAULT_OUTCOMES = DEFAULT_APP_STATE / "data" / "outcomes.json"
 
 # ── git 操作 ──────────────────────────────────────────────────────
 
@@ -69,8 +70,9 @@ _TAG_RE = re.compile(r'#([A-Za-z一-龥][A-Za-z0-9_一-龥/\-]*)')
 
 
 def _run_git(args: list[str], cwd: Path, timeout: float = 30.0) -> str:
+    # quotepath=false 让中文路径不被 \nnn 转义(给 outcome_tracker / 跨模块一致)
     p = subprocess.run(
-        ["git", "-C", str(cwd)] + args,
+        ["git", "-C", str(cwd), "-c", "core.quotepath=false"] + args,
         capture_output=True, text=True, timeout=timeout, check=False,
     )
     if p.returncode != 0:
@@ -205,7 +207,8 @@ def join_context(commit_ts: str, thread: list[dict], window_sec: int = 60) -> di
 DIFF_CAP = 4000  # jsonl 单行 diff 截到 4k,full diff 想要再去 git show
 
 
-def commit_to_row(vault: Path, commit: dict, thread: list[dict]) -> dict:
+def commit_to_row(vault: Path, commit: dict, thread: list[dict],
+                  outcomes: dict | None = None) -> dict:
     detail = commit_detail(vault, commit["hash"])
     author = parse_author(commit["subject"])
     tags = extract_tags_from_diff(detail["diff"])
@@ -214,7 +217,7 @@ def commit_to_row(vault: Path, commit: dict, thread: list[dict]) -> dict:
     if truncated:
         diff_short = diff_short[:DIFF_CAP] + f"\n…(truncated, {len(detail['diff']) - DIFF_CAP} more chars)"
 
-    return {
+    row = {
         "commit": commit["hash"],
         "ts": commit["ts"],
         "author": author,
@@ -225,13 +228,27 @@ def commit_to_row(vault: Path, commit: dict, thread: list[dict]) -> dict:
         "diff": diff_short,
         "context": join_context(commit["ts"], thread),
     }
+    # 集成 Z outcome:有 outcome 就贴上,没就空
+    if outcomes:
+        o = outcomes.get(commit["hash"])
+        if o:
+            row["outcome"] = {
+                "class": o.get("outcome_class"),
+                "later_touch_count": o.get("later_touch_count"),
+                "modified_after_seconds": o.get("modified_after_seconds"),
+                "age_seconds": o.get("age_seconds"),
+            }
+    return row
 
 
 def export(vault: Path = DEFAULT_VAULT,
            thread_path: Path = DEFAULT_THREAD_HISTORY,
            out_dir: Path = DEFAULT_OUT_DIR,
-           since: str | None = None) -> dict:
-    """主入口。返 {commits, tags, authors, out_dir} 统计。"""
+           since: str | None = None,
+           outcomes_path: Path = DEFAULT_OUTCOMES) -> dict:
+    """主入口。返 {commits, tags, authors, out_dir} 统计。
+    outcomes_path: 若存在则给每行附 outcome 字段(由 outcome_tracker.py 产生)。
+    """
     if not vault.exists():
         return {"error": f"vault not found: {vault}"}
     if not _is_repo(vault):
@@ -241,6 +258,14 @@ def export(vault: Path = DEFAULT_VAULT,
     commits = list_commits(vault, since=since)
     if not commits:
         return {"commits": 0, "tags": [], "authors": [], "out_dir": str(out_dir)}
+
+    # Z outcome 数据(可选 — 没就 None)
+    outcomes_map = {}
+    if outcomes_path and outcomes_path.exists():
+        try:
+            outcomes_map = json.loads(outcomes_path.read_text(encoding="utf-8")).get("outcomes", {})
+        except Exception:
+            outcomes_map = {}
 
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "by-tag").mkdir(exist_ok=True)
@@ -252,7 +277,7 @@ def export(vault: Path = DEFAULT_VAULT,
 
     rows = []
     for c in commits:
-        row = commit_to_row(vault, c, thread)
+        row = commit_to_row(vault, c, thread, outcomes=outcomes_map)
         rows.append(row)
         line = json.dumps(row, ensure_ascii=False)
         # baseline / bulk-import commits 不进 by-tag / by-author 索引:

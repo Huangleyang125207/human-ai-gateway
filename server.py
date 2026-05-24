@@ -3647,6 +3647,95 @@ def vault_repair():
     return _repair_vault()
 
 
+# ── history API(给 history.html 前端用)──────────────────────────
+# 数据源:vault git log + outcomes.json + thread-history.json,通过 history_exporter
+# / outcome_tracker 计算。endpoint 永远现算(scale 小,不缓存)。
+import history_exporter as _he
+import outcome_tracker as _ot
+
+@app.get("/api/history/stats")
+def history_stats():
+    """count + by_author + by_class + by_day(最近 30 天)。"""
+    from collections import Counter
+    if not (VAULT_DIR / ".git").exists():
+        return {"error": "vault not a git repo"}
+    commits = _he.list_commits(VAULT_DIR)
+    outcomes_map = _ot.load_outcomes().get("outcomes", {})
+    by_author, by_class, by_day = Counter(), Counter(), Counter()
+    for c in commits:
+        author = _he.parse_author(c["subject"])
+        by_author[author] += 1
+        day = c["ts"][:10]
+        by_day[day] += 1
+        o = outcomes_map.get(c["hash"])
+        if o:
+            by_class[o.get("outcome_class") or "unknown"] += 1
+    return {
+        "total": len(commits),
+        "by_author": dict(by_author),
+        "by_class": dict(by_class),
+        "by_day": dict(sorted(by_day.items())[-30:]),
+        "outcomes_computed": bool(outcomes_map),
+    }
+
+
+@app.get("/api/history/recent")
+def history_recent(limit: int = 50):
+    """最近 N commits 的 brief(不带 diff body,前端列表用)。"""
+    if not (VAULT_DIR / ".git").exists():
+        return {"error": "vault not a git repo"}
+    commits = _he.list_commits(VAULT_DIR)
+    outcomes_map = _ot.load_outcomes().get("outcomes", {})
+    # 新在前(commits 是老到新)
+    commits = list(reversed(commits))[: max(1, min(limit, 500))]
+    rows = []
+    for c in commits:
+        author = _he.parse_author(c["subject"])
+        o = outcomes_map.get(c["hash"], {})
+        rows.append({
+            "commit": c["hash"][:12],
+            "full_hash": c["hash"],
+            "ts": c["ts"],
+            "author": author,
+            "action": _he.strip_action_trailer(c["subject"]),
+            "outcome_class": o.get("outcome_class"),
+            "later_touch_count": o.get("later_touch_count", 0),
+        })
+    return {"commits": rows, "limit": limit}
+
+
+@app.get("/api/history/commit/{commit_hash}")
+def history_commit(commit_hash: str):
+    """单 commit 的完整信息(diff + outcome + 时间窗 join 的 chat context)。"""
+    if not (VAULT_DIR / ".git").exists():
+        return {"error": "vault not a git repo"}
+    # commit 元
+    detail = _he.commit_detail(VAULT_DIR, commit_hash)
+    if not detail["files"] and not detail["diff"]:
+        return {"error": f"commit not found: {commit_hash}"}
+    # ts + subject from log -1
+    info = _he._run_git(["log", "-1", "--format=%aI%x09%s", commit_hash], VAULT_DIR)
+    parts = info.strip().split("\t", 1)
+    ts = parts[0] if parts else ""
+    subject = parts[1] if len(parts) > 1 else ""
+    thread = _he.load_thread(_he.DEFAULT_THREAD_HISTORY)
+    outcomes_map = _ot.load_outcomes().get("outcomes", {})
+    row = _he.commit_to_row(VAULT_DIR, {"hash": commit_hash, "ts": ts, "subject": subject},
+                            thread, outcomes=outcomes_map)
+    return row
+
+
+@app.post("/api/history/rebuild")
+def history_rebuild():
+    """重新跑 outcome_tracker + history_exporter,刷新 jsonl 输出。"""
+    if not (VAULT_DIR / ".git").exists():
+        return {"error": "vault not a git repo"}
+    data = _ot.compute_all(VAULT_DIR)
+    _ot.save_outcomes(data)
+    r = _he.export(vault=VAULT_DIR)
+    return {"outcomes_count": data["count"], "export": r}
+
+
 # 启动时跑一次老路径 → APP_STATE_DIR 迁移
 @app.on_event("startup")
 def _startup_migrate_state():

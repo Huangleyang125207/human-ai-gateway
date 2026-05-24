@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>history · vault training corpus</title>
+<style>
+  /* 老报纸 / Stripe Press 调调 — 不像 dashboard */
+  :root {
+    --ink: #1a1a1a;
+    --ink-soft: #4a4a4a;
+    --ink-faint: #888;
+    --paper: #faf8f3;
+    --paper-soft: #f4f0e8;
+    --rule: #d4cfc0;
+    --accent: #8a3a3a;        /* 朱砂红 */
+    --ai: #4a6b8a;            /* 冷蓝 */
+    --user: #6b4a3a;          /* 暖棕 */
+    --system: #5a5a5a;
+    --stable: #4a7c4a;
+    --modified: #b07030;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Iowan Old Style', 'Source Han Serif SC', '宋体', Georgia, serif;
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  header {
+    padding: 36px 48px 18px;
+    border-bottom: 1px solid var(--rule);
+  }
+  header h1 {
+    margin: 0 0 6px 0;
+    font-size: 28px;
+    font-weight: normal;
+    letter-spacing: 1px;
+  }
+  header .sub {
+    color: var(--ink-faint);
+    font-size: 13px;
+    font-style: italic;
+  }
+  header .nav {
+    margin-top: 12px;
+    font-size: 13px;
+  }
+  header .nav a {
+    color: var(--accent);
+    text-decoration: none;
+    margin-right: 14px;
+  }
+  header .nav a:hover { text-decoration: underline; }
+
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    min-height: calc(100vh - 130px);
+  }
+  .panel {
+    padding: 28px 48px;
+    border-right: 1px solid var(--rule);
+    overflow-y: auto;
+  }
+  .panel:last-child { border-right: none; }
+  .panel h2 {
+    font-size: 16px;
+    font-weight: normal;
+    letter-spacing: 0.5px;
+    margin: 0 0 16px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+    color: var(--ink-soft);
+  }
+
+  /* stats */
+  .stats { font-size: 14px; }
+  .stats .row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px dotted var(--rule);
+  }
+  .stats .row .k { color: var(--ink-soft); }
+  .stats .row .v {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  .stats .group { margin-bottom: 24px; }
+  .stats .group .label {
+    color: var(--ink-faint);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  .bar-row {
+    display: grid;
+    grid-template-columns: 80px 1fr 40px;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0;
+    font-size: 13px;
+  }
+  .bar-row .name { color: var(--ink-soft); }
+  .bar-row .bar { background: var(--paper-soft); height: 8px; border-radius: 0; }
+  .bar-row .bar > div { height: 100%; background: var(--accent); opacity: 0.7; }
+  .bar-row .count {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-faint);
+  }
+
+  .day-spark {
+    display: flex;
+    align-items: flex-end;
+    height: 60px;
+    gap: 2px;
+    margin-top: 8px;
+  }
+  .day-spark .day {
+    flex: 1;
+    background: var(--ink-soft);
+    opacity: 0.4;
+    min-height: 1px;
+  }
+  .day-spark .day:hover { opacity: 0.9; background: var(--accent); }
+
+  /* commit timeline */
+  .timeline { font-size: 13px; }
+  .commit-row {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--rule);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .commit-row:hover { background: var(--paper-soft); padding-left: 12px; }
+  .commit-row.active { background: var(--paper-soft); border-left: 2px solid var(--accent); padding-left: 10px; }
+  .commit-row .top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .commit-row .action {
+    flex: 1;
+    color: var(--ink);
+  }
+  .commit-row .meta {
+    font-size: 11px;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .commit-row .bottom {
+    margin-top: 4px;
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 0;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+  .badge.user { background: var(--user); color: white; }
+  .badge.ai { background: var(--ai); color: white; }
+  .badge.system { background: var(--system); color: white; }
+  .badge.unknown { background: #aaa; color: white; }
+  .badge.stable { background: var(--stable); color: white; }
+  .badge.modified { background: var(--modified); color: white; }
+
+  /* detail panel */
+  .detail-empty {
+    color: var(--ink-faint);
+    font-style: italic;
+    padding: 40px 0;
+    text-align: center;
+  }
+  .detail .commit-hash {
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 12px;
+    color: var(--ink-faint);
+    margin-bottom: 6px;
+  }
+  .detail h3 {
+    font-size: 18px;
+    font-weight: normal;
+    margin: 0 0 12px 0;
+  }
+  .detail .field {
+    margin: 12px 0;
+    font-size: 13px;
+  }
+  .detail .field .label {
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  .detail .files li {
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 12px;
+  }
+  .detail .ctx {
+    background: var(--paper-soft);
+    padding: 12px 16px;
+    border-left: 2px solid var(--rule);
+    font-size: 13px;
+    margin: 8px 0;
+  }
+  .detail .ctx .role {
+    font-size: 11px;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  .detail pre.diff {
+    background: var(--paper-soft);
+    border: 1px solid var(--rule);
+    padding: 12px;
+    overflow-x: auto;
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    max-height: 480px;
+  }
+  .detail pre.diff .add { color: #2a6a2a; background: #e8f5e8; display: block; }
+  .detail pre.diff .del { color: #8a2a2a; background: #f5e8e8; display: block; }
+  .detail pre.diff .meta { color: var(--ink-faint); display: block; }
+
+  /* refresh button */
+  .refresh {
+    margin-left: auto;
+    background: none;
+    border: 1px solid var(--rule);
+    padding: 4px 12px;
+    cursor: pointer;
+    font-family: inherit;
+    color: var(--ink-soft);
+    font-size: 12px;
+  }
+  .refresh:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>vault · training corpus</h1>
+  <div class="sub">每个 commit 都是一条可授权的 RLHF/DPO/SFT 训练数据 — 也是一份你自己 AI 的小学课本</div>
+  <div class="nav">
+    <a href="./index.html">← gateway 主页</a>
+    <button class="refresh" onclick="rebuild()">⟳ rebuild outcomes + export</button>
+    <span id="status" style="margin-left:12px; font-size:12px; color:var(--ink-faint);"></span>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>语料概览</h2>
+    <div class="stats" id="stats">loading…</div>
+  </section>
+
+  <section class="panel" style="grid-column: 2 / 4;">
+    <h2 style="display:flex; justify-content:space-between;">
+      <span>commit timeline</span>
+      <span style="font-size:11px; color:var(--ink-faint); font-weight:normal;">点任意条 → 展开</span>
+    </h2>
+    <div class="timeline" id="timeline">loading…</div>
+
+    <div id="detail" style="margin-top:32px;"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function loadStats() {
+  const r = await fetch('/api/history/stats');
+  const d = await r.json();
+  if (d.error) {
+    $('stats').innerHTML = `<div class="row"><span class="k">error</span><span class="v">${d.error}</span></div>`;
+    return;
+  }
+  const auth = d.by_author || {};
+  const cls = d.by_class || {};
+  const day = d.by_day || {};
+  const authMax = Math.max(...Object.values(auth), 1);
+  const dayMax = Math.max(...Object.values(day), 1);
+
+  $('stats').innerHTML = `
+    <div class="group">
+      <div class="row"><span class="k">总 commits</span><span class="v">${d.total}</span></div>
+      <div class="row"><span class="k">outcome 已算</span><span class="v">${d.outcomes_computed ? 'yes' : 'no — 点 rebuild'}</span></div>
+    </div>
+    <div class="group">
+      <div class="label">by author</div>
+      ${Object.entries(auth).sort((a,b)=>b[1]-a[1]).map(([k,v]) => `
+        <div class="bar-row">
+          <span class="name">${k}</span>
+          <div class="bar"><div style="width:${(v/authMax)*100}%"></div></div>
+          <span class="count">${v}</span>
+        </div>
+      `).join('')}
+    </div>
+    <div class="group">
+      <div class="label">by outcome class</div>
+      ${Object.entries(cls).sort((a,b)=>b[1]-a[1]).map(([k,v]) => `
+        <div class="bar-row">
+          <span class="name">${k}</span>
+          <div class="bar"><div style="width:${(v/d.total)*100}%; background:${k==='stable'?'var(--stable)':'var(--modified)'}"></div></div>
+          <span class="count">${v}</span>
+        </div>
+      `).join('')}
+    </div>
+    <div class="group">
+      <div class="label">by day (last 30)</div>
+      <div class="day-spark">
+        ${Object.entries(day).map(([k,v]) => `
+          <div class="day" title="${k}: ${v}" style="height:${(v/dayMax)*100}%"></div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+let activeHash = null;
+async function loadTimeline() {
+  const r = await fetch('/api/history/recent?limit=200');
+  const d = await r.json();
+  if (d.error) { $('timeline').textContent = d.error; return; }
+  $('timeline').innerHTML = d.commits.map(c => `
+    <div class="commit-row" data-hash="${c.full_hash}" onclick="selectCommit('${c.full_hash}')">
+      <div class="top">
+        <span class="action">${escapeHtml(c.action || '(no action)')}</span>
+        <span class="meta">${formatTs(c.ts)}</span>
+      </div>
+      <div class="bottom">
+        <span class="badge ${c.author}">${c.author}</span>
+        ${c.outcome_class ? `<span class="badge ${c.outcome_class}">${c.outcome_class}${c.later_touch_count?'·'+c.later_touch_count:''}</span>` : ''}
+        <span style="color:var(--ink-faint); font-family:'SF Mono',Menlo,monospace; font-size:11px;">${c.commit}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function selectCommit(hash) {
+  activeHash = hash;
+  document.querySelectorAll('.commit-row').forEach(el => {
+    el.classList.toggle('active', el.dataset.hash === hash);
+  });
+  const r = await fetch('/api/history/commit/' + hash);
+  const d = await r.json();
+  if (d.error) { $('detail').innerHTML = `<div class="detail-empty">${d.error}</div>`; return; }
+  const ctx = d.context || {};
+  $('detail').innerHTML = `
+    <div class="detail">
+      <div class="commit-hash">${hash}</div>
+      <h3>${escapeHtml(d.action || '')}</h3>
+      <div class="field">
+        <span class="badge ${d.author}">${d.author}</span>
+        ${d.outcome ? `<span class="badge ${d.outcome.class}">${d.outcome.class}${d.outcome.later_touch_count?' · later '+d.outcome.later_touch_count:''}</span>` : ''}
+        <span style="color:var(--ink-faint); margin-left:8px; font-size:12px;">${formatTs(d.ts)} · age ${humanSeconds(d.outcome?.age_seconds || 0)}</span>
+      </div>
+      ${d.tags && d.tags.length ? `
+        <div class="field">
+          <div class="label">tags</div>
+          ${d.tags.map(t => `<span style="color:var(--accent); margin-right:8px;">#${t}</span>`).join('')}
+        </div>
+      ` : ''}
+      <div class="field">
+        <div class="label">files</div>
+        <ul class="files">${(d.files||[]).map(f => `<li>${escapeHtml(f)}</li>`).join('')}</ul>
+      </div>
+      ${ctx.preceding_user_msg ? `
+        <div class="field">
+          <div class="label">preceding chat (${ctx.context_method})</div>
+          <div class="ctx">
+            <div class="role">user</div>
+            ${escapeHtml(ctx.preceding_user_msg)}
+          </div>
+          ${ctx.preceding_ai_reply ? `
+            <div class="ctx">
+              <div class="role">ai</div>
+              ${escapeHtml(ctx.preceding_ai_reply)}
+            </div>
+          ` : ''}
+        </div>
+      ` : ''}
+      <div class="field">
+        <div class="label">diff${d.diff_truncated ? ' (truncated)' : ''}</div>
+        <pre class="diff">${renderDiff(d.diff || '')}</pre>
+      </div>
+    </div>
+  `;
+  // 滚到 detail
+  $('detail').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+async function rebuild() {
+  $('status').textContent = 'rebuilding…';
+  try {
+    const r = await fetch('/api/history/rebuild', { method: 'POST' });
+    const d = await r.json();
+    $('status').textContent = `✓ ${d.outcomes_count} outcomes, ${d.export.commits} commits exported`;
+    await loadStats();
+    await loadTimeline();
+    if (activeHash) selectCommit(activeHash);
+  } catch (e) {
+    $('status').textContent = '✗ ' + e.message;
+  }
+}
+
+// ── utils ───────────────────────────────
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function formatTs(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function humanSeconds(s) {
+  if (!s) return '0';
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s/60) + 'm';
+  if (s < 86400) return Math.floor(s/3600) + 'h';
+  return Math.floor(s/86400) + 'd';
+}
+function renderDiff(diff) {
+  return escapeHtml(diff).split('\n').map(line => {
+    if (line.startsWith('+') && !line.startsWith('+++')) return `<span class="add">${line}</span>`;
+    if (line.startsWith('-') && !line.startsWith('---')) return `<span class="del">${line}</span>`;
+    if (line.startsWith('@@') || line.startsWith('diff ') || line.startsWith('---') || line.startsWith('+++') || line.startsWith('index ')) return `<span class="meta">${line}</span>`;
+    return line;
+  }).join('\n');
+}
+
+// init
+loadStats();
+loadTimeline();
+</script>
+</body>
+</html>
