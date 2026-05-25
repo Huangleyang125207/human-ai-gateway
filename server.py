@@ -1802,6 +1802,38 @@ def _index_upsert(date: str, filename: str, **fields):
         _save_attachments_index(arr)
 
 
+def _ocr_text(file_path: Path) -> str:
+    """统一 OCR 出口:端侧优先(macOS Vision / rapidocr ONNX),失败兜底百度云。
+
+    返恒非 None 的字符串(空 = 没识别出 / 全失败)。3 个 caller 共用,
+    替换原 from ocr import baidu_ocr_image 的散落模式。
+
+    优先级:
+      1. ocr_local.ocr_local(file_path) → 端侧链(macOS Vision Swift binary +
+         rapidocr ONNX fallback)。返 str = 成功(可能空),None = 端侧不可用
+      2. 端侧 None → 走 baidu(若 config 有 key);无 key → 返 ""
+    """
+    try:
+        from ocr_local import ocr_local
+        local_result = ocr_local(file_path)
+        if local_result is not None:
+            return local_result
+    except Exception as e:
+        log.info(f"ocr_local failed for {file_path.name}: {e}")
+    # 端侧不可用 → baidu cloud fallback
+    try:
+        cfg = load_config() or {}
+        api_key = cfg.get("baidu_ocr_api_key", "")
+        secret_key = cfg.get("baidu_ocr_secret_key", "")
+        if not api_key or not secret_key:
+            return ""  # 都端侧不行 + baidu 没 key → 给空
+        from ocr import baidu_ocr_image
+        return baidu_ocr_image(file_path, api_key, secret_key) or ""
+    except Exception as e:
+        log.warning(f"baidu OCR also failed for {file_path.name}: {e}")
+        return ""
+
+
 def _index_attachment(date: str, filename: str, original: str, size: int):
     """后台跑 OCR + 写索引。失败也不抛(索引降级)。
     vision 分类不在这里跑(成本考虑):upload 即跑 vision 对"上传多但不讨论"
@@ -1811,13 +1843,7 @@ def _index_attachment(date: str, filename: str, original: str, size: int):
     f = ATTACHMENTS_DIR / date / filename
     ocr_text = ""
     try:
-        cfg = load_config() or {}
-        from ocr import baidu_ocr_image
-        ocr_text = baidu_ocr_image(
-            f,
-            cfg.get("baidu_ocr_api_key", ""),
-            cfg.get("baidu_ocr_secret_key", ""),
-        ) or ""
+        ocr_text = _ocr_text(f)
     except Exception as e:
         log.warning(f"index OCR failed for {filename}: {e}")
     # upsert 而非 append:若 vision call 先到、已建好 entry,这里只补 OCR / 元数据,
@@ -2008,16 +2034,10 @@ def _strip_ocr_from_history(text: str) -> str:
 
 
 def _refs_to_image_blocks(refs):
-    """v2(MiniMax 中国版无视觉模型,改走百度 OCR):
-    从 context.refs 抽 image,跑 OCR,返回 [{filename, ocr_text}] 列表。
+    """从 context.refs 抽 image,跑 OCR,返回 [{filename, ocr_text}] 列表。
     上层把这个嵌进 user message 文本里给 LLM。
+    走 _ocr_text 统一出口(端侧优先,baidu 兜底)。
     """
-    from ocr import baidu_ocr_image
-
-    cfg = load_config() or {}
-    api_key = cfg.get("baidu_ocr_api_key", "")
-    secret_key = cfg.get("baidu_ocr_secret_key", "")
-
     out = []
     for r in refs or []:
         if r.get("kind") != "image":
@@ -2029,10 +2049,9 @@ def _refs_to_image_blocks(refs):
         f = ATTACHMENTS_DIR / m.group(1) / m.group(2)
         if not f.exists():
             continue
-        text = baidu_ocr_image(f, api_key, secret_key)
         out.append({
             "filename": (r.get("payload") or {}).get("original") or f.name,
-            "ocr_text": text,
+            "ocr_text": _ocr_text(f),
         })
     return out
 
@@ -4072,12 +4091,7 @@ async def cutout_image(req: Request):
     cfg = load_config() or {}
     ocr_pill_count = None
     try:
-        from ocr import baidu_ocr_image
-        ocr_text = baidu_ocr_image(
-            src,
-            cfg.get("baidu_ocr_api_key", ""),
-            cfg.get("baidu_ocr_secret_key", ""),
-        ) or ""
+        ocr_text = _ocr_text(src)
         ocr_pill_count = _parse_pill_count_from_ocr(ocr_text)
         if ocr_pill_count:
             # 只在 meta 还没填过 total 时自动写入(尊重用户已有手填)

@@ -75,6 +75,7 @@ ADDS=(
   --add-data "cutout.py:."
   --add-data "cutout_local.py:."
   --add-data "ocr.py:."
+  --add-data "ocr_local.py:."
   --add-data "tools:tools"
 )
 # uvicorn 的隐式 import(PyInstaller 默认抓不到)
