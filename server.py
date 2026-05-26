@@ -5001,11 +5001,11 @@ def setup_current():
     return {
         "models": cfg.get("models", []),
         "default_model_id": cfg.get("default_model_id", ""),
-        "baidu_ocr_api_key": cfg.get("baidu_ocr_api_key", ""),
-        "baidu_ocr_secret_key": cfg.get("baidu_ocr_secret_key", ""),
+        "dashscope_api_key": cfg.get("dashscope_api_key", ""),
+        "dashscope_base_url": cfg.get("dashscope_base_url", ""),
+        "dashscope_vision_model": cfg.get("dashscope_vision_model", ""),
         "baidu_cutout_api_key": cfg.get("baidu_cutout_api_key", ""),
         "baidu_cutout_secret_key": cfg.get("baidu_cutout_secret_key", ""),
-        "gemini_api_key": cfg.get("gemini_api_key", ""),
     }
 
 
@@ -5020,9 +5020,8 @@ async def setup_save_partial(req: Request):
         cfg["models"] = body["models"]
     if "default_model_id" in body and body["default_model_id"]:
         cfg["default_model_id"] = body["default_model_id"]
-    for k in ("baidu_ocr_api_key", "baidu_ocr_secret_key",
-              "baidu_cutout_api_key", "baidu_cutout_secret_key",
-              "gemini_api_key"):
+    for k in ("dashscope_api_key", "dashscope_base_url", "dashscope_vision_model",
+              "baidu_cutout_api_key", "baidu_cutout_secret_key"):
         if k in body:
             v = body[k]
             if v == "" or v is None:

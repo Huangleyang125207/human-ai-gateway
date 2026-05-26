@@ -125,11 +125,13 @@
           <section class="setup-section setup-section-primary">
             <h3>① 说话的 · <span class="setup-role">DeepSeek 直连</span></h3>
             <div class="setup-howto">
-              这是跟你聊天、写日记的 AI 主体。<b>直接给 DeepSeek 充值</b> — 比走聚合平台多一份"我在养自己挑的 AI"的关系感。
+              跟你聊天、写日记的 AI。<b>直接到 DeepSeek 官方充值。</b>
+              <br><br>
+              V4 Pro 现在永久 <b>2.5 折</b>(原价的 1/4),10-20 元够用很久。
               <ol>
                 <li>访问 <a href="https://platform.deepseek.com/" target="_blank" rel="noopener">platform.deepseek.com</a> 注册/登录</li>
                 <li>左侧菜单 <b>API Keys</b> → <b>Create new API key</b></li>
-                <li>充值 <b>$1-2 起步</b>(够你用很久)— 新用户首充常有赠送</li>
+                <li>充值</li>
                 <li>复制 sk-... 粘贴到下方,测试通过即可</li>
               </ol>
             </div>
@@ -139,15 +141,13 @@
           <section class="setup-section">
             <h3>② 眼睛 · <span class="setup-role">阿里云百炼(给 DeepSeek 装视觉)</span></h3>
             <div class="setup-howto setup-howto-secondary">
-              DeepSeek 本身<b>不会看图</b>。你拖一张照片进对话,它只能看到文件名。
-              百炼提供 qwen3-vl 看图模型 — 每次拖图后,它先识别"这是一份羊排饭",再把这条 hint 喂给 DeepSeek,DeepSeek 才知道你贴了什么。
-              <br><br>
-              没填的话:拖图功能会瘸 — 抠图走端侧(macOS Subject Lift 仍然能用),但 AI 不知道图里是啥,不会自动定位贴到对应 entry。
+              根据指引获取阿里云百炼 API,为你的 DeepSeek 装上眼睛。
               <ol>
-                <li>访问 <a href="https://www.aliyun.com/benefit/scene/ai-discount" target="_blank" rel="noopener">aliyun.com / AI 优惠场景</a> 注册,有新用户 token 福利</li>
+                <li>访问 <a href="https://www.aliyun.com/benefit/scene/ai-discount" target="_blank" rel="noopener">aliyun.com / AI 优惠场景</a> 注册,百炼新用户每个模型送 <b>100 万 token / 90 天</b></li>
                 <li>进 <a href="https://bailian.console.aliyun.com/" target="_blank" rel="noopener">百炼控制台</a> → 开通服务(免费)</li>
                 <li>左侧 <b>API-KEY</b> → 创建</li>
-                <li>每张图分类约几分钱(qwen3-vl-flash),日记重度用月成本 ¥个位数</li>
+                <li>每张图 ~0.03 分(qwen3-vl-flash 实测),10 元能识约 3.6 万张;新用户 100 万免费 token 够识 ~800 张</li>
+                <li>免费额度用完后 → <a href="https://expense.console.aliyun.com/finance/recharge" target="_blank" rel="noopener">阿里云充值入口</a></li>
               </ol>
             </div>
             <div class="bailian-card" id="bailianCard"></div>
