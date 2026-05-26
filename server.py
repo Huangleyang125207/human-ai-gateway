@@ -418,6 +418,44 @@ def load_protocol(name: str, model_id: str = None) -> str:
 
 
 # ── system prompt builder ────────────────────────────────────────────
+# user 视图注入(USER_PULSE + 所有 memory 内容)— phase 1 默契实验
+# 静态文件 read 走 module-level cache,避免每次 chat I/O
+_USER_PULSE_PATH = Path("/Users/claudecodedezhuanshumac/agents创作平台/agents/human-ai-schedule/USER_PULSE.md")
+_MEMORY_DIR = Path("/Users/claudecodedezhuanshumac/.claude/projects/-Users-claudecodedezhuanshumac-agents----/memory")
+_USER_CTX_CACHE: dict = {"sig": None, "content": ""}
+
+def _load_user_context() -> str:
+    """合并 USER_PULSE.md + memory/*.md(排除索引)。改一次文件 invalidate 一次缓存。"""
+    files = []
+    if _USER_PULSE_PATH.exists():
+        files.append(_USER_PULSE_PATH)
+    if _MEMORY_DIR.exists():
+        files.extend(sorted(p for p in _MEMORY_DIR.glob("*.md") if p.name != "MEMORY.md"))
+    sig = tuple((str(p), p.stat().st_mtime) for p in files)
+    if _USER_CTX_CACHE["sig"] == sig:
+        return _USER_CTX_CACHE["content"]
+    parts = []
+    if _USER_PULSE_PATH.exists():
+        try:
+            parts.append(f"\n\n=== USER_PULSE(葱鸭当下快照,先读这条建立 mental model)===\n{_USER_PULSE_PATH.read_text(encoding='utf-8')}")
+        except Exception:
+            pass
+    mem_parts = []
+    for p in files:
+        if p == _USER_PULSE_PATH:
+            continue
+        try:
+            mem_parts.append(f"--- {p.stem} ---\n{p.read_text(encoding='utf-8')}")
+        except Exception:
+            pass
+    if mem_parts:
+        parts.append("\n\n=== 协作 memory(具体规则 / 用户事实 / 项目决策)===\n" + "\n\n".join(mem_parts))
+    content = "".join(parts)
+    _USER_CTX_CACHE["sig"] = sig
+    _USER_CTX_CACHE["content"] = content
+    return content
+
+
 def build_system_prompt(context: dict = None, model_id: str = None) -> str:
     """构造 system prompt。Lean baseline + protocol 索引;具体协议 AI 用
     load_protocol tool 按需拉。model_id 用于替换 prompt 模板里的 {model_id}。
@@ -441,6 +479,11 @@ def build_system_prompt(context: dict = None, model_id: str = None) -> str:
         "\n"
         "运行环境:你写的 vault 内容落进 Obsidian markdown(`.md` 文件 + Obsidian/gateway 双端 render),不是聊天框。该用 markdown / wiki-link 语法就用,别 plain text。"
     ]
+
+    # user 视图 inject(USER_PULSE + 全部 memory)— 放在身份段后、protocol 目录前
+    user_ctx = _load_user_context()
+    if user_ctx:
+        parts.append(user_ctx)
 
     # protocol 目录 — AI 知道有这些协议可 load
     protocol_index = "\n\n=== 可用 protocols(用 load_protocol(name=...) 按需拉详细规则)===\n"
