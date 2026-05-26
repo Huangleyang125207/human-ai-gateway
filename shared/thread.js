@@ -12,6 +12,7 @@
 
 (function () {
   const THREAD_KEY = "gateway.thread.history.v1";
+  const MTIME_KEY = "gateway.thread.synced_mtime.v1";  // 本地缓存所基于的 server mtime
   const MODEL_KEY = "gateway.thread.model_id.v1";
   const MAX_HISTORY = 100;      // 发给 server 的总条数;server 取最近 20 原文,更早的做摘要
   const PERSIST_LIMIT = 200;    // localStorage 最多存 N 条
@@ -44,8 +45,24 @@
     open: false,
     apiOk: null,
   };
-  // server-side mtime — 用于 poll diff:server > 这个值才重渲(避免自己写完被自己 pull 一次)
-  let lastServerMtime = 0;
+  // server-side mtime — 本地缓存所基于的 server 状态版本。判同步靠它(recency),不靠条数。
+  // 从 localStorage 恢复:重开标签页时知道自己缓存的是哪个 server 版本,避免旧缓存盖新历史。
+  let lastServerMtime = (function () {
+    try { return Number(localStorage.getItem(MTIME_KEY)) || 0; } catch { return 0; }
+  })();
+  function _persistMtime() {
+    try { localStorage.setItem(MTIME_KEY, String(lastServerMtime)); } catch {}
+  }
+  function _persistLocal() {
+    try { localStorage.setItem(THREAD_KEY, JSON.stringify(state.history.slice(-PERSIST_LIMIT))); } catch {}
+    _persistMtime();
+  }
+  function _rerender() {
+    if (typeof stream !== "undefined" && stream) {
+      stream.innerHTML = "";
+      for (const m of state.history) appendMsg(m);
+    }
+  }
 
   function loadHistory() {
     try {
@@ -64,66 +81,90 @@
       );
     } catch {}
     // 2. server(跨浏览器 / 跨设备真相源)
+    //    带 base_mtime 做 CAS:server 若发现期间有人写过(mtime 变了)→ 409,
+    //    说明本 tab 的 state 陈旧,绝不能覆盖 → 改为拉取 server 最新(防 5.26 那种事故)
     fetch("/api/thread/save", {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ history: state.history.slice(-PERSIST_LIMIT) }),
-    }).then(r => r.json()).then(d => {
-      if (d && d.mtime) lastServerMtime = d.mtime;
+      body: JSON.stringify({ history: state.history.slice(-PERSIST_LIMIT), base_mtime: lastServerMtime }),
+    }).then(async r => {
+      if (r.status === 409) {
+        console.warn("[thread] save 冲突(base_mtime 陈旧)— server 有更新状态,放弃覆盖,改拉 server");
+        await forceReloadFromServer();
+        return;
+      }
+      const d = await r.json();
+      if (d && d.mtime) { lastServerMtime = d.mtime; _persistMtime(); }
     }).catch(() => {});  // 离线 / server down 都不阻塞
   }
 
+  async function forceReloadFromServer() {
+    // 冲突后无条件采纳 server(它 mtime 更新 = 更 canonical)。
+    // 本 tab 的内容仍留在 localStorage 兜底,不会凭空消失。
+    try {
+      const r = await fetch("/api/thread/history");
+      const d = await r.json();
+      const hist = Array.isArray(d.history) ? d.history : [];
+      state.history = hist.slice(-PERSIST_LIMIT);
+      lastServerMtime = d.mtime || 0;
+      _persistLocal();
+      _rerender();
+    } catch {}
+  }
+
   async function syncFromServer() {
-    // 轮询用:仅 server mtime > 本地基线 时尝试同步;且 server "比本地多" 才覆盖
+    // 轮询:server mtime > 本地基线 → server 更新了 → 采纳。
+    // 不再用条数判断(条数多≠更新;陈旧标签页条数可能更多但内容旧 — 5.26 事故根因)。
     try {
       const r = await fetch("/api/thread/history");
       const d = await r.json();
       const mtime = d.mtime || 0;
-      if (mtime <= lastServerMtime) return false;
+      if (mtime <= lastServerMtime) return false;  // server 没更新
       const hist = Array.isArray(d.history) ? d.history : [];
-      // 防御:server 比 local 少 → 几乎一定是 server 文件被误删 / 测试污染 /
-      // 其他 client 错误 reset。绝不让 server 蚕食本地;反过来推 LS 救场。
-      if (hist.length < state.history.length) {
-        saveHistory();
+      // 唯一例外:server 推进到「空」但本地有内容 → 疑似文件被误删/污染,
+      // 不采纳空、也不 push(避免覆盖战),只 warn,留人工处理。
+      if (hist.length === 0 && state.history.length > 0) {
+        console.warn("[thread] server 推进到空但本地有历史 — 疑似 server 文件异常,暂不同步");
         return false;
       }
       state.history = hist.slice(-PERSIST_LIMIT);
       lastServerMtime = mtime;
-      try { localStorage.setItem(THREAD_KEY, JSON.stringify(state.history)); } catch {}
-      if (typeof stream !== "undefined" && stream) {
-        stream.innerHTML = "";
-        for (const m of state.history) appendMsg(m);
-      }
+      _persistLocal();
+      _rerender();
       return true;
     } catch { return false; }
   }
 
   async function initSync() {
-    // 启动时三分支(永远 "数据多" 的那侧赢,杜绝事故吃数据):
-    //   server > local → server 覆盖本地(其他 client/设备写过)
-    //   local > server → push 本地(server 是新的/被清/初次)
-    //   等长 + server 有 mtime → 采 server(假定同份数据,基线对齐)
+    // 真相源 = server 文件。localStorage 只是离线缓存,带它对应的 syncedMtime(lastServerMtime)。
+    // 判定靠 recency(mtime),不靠条数:
+    //   server.mtime > 本地基线 → server 更新 → 采纳 server(canonical)
+    //   server 空 + 本地有       → server 文件丢/首次 → push 本地救场
+    //   本地基线 > server.mtime  → 本地缓存比 server 还新(离线编辑过)→ push(CAS 复核)
+    //   相等                      → 已同步,no-op
+    // 旧版 localStorage 没存过 syncedMtime → lastServerMtime=0 → server>0 必采纳 server,
+    // 顺带清掉「陈旧 100 条」那种毒缓存(5.26 事故)。
     try {
       const r = await fetch("/api/thread/history");
       const d = await r.json();
       const serverHist = Array.isArray(d.history) ? d.history : [];
       const serverMtime = d.mtime || 0;
 
-      if (serverHist.length > state.history.length) {
-        state.history = serverHist.slice(-PERSIST_LIMIT);
-        lastServerMtime = serverMtime;
-        try { localStorage.setItem(THREAD_KEY, JSON.stringify(state.history)); } catch {}
-        if (stream) {
-          stream.innerHTML = "";
-          for (const m of state.history) appendMsg(m);
+      if (serverMtime > lastServerMtime) {
+        if (serverHist.length === 0 && state.history.length > 0) {
+          console.warn("[thread] server 空但本地有历史 — 不采纳空,push 本地救场");
+          saveHistory();
+          return;
         }
-      } else if (state.history.length > serverHist.length) {
-        // local 更多 → push 上去
-        saveHistory();
-      } else if (serverMtime > 0) {
-        // 等长 + server 有 mtime → 采 server 文本(可能内容一致,确保基线)
         state.history = serverHist.slice(-PERSIST_LIMIT);
         lastServerMtime = serverMtime;
+        _persistLocal();
+        _rerender();
+      } else if (serverMtime === 0 && state.history.length > 0) {
+        saveHistory();  // server 没文件 / 首次 → push 本地
+      } else if (lastServerMtime > serverMtime && state.history.length > 0) {
+        saveHistory();  // 本地缓存更新(离线编辑)→ push,CAS 会复核
       }
+      // 其余:相等 → 已同步
     } catch {}
   }
 

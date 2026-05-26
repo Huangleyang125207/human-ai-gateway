@@ -4019,11 +4019,33 @@ THREAD_HISTORY_PATH = DATA_DIR / "thread-history.json"
 _THREAD_LOCK = threading.Lock()
 
 
-def _thread_history_mtime_ns() -> int:
+def _thread_history_mtime_ms() -> int:
+    """毫秒级 mtime。用 ms(~1.78e12)而非 ns(~1.78e18)是因为 ns 超过
+    JS Number.MAX_SAFE_INTEGER(9e15),前端存/传时丢精度会导致 CAS 把合法 save 误判成冲突。
+    ms 精度对单用户冲突检测绰绰有余(同毫秒两次写几乎不可能)。"""
     try:
-        return THREAD_HISTORY_PATH.stat().st_mtime_ns
+        return THREAD_HISTORY_PATH.stat().st_mtime_ns // 1_000_000
     except FileNotFoundError:
         return 0
+
+
+def _thread_save_is_stale(base_mtime, current_mtime: int) -> bool:
+    """CAS 判定:client 回传它 save 所基于的 base_mtime,若跟当前存档 mtime 不符,
+    说明期间别的 client(或陈旧标签页)写过 → 这次 save 是陈旧覆盖 → 该拒。
+
+    豁免:
+    - base_mtime is None(旧 client 没回传)→ 不判定,放行(过渡兼容)
+    - current_mtime == 0(文件还不存在,首次写)→ 放行
+    防的就是 5.17 / 5.26 那种「开了几天的旧标签页用内存里的旧 history 盖掉新历史」。
+    """
+    if base_mtime is None:
+        return False
+    if current_mtime == 0:
+        return False
+    try:
+        return int(base_mtime) != current_mtime
+    except (TypeError, ValueError):
+        return False
 
 
 @app.get("/api/health")
@@ -4040,7 +4062,7 @@ def thread_history_get():
     try:
         with _THREAD_LOCK:
             data = json.loads(THREAD_HISTORY_PATH.read_text(encoding="utf-8"))
-            mtime = _thread_history_mtime_ns()
+            mtime = _thread_history_mtime_ms()
         if not isinstance(data, list):
             data = []
         return {"history": data, "mtime": mtime}
@@ -4056,17 +4078,26 @@ async def thread_history_save(req: Request):
     """
     body = await req.json()
     hist = body.get("history")
+    base_mtime = body.get("base_mtime")  # client 上次 GET/save 拿到的 mtime,用于 CAS
     if not isinstance(hist, list):
         raise HTTPException(400, "history must be a list")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with _THREAD_LOCK:
+        current = _thread_history_mtime_ms()
+        # CAS 守门:base_mtime 跟当前不符 → 陈旧覆盖,拒绝。client 应 409 后 reload server 再说。
+        if _thread_save_is_stale(base_mtime, current):
+            raise HTTPException(status_code=409, detail={
+                "conflict": True,
+                "current_mtime": current,
+                "message": "stale base_mtime — reload server history before saving",
+            })
         # rotate 5 份备份 + 原子写;事故能 rollback 到最近 5 个版本
         _safe_write_text(
             THREAD_HISTORY_PATH,
             json.dumps(hist, ensure_ascii=False, indent=2),
             rotate=True,
         )
-        mtime = _thread_history_mtime_ns()
+        mtime = _thread_history_mtime_ms()
     return {"ok": True, "mtime": mtime, "count": len(hist)}
 
 
