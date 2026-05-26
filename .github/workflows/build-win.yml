@@ -1,0 +1,96 @@
+name: Build Windows .exe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.py'
+      - '**.html'
+      - 'shared/**'
+      - 'widgets/**'
+      - 'vendor/**'
+      - 'brand/**'
+      - 'protocols/**'
+      - 'tools/**'
+      - 'requirements.txt'
+      - 'build-win.bat'
+      - '.github/workflows/build-win.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        shell: cmd
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install rapidocr-onnxruntime rembg pyinstaller
+
+      - name: Build .exe with PyInstaller
+        shell: cmd
+        run: |
+          pyinstaller ^
+            --name Gateway ^
+            --noconsole ^
+            --noconfirm ^
+            --distpath dist-pyinstaller ^
+            --workpath build ^
+            --add-data "index.html;." ^
+            --add-data "day.html;." ^
+            --add-data "reset.html;." ^
+            --add-data "history.html;." ^
+            --add-data "consent.html;." ^
+            --add-data "shared;shared" ^
+            --add-data "widgets;widgets" ^
+            --add-data "vendor;vendor" ^
+            --add-data "brand;brand" ^
+            --add-data "protocols;protocols" ^
+            --add-data ".gateway-config.example.json;." ^
+            --add-data "vault_config.py;." ^
+            --add-data "vault_git.py;." ^
+            --add-data "history_exporter.py;." ^
+            --add-data "outcome_tracker.py;." ^
+            --add-data "cutout.py;." ^
+            --add-data "cutout_local.py;." ^
+            --add-data "ocr.py;." ^
+            --add-data "ocr_local.py;." ^
+            --add-data "tools;tools" ^
+            --hidden-import uvicorn.logging ^
+            --hidden-import uvicorn.loops.auto ^
+            --hidden-import uvicorn.loops.asyncio ^
+            --hidden-import uvicorn.protocols.http.h11_impl ^
+            --hidden-import uvicorn.protocols.http.auto ^
+            --hidden-import uvicorn.protocols.websockets.auto ^
+            --hidden-import uvicorn.protocols.websockets.websockets_impl ^
+            --hidden-import uvicorn.lifespan.on ^
+            --hidden-import uvicorn.lifespan.off ^
+            --hidden-import multipart ^
+            --hidden-import email_validator ^
+            --hidden-import rapidocr_onnxruntime ^
+            --hidden-import rembg ^
+            server.py
+
+      - name: Zip Gateway folder
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist-pyinstaller\Gateway -DestinationPath Gateway-windows-x64.zip
+          Get-Item Gateway-windows-x64.zip | Select-Object Name, @{Name='SizeMB';Expression={[math]::Round($_.Length/1MB,1)}}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gateway-windows-x64
+          path: Gateway-windows-x64.zip
+          retention-days: 30
