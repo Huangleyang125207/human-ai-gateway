@@ -1863,13 +1863,15 @@ body.thread-resizing { transition: none; }
   border-radius: 6px;
   overflow-x: auto;
   margin: 8px 0;
-  font: 12.5px var(--sans);
-  line-height: 1.55;
+  font: 12.5px var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  line-height: 1.5;
 }
 .entry-text pre code,
 .t-msg .body pre code {
   background: transparent;
   padding: 0;
+  /* 覆盖 .entry-text code 的 var(--sans) — ASCII 图 / 代码块必须等宽才对齐 */
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 }
 
 .entry-text hr,
