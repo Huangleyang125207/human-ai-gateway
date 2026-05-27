@@ -87,6 +87,10 @@ pub fn run() {
             .title("Gateway · 半小时复盘")
             .inner_size(1200.0, 850.0)
             .resizable(true)
+            // Tauri 默认在 webview 层注册原生拖放处理器,吞掉 OS 文件 drop → 前端 HTML5
+            // dragover/drop 收不到(thread.js 的拖图上传失灵)。禁掉它,让 WKWebView 的
+            // HTML5 拖放像浏览器一样直达网页。守铁律:壳侧配置,前端零改、不碰 JS 桥。
+            .disable_drag_drop_handler()
             .build()?;
             Ok(())
         })
