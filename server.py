@@ -1607,6 +1607,9 @@ TOOL_GROUPS = {
     "images": [
         "place_scrapbook_image", "delete_attachment",
         "set_water_cup_image", "set_daily_task_image",
+        # check_daily_task 也放这:拖补剂图 = 打卡(设图标 + 勾选)的一体动作,
+        # 不带它的话 AI 只能设图标、勾不上今天的打卡(它另外也在 write_journal 组)。
+        "check_daily_task",
     ],
     "widgets_and_tasks": [
         "list_widgets", "add_widget", "patch_widget",
@@ -1622,7 +1625,8 @@ BOOTSTRAP_TOOL_NAMES = {
 }
 
 _INITIAL_LOAD_KEYWORDS = re.compile(
-    r'(记一下|记一笔|记下|写进|写到|加进|append|更新.*?日记|改.*?日记)'
+    r'(记一下|记一笔|记下|写进|写到|加进|append|更新.*?日记|改.*?日记'
+    r'|打卡|打个卡|勾选|勾上|勾掉|勾了|标记完成|标为完成)'  # 打卡类 → 要 check_daily_task(在 write_journal 组)
 )
 
 def _initial_groups(user_msg: str, context: dict) -> set:
@@ -2234,7 +2238,11 @@ async def chat(req: Request):
             f"    3. **不要调** place_scrapbook_image,等用户答\n"
             f"\n"
             f"  特殊类型分流(覆盖上面三 path):\n"
-            f"    kind=supplement → 走 set_daily_task_image(列 daily tasks 让用户挑哪个)\n"
+            f"    kind=supplement → 这是补剂打卡,三步连做(别只设图不勾):\n"
+            f"      ① read_today_schedule(date='{view_date}') 拿 daily task 列表,按描述/品牌匹配是哪个;\n"
+            f"         匹配不出来才列出来反问用户挑哪个\n"
+            f"      ② set_daily_task_image(task_name, attachment_url) — 把照片设成该 task 的打卡图标\n"
+            f"      ③ check_daily_task(task_name, checked=true) — 勾上今天的打卡\n"
             f"    kind=doc + ocr_likely=true → 走 patch_journal_block(把 OCR 文本写进当前块)"
         )
         pre_sections.append("\n".join(v_lines))
