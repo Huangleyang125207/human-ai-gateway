@@ -852,6 +852,31 @@ body.thread-resizing { transition: none; }
 .t-msg.ai   .who::before { content: "✦ "; color: var(--peach); }
 .t-msg .body { color: var(--ink); white-space: pre-wrap; }
 .t-msg.ai .body { color: var(--ink-2); }
+
+/* AI 在 chat 里返的图 → 缩略图,不撑满气泡;点击开 lightbox 看大图 */
+.t-msg .body img {
+  max-width: 180px;
+  max-height: 180px;
+  border-radius: 8px;
+  border: 1px solid rgba(58, 52, 44, 0.15);
+  cursor: zoom-in;
+  display: block;
+  margin: 6px 0;
+  object-fit: cover;
+}
+/* 全屏看大图 lightbox */
+.img-lightbox {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(20, 18, 15, 0.88);
+  display: none; align-items: center; justify-content: center;
+  cursor: zoom-out;
+  opacity: 0; transition: opacity 0.18s ease;
+}
+.img-lightbox.on { opacity: 1; }
+.img-lightbox img {
+  max-width: 92vw; max-height: 92vh;
+  border-radius: 6px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
 .t-msg pre {
   font: 12px ui-monospace, monospace;
   background: var(--bg-2);

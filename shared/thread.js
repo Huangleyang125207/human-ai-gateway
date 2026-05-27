@@ -410,6 +410,36 @@
     }).join("");
   }
 
+  // AI 在 chat 返的图默认缩略图(CSS 限尺寸),点击开全屏 lightbox 看大图
+  function openLightbox(src) {
+    let lb = document.getElementById("imgLightbox");
+    if (!lb) {
+      lb = document.createElement("div");
+      lb.id = "imgLightbox";
+      lb.className = "img-lightbox";
+      lb.innerHTML = `<img alt="">`;
+      const close = () => {
+        lb.classList.remove("on");
+        setTimeout(() => { lb.style.display = "none"; }, 180);
+      };
+      lb.addEventListener("click", close);
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && lb.style.display === "flex") close();
+      });
+      document.body.appendChild(lb);
+    }
+    lb.querySelector("img").src = src;
+    lb.style.display = "flex";
+    void lb.offsetWidth;        // 强制 reflow,让 .on 的 opacity transition 触发(比 rAF 在各上下文更可靠)
+    lb.classList.add("on");
+  }
+  if (stream) {
+    stream.addEventListener("click", (e) => {
+      const img = e.target.closest(".body img");
+      if (img && img.src) openLightbox(img.src);
+    });
+  }
+
   function appendMsg(m) {
     const el = document.createElement("div");
     el.className = `t-msg ${m.role === "user" ? "user" : "ai"}`;
