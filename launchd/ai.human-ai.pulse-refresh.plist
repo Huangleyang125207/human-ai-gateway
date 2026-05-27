@@ -16,18 +16,13 @@
     <integer>0</integer>
   </dict>
 
+  <!-- 不再写死 4321:Tauri 壳用动态端口。gw-cron.sh 现场读 ~/.human-ai/.gateway-port。 -->
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/curl</string>
-    <string>-sS</string>
-    <string>-X</string>
-    <string>POST</string>
-    <string>http://127.0.0.1:4321/api/pulse/refresh-mirror</string>
-    <string>-H</string>
-    <string>Content-Type: application/json</string>
-    <string>-d</string>
+    <string>/bin/bash</string>
+    <string>/Users/claudecodedezhuanshumac/.human-ai/bin/gw-cron.sh</string>
+    <string>/api/pulse/refresh-mirror</string>
     <string>{}</string>
-    <string>--max-time</string>
     <string>60</string>
   </array>
 

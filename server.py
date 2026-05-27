@@ -6045,6 +6045,17 @@ if __name__ == "__main__":
     import uvicorn
     # 默认 4321;GATEWAY_PORT env 可覆盖(测试 / 多实例)
     port = int(os.environ.get("GATEWAY_PORT", "4321"))
+    # 写真实端口到已知文件,给外部 launchd cron 发现用(eval 21:30 / pulse-refresh 21:00)。
+    # Tauri 壳用动态端口 → cron 不能再写死 4321(否则连不上,5.27 留言板/PULSE 停更的真因)。
+    # 配套:~/.human-ai/bin/gw-cron.sh 读这个文件再 curl。
+    try:
+        _port_file = Path(os.path.expanduser("~/.human-ai/.gateway-port"))
+        _port_file.parent.mkdir(parents=True, exist_ok=True)
+        _tmp = _port_file.with_suffix(".port.tmp")
+        _tmp.write_text(str(port), encoding="utf-8")
+        _tmp.replace(_port_file)  # 原子替换
+    except Exception as _e:
+        print(f"[gateway] 写 .gateway-port 失败(cron 发现端口会受影响): {_e}")
     print(f"[gateway] starting on http://localhost:{port}")
     print(f"[gateway] static root: {GATEWAY_DIR}")
     print(f"[gateway] config: {CONFIG_PATH} {'(set)' if CONFIG_PATH.exists() else '(missing — copy .gateway-config.example.json)'}")
