@@ -1482,15 +1482,55 @@ def tool_set_daily_task_meta(args):
     return {"ok": True, "task_name": name, **_task_meta_state(name, meta_map)}
 
 
+# ── web_search 后端:百炼 enable_search 为主,ddgs 兜底 ──────────────────
+# 为什么:ddgs 走 DuckDuckGo/Google,大陆被墙、无代理用不了(5.27 调研实测)。
+# 百炼 enable_search 在大陆直连、复用用户已配的 dashscope key、对 deepseek/qwen 都支持,
+# 是大陆 + 单 API 的正解。OpenAI 兼容接口拿不到结构化来源,但模型文字答里常带链接,够用。
+_BAILIAN_SEARCH_MODEL = "qwen-flash"   # 便宜+快;搜索-总结任务足够;百炼托管,带 enable_search
+
+def _resolve_dashscope_creds():
+    """找百炼(dashscope)的 (api_key, base_url)。优先 models[] 里 base 含 dashscope 的 profile
+    (这用户 key 在那,非顶层),再退顶层 dashscope_api_key。找不到返 (None, None)。"""
+    cfg = load_config() or {}
+    for p in (cfg.get("models") or []):
+        if "dashscope" in (p.get("base_url") or "") and p.get("api_key"):
+            return p["api_key"], p["base_url"]
+    dk = cfg.get("dashscope_api_key", "")
+    if dk:
+        return dk, cfg.get("dashscope_base_url") or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    return None, None
+
+def _bailian_web_search(query: str) -> str:
+    """百炼 enable_search:模型联网搜 + 总结。大陆直连。没 key / 失败 → 抛异常给调用方降级。"""
+    key, base = _resolve_dashscope_creds()
+    if not key:
+        raise RuntimeError("no dashscope key")
+    from openai import OpenAI
+    client = OpenAI(api_key=key, base_url=base)
+    r = client.chat.completions.create(
+        model=_BAILIAN_SEARCH_MODEL,
+        messages=[{"role": "user", "content":
+                   "联网搜索并回答下面的查询。列关键事实要点,能附来源链接就附。简洁,别废话。\n\n" + query}],
+        extra_body={"enable_search": True,
+                    "search_options": {"search_strategy": "turbo", "enable_source": True}},
+        timeout=40,
+    )
+    ans = (r.choices[0].message.content or "").strip()
+    if not ans:
+        raise RuntimeError("百炼 search 返空")
+    return ans
+
 def _do_web_search(query: str, max_results: int = 5) -> str:
-    """ddgs 后端。三段式 fall through:
-      1. auto — 默认混合多引擎,中文 query 结果质量最高
-      2. duckduckgo,google,wikipedia — auto 崩时显式链(漏掉常炸 TLS 的 brave/mullvad)
-      3. wikipedia 单独 — 最后兜底(没 TLS 协议负担)
-    auto 失败常见原因:某个被选中的引擎 TLS handshake 崩
-    ('Unsupported protocol version 0x304')。
-    失败 / 空结果 都返字符串(不抛)。
-    """
+    """web_search 后端:主走百炼 enable_search(大陆直连),失败/没 dashscope key → ddgs 兜底。"""
+    try:
+        return _bailian_web_search(query)
+    except Exception as e:
+        log.info(f"[web_search] 百炼降级 ddgs: {type(e).__name__}: {str(e)[:120]}")
+        return _ddgs_search(query, max_results)
+
+def _ddgs_search(query: str, max_results: int = 5) -> str:
+    """[兜底] ddgs 后端(DuckDuckGo/Google 聚合,大陆需代理)。三段式 fall through。
+    auto 失败常见 TLS handshake 崩('Unsupported protocol version 0x304')。失败/空都返字符串。"""
     max_results = max(1, min(int(max_results or 5), 10))
     try:
         from ddgs import DDGS
