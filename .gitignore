@@ -7,3 +7,9 @@
 /build/
 *.spec
 brand/logo.icns
+
+# Tauri Rust build artifacts
+src-tauri/target/
+src-tauri/gen/
+dist-sidecar/
+src-tauri/binaries/
