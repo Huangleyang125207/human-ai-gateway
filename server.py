@@ -830,12 +830,16 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "渐进披露第一步:只返标题 + URL + ~80 char 摘要。**看完决定要不要 fetch_url 看正文,别只凭摘要答** — 摘要常没料。",
+            "description": "联网搜索(大陆直连)。category 选源:general=通用网页;wechat=微信公众号文章。"
+                           "**看完标题/摘要决定要不要 fetch_url 看正文,别只凭摘要答**。"
+                           "找公众号文章时务必用 category=wechat,通用搜搜不到公众号。",
             "parameters": {
                 "type": "object",
                 "required": ["query"],
                 "properties": {
                     "query": {"type": "string", "description": "搜索关键词,中英文均可"},
+                    "category": {"type": "string", "enum": ["general", "wechat"],
+                                 "description": "搜索源:general 通用(默认) / wechat 微信公众号文章"},
                     "max_results": {"type": "integer", "description": "返回多少条(默认 5,上限 10)"},
                 },
             },
@@ -1520,8 +1524,67 @@ def _bailian_web_search(query: str) -> str:
         raise RuntimeError("百炼 search 返空")
     return ans
 
-def _do_web_search(query: str, max_results: int = 5) -> str:
-    """web_search 后端:主走百炼 enable_search(大陆直连),失败/没 dashscope key → ddgs 兜底。"""
+_WEB_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+def _sogou_wechat_search(query: str, max_results: int = 8) -> str:
+    """搜微信公众号文章(经搜狗微信,大陆直连)。选择器移植自 SearXNG sogou_wechat 引擎。
+    返标题/链接/摘要;链接是搜狗跳转页,要看正文让 AI 再 fetch_url 它。"""
+    from lxml import html as _lx
+    try:
+        r = requests.get("https://weixin.sogou.com/weixin",
+                         params={"query": query, "type": 2, "page": 1},
+                         headers={"User-Agent": _WEB_UA, "Accept-Language": "zh-CN,zh;q=0.9"},
+                         timeout=12)
+    except Exception as e:
+        return f"[公众号搜索失败:{type(e).__name__}: {str(e)[:120]}]"
+    if "antispider" in r.url or "验证码" in r.text[:3000]:
+        return "[公众号搜索被搜狗反爬拦截 — 稍后再试或换关键词]"
+    parts = []
+    for item in _lx.fromstring(r.text).xpath('//li[contains(@id, "sogou_vr_")]')[:max_results]:
+        a = item.xpath('.//h3/a')
+        if not a:
+            continue
+        title = a[0].text_content().strip()
+        href = a[0].get("href", "")
+        if href.startswith("/link?url="):
+            href = "https://weixin.sogou.com" + href
+        snip = item.xpath('.//p[contains(@class, "txt-info")]')
+        content = (snip[0].text_content().strip()[:120]) if snip else ""
+        if title and href:
+            parts.append(f"- {title}\n  {href}\n  {content}")
+    return "\n".join(parts) if parts else "[公众号搜索无结果]"
+
+def _bilibili_search(query: str, max_results: int = 10) -> str:
+    """搜 B站视频(官方 JSON API,大陆直连)。移植自 SearXNG bilibili 引擎(假 buvid3 + Referer)。"""
+    import random, string
+    buvid = "".join(random.choice(string.hexdigits) for _ in range(16)) + "infoc"
+    try:
+        r = requests.get("https://api.bilibili.com/x/web-interface/search/type",
+                         params={"search_type": "video", "keyword": query, "page": 1,
+                                 "page_size": 20, "single_column": "0", "__refresh__": "true"},
+                         headers={"User-Agent": _WEB_UA, "Referer": "https://www.bilibili.com"},
+                         cookies={"buvid3": buvid, "i-wanna-go-back": "-1", "b_ut": "7"}, timeout=12)
+        data = (r.json().get("data") or {}).get("result") or []
+    except Exception as e:
+        return f"[B站搜索失败:{type(e).__name__}: {str(e)[:120]}]"
+    parts = []
+    for it in data[:max_results]:
+        title = re.sub(r"<[^>]+>", "", it.get("title", "") or "")
+        desc = (it.get("description") or "")[:100]
+        parts.append(f"- {title}(UP:{it.get('author','')})\n  {it.get('arcurl','')}\n  {desc}")
+    return "\n".join(parts) if parts else "[B站搜索无结果]"
+
+def _do_web_search(query: str, max_results: int = 5, category: str = "general") -> str:
+    """web_search 后端,按 category 分流(都大陆直连):
+      wechat   → 搜狗微信(公众号文章)
+      bilibili → B站视频(JSON API)
+      general  → 百炼 enable_search,失败/没 dashscope key → ddgs 兜底
+    """
+    if category == "wechat":
+        return _sogou_wechat_search(query, max_results)
+    if category == "bilibili":
+        return _bilibili_search(query, max_results)
     try:
         return _bailian_web_search(query)
     except Exception as e:
@@ -1567,7 +1630,10 @@ def tool_web_search(args):
     if not q:
         return {"error": "need query"}
     n = args.get("max_results", 5)
-    return {"ok": True, "query": q, "results": _do_web_search(q, n)}
+    cat = (args.get("category") or "general").strip().lower()
+    if cat not in ("general", "wechat"):   # bilibili 撤下(B站 search 需 WBI 签名,先不开;函数 dormant)
+        cat = "general"
+    return {"ok": True, "query": q, "category": cat, "results": _do_web_search(q, n, cat)}
 
 
 # PATTERN: util — minimal HTML → text(no deps)
