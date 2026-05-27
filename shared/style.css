@@ -1234,6 +1234,89 @@ body.thread-resizing { transition: none; }
   color: #fff;
   border-color: var(--peach, #a86e46);
 }
+
+/* ───────────── gw-dialog (页内 confirm/prompt/alert，替代原生弹窗) ───────────── */
+.gw-dlg-overlay {
+  position: fixed; inset: 0;
+  background: rgba(40, 32, 20, 0.32);
+  z-index: 10000;                       /* 高过 lightbox(9999)，弹窗永远在最上 */
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(2px);
+  opacity: 0; transition: opacity 0.16s ease;
+}
+.gw-dlg-overlay.on { opacity: 1; }
+.gw-dlg {
+  background: #fefaf2;
+  border: 1px solid rgba(58, 52, 44, 0.18);
+  border-radius: 12px;
+  padding: 24px 28px;
+  min-width: 300px; max-width: 460px;
+  box-shadow: 0 32px 80px rgba(58, 52, 44, 0.25);
+  transform: translateY(8px) scale(0.98);
+  transition: transform 0.16s ease;
+}
+.gw-dlg-overlay.on .gw-dlg { transform: none; }
+.gw-dlg-msg {
+  font: 15px/1.6 var(--serif);
+  color: var(--ink);
+  white-space: pre-wrap;                /* 保留 alert 的多行 */
+  margin-bottom: 18px;
+}
+.gw-dlg-input {
+  width: 100%; box-sizing: border-box;
+  padding: 9px 11px; margin-bottom: 18px;
+  font: 14px var(--sans);
+  border: 1px solid rgba(58, 52, 44, 0.2);
+  border-radius: 6px;
+  background: #fff; color: var(--ink);
+}
+.gw-dlg-input:focus { outline: none; border-color: var(--peach, #a86e46); }
+.gw-dlg-btns { display: flex; justify-content: flex-end; gap: 8px; }
+.gw-dlg-btn {
+  padding: 7px 18px;
+  border: 1px solid rgba(58, 52, 44, 0.2);
+  background: #fff; border-radius: 6px;
+  font: 13px var(--sans); color: var(--ink-2);
+  cursor: pointer;
+}
+.gw-dlg-btn:hover { background: rgba(168, 110, 70, 0.06); }
+.gw-dlg-btn.primary {
+  background: var(--peach, #a86e46); color: #fff;
+  border-color: var(--peach, #a86e46);
+}
+.gw-dlg-btn.primary.danger {
+  background: #b3492a; border-color: #b3492a;   /* 删除类用朱砂红 */
+}
+
+/* ── gw-undo · 撤回 toast(删除后从底部浮起，带 5s 倒计时进度条） ── */
+.gw-undo {
+  position: fixed;
+  left: 50%; bottom: 28px;
+  transform: translate(-50%, 16px);
+  z-index: 10001;
+  display: flex; align-items: center; gap: 14px;
+  padding: 11px 14px 11px 18px;
+  background: #2e2820; color: #f1e9da;          /* 深底，跟纸面对比，像"操作回执" */
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(40, 32, 20, 0.4);
+  font: 13px var(--sans);
+  opacity: 0; transition: opacity 0.18s ease, transform 0.18s ease;
+  overflow: hidden;
+}
+.gw-undo.on { opacity: 1; transform: translate(-50%, 0); }
+.gw-undo-msg { white-space: nowrap; }
+.gw-undo-btn {
+  background: transparent; border: none;
+  color: #e8b486; font: 600 13px var(--sans);
+  cursor: pointer; padding: 4px 8px; border-radius: 6px;
+  letter-spacing: 0.02em;
+}
+.gw-undo-btn:hover { background: rgba(232, 180, 134, 0.14); }
+.gw-undo-bar {
+  position: absolute; left: 0; bottom: 0; height: 2px; width: 100%;
+  background: #e8b486; transform-origin: left;
+  transform: scaleX(1);
+}
 .mini-modal-btn.primary:hover { background: #97603d; }
 .mini-modal-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 

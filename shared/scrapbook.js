@@ -290,18 +290,30 @@
   }
 
   function bindDelete(handle, it) {
-    handle.addEventListener("click", async (e) => {
+    handle.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (!confirm("删掉这张图?")) return;
-      try {
-        await fetch("/api/scrapbook/delete", {
-          method: "POST", headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({date: currentDate, id: it.id}),
-        });
-        await fetchAndRender(currentDate);
-      } catch (e) {
-        window.gateway?.whisper?.("删除失败 — " + e.message);
-      }
+      const wrap = handle.closest(".sb-wrap");
+      const date = currentDate;                       // 锁定当时的日期(撤回窗口内可能切天)
+      if (wrap) wrap.style.display = "none";           // 乐观隐藏
+      window.gateway?.entryWrap?.rewrap?.();           // 图没了 → 文字回填绕排
+      gatewayUndo("已删除图片", {
+        onUndo: () => {
+          if (wrap) wrap.style.display = "";
+          window.gateway?.entryWrap?.rewrap?.();
+        },
+        onCommit: async () => {                        // 撤回窗口过后才真删
+          try {
+            await fetch("/api/scrapbook/delete", {
+              method: "POST", headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({date, id: it.id}),
+            });
+            if (currentDate === date) await fetchAndRender(date);
+          } catch (err) {
+            window.gateway?.whisper?.("删除失败 — " + err.message);
+            if (wrap && currentDate === date) wrap.style.display = "";   // 删失败 → 复原
+          }
+        },
+      });
     });
   }
 

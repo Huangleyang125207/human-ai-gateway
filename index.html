@@ -33,7 +33,7 @@
   <script>
     document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("quitBtn")?.addEventListener("click", async () => {
-        if (!confirm("退出 Gateway?\nserver 会关掉,网页就不响应了 — 想再用得重新双击 Gateway.app。")) return;
+        if (!(await gatewayConfirm("退出 Gateway?\nserver 会关掉,网页就不响应了 — 想再用得重新双击 Gateway.app。", { danger: true, okText: "退出" }))) return;
         try {
           await fetch("/api/quit", { method: "POST" });
           document.body.innerHTML = '<div style="font:14px var(--sans); color:var(--ink-4); padding:80px; text-align:center;">Gateway 已停。<br><br>关掉这个页面即可。<br>下次想用,双击 Applications/Gateway。</div>';
@@ -109,6 +109,7 @@
 <script src="./vendor/dompurify.min.js" defer></script>
 <script src="./shared/scroll-drag.js?v=20260517e" defer></script>
 <script src="./shared/md.js?v=20260515f" defer></script>
+<script src="./shared/dialog.js?v=20260527a" defer></script>
 <script src="./shared/context-menu.js?v=20260515f" defer></script>
 <script src="./shared/thread.js?v=20260527thumb2" defer></script>
 <script src="./shared/notes-board.js?v=20260519i" defer></script>

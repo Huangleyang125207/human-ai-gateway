@@ -340,10 +340,10 @@
       });
       const d = await r.json();
       baidu._tested = !!d.ok;
-      if (!d.ok) alert(`抠图测试失败: ${d.reason || ""}`);
+      if (!d.ok) gatewayAlert(`抠图测试失败: ${d.reason || ""}`);
       renderBaidu();
     } catch (e) {
-      alert(`测试请求失败: ${e.message}`);
+      gatewayAlert(`测试请求失败: ${e.message}`);
     }
   }
 
@@ -394,7 +394,7 @@
         });
       }
     }
-    if (!profiles.length) { alert("没有可保存的 profile"); return; }
+    if (!profiles.length) { gatewayAlert("没有可保存的 profile"); return; }
     const def = deepseek.default_model_id || profiles[0].id;
     const payload = {
       models: profiles,
@@ -417,9 +417,9 @@
       });
       const d = await r.json();
       if (d.ok) { canClose = true; close(); location.reload(); }
-      else alert("保存失败: " + (d.detail || JSON.stringify(d)));
+      else gatewayAlert("保存失败: " + (d.detail || JSON.stringify(d)));
     } catch (e) {
-      alert("保存请求失败: " + e.message);
+      gatewayAlert("保存请求失败: " + e.message);
     }
   }
 

@@ -220,24 +220,31 @@
             window.gateway.thread?.addRef({ kind: "entry", label, payload });
           } },
         { label: "🗑 删整个时间块",
-          action: async () => {
-            if (!confirm(`确定清空 ${b.time} 整个时间块?`)) return;
-            try {
-              const r = await fetch("/api/journal/delete-block", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ time: b.time, date: currentDate }),
-              });
-              const data = await r.json();
-              if (data.error || data.detail) {
-                window.gateway.whisper?.("删除失败: " + (data.error || data.detail));
-                return;
-              }
-              window.gateway.whisper?.("✓ 已清空 " + b.time, 1800);
-              lastSig = null;
-              fetchJournal(currentDate);
-            } catch (err) {
-              window.gateway.whisper?.("删除失败: " + err.message);
-            }
+          action: () => {
+            const date = currentDate;                  // 锁定日期(撤回窗口内可能切天)
+            art.style.display = "none";                 // 乐观隐藏
+            gatewayUndo(`已清空 ${b.time}`, {
+              onUndo: () => { art.style.display = ""; },
+              onCommit: async () => {                   // 撤回窗口过后才真删
+                try {
+                  const r = await fetch("/api/journal/delete-block", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ time: b.time, date }),
+                  });
+                  const data = await r.json();
+                  if (data.error || data.detail) {
+                    window.gateway.whisper?.("删除失败: " + (data.error || data.detail));
+                    art.style.display = "";             // 失败复原
+                    return;
+                  }
+                  lastSig = null;
+                  if (currentDate === date) fetchJournal(date);
+                } catch (err) {
+                  window.gateway.whisper?.("删除失败: " + err.message);
+                  art.style.display = "";
+                }
+              },
+            });
           } },
       ]);
     });
@@ -453,7 +460,7 @@
       e.stopPropagation();
       window.gateway.menu?.show(e, [
         { label: "✎ 改 tag", action: async () => {
-          const cur = prompt("改 tag (不带 #):", t);
+          const cur = await gatewayPrompt("改 tag (不带 #):", t);
           if (cur == null) return;
           const cleaned = cur.trim().replace(/^#+/, "");
           if (!cleaned || cleaned === t) return;
@@ -533,7 +540,7 @@
         });
         const data = await r.json();
         if (!data.ok) {
-          alert("生成失败: " + (data.error || data.stdout || "unknown"));
+          gatewayAlert("生成失败: " + (data.error || data.stdout || "unknown"));
           return;
         }
         // 刷新 days 列表 + 跳到今天
@@ -544,7 +551,7 @@
         fetchJournal(today);
         if (data.created) bumpYahaha(btn);
       } catch (e) {
-        alert("server 不通: " + e.message);
+        gatewayAlert("server 不通: " + e.message);
       } finally {
         btn.disabled = false;
         btn.textContent = orig;
@@ -688,8 +695,8 @@
   }
 
   // ── daily task add modal (顶部补剂打卡式) ──────────────
-  function showTaskAddModal() {
-    const text = prompt("加新每日任务 (写文本即可,不用带 - [ ] 前缀):");
+  async function showTaskAddModal() {
+    const text = await gatewayPrompt("加新每日任务 (写文本即可,不用带 - [ ] 前缀):");
     if (!text || !text.trim()) return;
     fetch("/api/template/task", {
       method: "POST",
@@ -698,11 +705,11 @@
     }).then(r => r.json()).then(data => {
       lastSig = null;
       fetchJournal(currentDate);
-    }).catch(e => alert("失败: " + e.message));
+    }).catch(e => gatewayAlert("失败: " + e.message));
   }
 
-  function showTaskEditModal(oldText) {
-    const text = prompt("改这一项:", oldText);
+  async function showTaskEditModal(oldText) {
+    const text = await gatewayPrompt("改这一项:", oldText);
     if (text === null || text.trim() === oldText) return;
     fetch("/api/template/task", {
       method: "POST",
@@ -715,14 +722,18 @@
   }
 
   function showTaskDelConfirm(oldText) {
-    if (!confirm(`删除任务项: ${oldText}?`)) return;
-    fetch("/api/template/task", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "del", old_text: oldText }),
-    }).then(r => r.json()).then(() => {
-      lastSig = null;
-      fetchJournal(currentDate);
+    // 撤回式:不弹确认,5s 撤回窗口过后才真删(低频配置操作,defer-only,不乐观隐藏)
+    gatewayUndo(`已删除任务项「${oldText}」`, {
+      onCommit: () => {
+        fetch("/api/template/task", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "del", old_text: oldText }),
+        }).then(r => r.json()).then(() => {
+          lastSig = null;
+          fetchJournal(currentDate);
+        });
+      },
     });
   }
 
@@ -766,7 +777,7 @@
       });
       const data = await r.json();
       if (!data.ok) {
-        alert("生成失败: " + (data.error || data.stdout || "unknown"));
+        gatewayAlert("生成失败: " + (data.error || data.stdout || "unknown"));
         return;
       }
       await fetchDays();
@@ -775,7 +786,7 @@
       currentDate = goto;
       fetchJournal(goto);
     } catch (e) {
-      alert("server 不通: " + e.message);
+      gatewayAlert("server 不通: " + e.message);
     }
   }
 

@@ -103,7 +103,7 @@
         lines.push(`  · #${it.tag} ${it.row_date} ${it.row_time}:${it.link}`);
       });
     }
-    alert(lines.join("\n"));
+    gatewayAlert(lines.join("\n"));
   }
 
   document.addEventListener("DOMContentLoaded", () => {

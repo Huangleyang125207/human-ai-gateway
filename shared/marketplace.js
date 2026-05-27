@@ -317,7 +317,7 @@
       } catch (e) {
         cb.checked = !cb.checked;
         cb.disabled = false;
-        alert("切换失败:" + e.message);
+        gatewayAlert("切换失败:" + e.message);
       }
     });
     return el;

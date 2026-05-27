@@ -21,7 +21,7 @@
         const r = await fetch("/api/tag-aggregate");
         dataCache = await r.json();
       } catch (e) {
-        alert("聚合页加载失败:" + e.message);
+        gatewayAlert("聚合页加载失败:" + e.message);
         return;
       }
     }
@@ -38,7 +38,7 @@
   function render() {
     const sections = (dataCache && dataCache.sections) || [];
     if (!sections.length) {
-      alert("聚合页为空" + (dataCache.warning ? " — " + dataCache.warning : ""));
+      gatewayAlert("聚合页为空" + (dataCache.warning ? " — " + dataCache.warning : ""));
       return;
     }
     if (!activeTag || !sections.find(s => s.tag === activeTag)) {
@@ -90,12 +90,12 @@
   }
 
   async function register() {
-    const raw = prompt("新 project tag 名(不带 #,如 探索 / 桌宠):");
+    const raw = await gatewayPrompt("新 project tag 名(不带 #,如 探索 / 桌宠):");
     if (!raw) return;
     const tag = raw.trim().replace(/^#+/, "");
     if (!tag) return;
-    const description = (prompt(`#${tag} 描述(可空,1 句话 — 用户日后看 panel 用):`, "") || "").trim();
-    const withSub = confirm(`#${tag} 需要 Sub 列吗?\n\n点"确定"= 是(适合预计会有 #${tag}/childA #${tag}/childB 这种 sub-tag 的)\n点"取消"= 否(普通 4 列表,简单)`);
+    const description = (await gatewayPrompt(`#${tag} 描述(可空,1 句话 — 用户日后看 panel 用):`, "") || "").trim();
+    const withSub = await gatewayConfirm(`#${tag} 需要 Sub 列吗?\n\n"确定"= 是(适合预计会有 #${tag}/childA #${tag}/childB 这种 sub-tag 的)\n"取消"= 否(普通 4 列表,简单)`);
     try {
       const r = await fetch("/api/tag-aggregate/register", {
         method: "POST", headers: {"Content-Type": "application/json"},
@@ -103,7 +103,8 @@
       });
       const data = await r.json();
       if (!data.ok) {
-        window.gateway?.whisper?.("× " + (data.error || "注册失败"), 3500) || alert("× " + data.error);
+        const em = "× " + (data.error || "注册失败");
+        if (window.gateway?.whisper) window.gateway.whisper(em, 3500); else gatewayAlert(em);
         return;
       }
       // 立刻跑一次 refresh 把 schedule 里已存在的同 tag entry 吸进来
@@ -124,7 +125,8 @@
         : "";
       window.gateway?.whisper?.(`✓ 注册 #${tag}${tail}`, 3200);
     } catch (e) {
-      window.gateway?.whisper?.("× 注册请求失败 — " + e.message, 3500) || alert("× " + e.message);
+      const em = "× 注册请求失败 — " + e.message;
+      if (window.gateway?.whisper) window.gateway.whisper(em, 3500); else gatewayAlert(em);
     }
   }
 

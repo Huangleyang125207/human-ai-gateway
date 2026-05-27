@@ -666,19 +666,22 @@
       uploadForTask(t.name);
     });
 
-    overlay.querySelector(".task-modal-delete")?.addEventListener("click", async () => {
-      if (!confirm(`确定要删除「${t.name}」吗?\n会同时删掉打卡条目、图片和库存数据。`)) return;
-      try {
-        const r = await fetch("/api/daily-tasks/delete", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ task_name: t.name }),
-        });
-        const d = await r.json();
-        if (!d.ok) throw new Error(d.detail || "delete failed");
-        window.gatewayToast?.("✓ 已删除 " + t.name);
-        close();
-        refreshTasks();
-      } catch (e) { window.gatewayToast?.("删除失败: " + e.message); }
+    overlay.querySelector(".task-modal-delete")?.addEventListener("click", () => {
+      close();                                  // 关详情弹层 = 即时视觉反馈
+      gatewayUndo(`已删除「${t.name}」`, {
+        // 撤回窗口过后才真删(连带打卡/图/库存);窗口内撤回 = 啥也没动
+        onCommit: async () => {
+          try {
+            const r = await fetch("/api/daily-tasks/delete", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ task_name: t.name }),
+            });
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.detail || "delete failed");
+            refreshTasks();
+          } catch (e) { window.gatewayToast?.("删除失败: " + e.message); }
+        },
+      });
     });
 
     // history fetch
