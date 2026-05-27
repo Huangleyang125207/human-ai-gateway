@@ -1575,20 +1575,60 @@ def _bilibili_search(query: str, max_results: int = 10) -> str:
         parts.append(f"- {title}(UP:{it.get('author','')})\n  {it.get('arcurl','')}\n  {desc}")
     return "\n".join(parts) if parts else "[B站搜索无结果]"
 
+def _360_search(query: str, max_results: int = 8) -> str:
+    """360 通用搜索(so.com,大陆直连)。选择器移植自 SearXNG 360search 引擎。
+    先 GET 一次拿 cookie(防空结果),再带 cookie 请求。返 标题/链接/摘要。"""
+    from lxml import html as _lx
+    sess = requests.Session()
+    sess.headers.update({"User-Agent": _WEB_UA, "Accept-Language": "zh-CN,zh;q=0.9"})
+    try:
+        url = "https://www.so.com/s"
+        params = {"q": query, "pn": 1}
+        # cookie 预热(360 对无 cookie 请求常返空)
+        try:
+            warm = sess.get(url, params=params, timeout=10, allow_redirects=False)
+            ck = warm.headers.get("set-cookie", "")
+            if ck:
+                sess.headers["Cookie"] = ck.split(";")[0]
+        except Exception:
+            pass
+        r = sess.get(url, params=params, timeout=12)
+    except Exception as e:
+        return f"[360 搜索失败:{type(e).__name__}: {str(e)[:120]}]"
+    if not r.text.strip():
+        return "[360 搜索返空(可能被风控)]"
+    parts = []
+    for item in _lx.fromstring(r.text).xpath('//li[contains(@class, "res-list")]')[:max_results]:
+        a = item.xpath('.//h3[contains(@class, "res-title")]/a')
+        if not a:
+            continue
+        title = a[0].text_content().strip()
+        href = a[0].get("data-mdurl") or a[0].get("href", "")
+        desc = item.xpath('.//p[@class="res-desc"]') or item.xpath('.//span[@class="res-list-summary"]')
+        content = (desc[0].text_content().strip()[:120]) if desc else ""
+        if title and href:
+            parts.append(f"- {title}\n  {href}\n  {content}")
+    return "\n".join(parts) if parts else "[360 搜索无结果]"
+
 def _do_web_search(query: str, max_results: int = 5, category: str = "general") -> str:
     """web_search 后端,按 category 分流(都大陆直连):
       wechat   → 搜狗微信(公众号文章)
-      bilibili → B站视频(JSON API)
-      general  → 百炼 enable_search,失败/没 dashscope key → ddgs 兜底
+      bilibili → B站视频(JSON API,dormant)
+      general  → 360(主力,免费+真来源 URL) → 百炼兜底(360 挂时) → ddgs(海外兜底)
     """
     if category == "wechat":
         return _sogou_wechat_search(query, max_results)
     if category == "bilibili":
         return _bilibili_search(query, max_results)
+    # 通用:360 主力。失败/无结果 → 百炼兜底(大陆可靠) → ddgs(需代理)
+    r360 = _360_search(query, max_results)
+    if r360 and not r360.startswith("[360"):   # 有真结果
+        return r360
+    log.info(f"[web_search] 360 无结果({r360[:40]}),试百炼兜底")
     try:
         return _bailian_web_search(query)
     except Exception as e:
-        log.info(f"[web_search] 百炼降级 ddgs: {type(e).__name__}: {str(e)[:120]}")
+        log.info(f"[web_search] 百炼也降级 ddgs: {type(e).__name__}: {str(e)[:120]}")
         return _ddgs_search(query, max_results)
 
 def _ddgs_search(query: str, max_results: int = 5) -> str:
