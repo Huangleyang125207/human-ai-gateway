@@ -123,9 +123,12 @@
 <script src="./shared/health-ping.js?v=20260517k" defer></script>
 <script src="./shared/setup.js?v=20260521a" defer></script>
 <script src="./shared/widget-loader.js?v=20260518c" defer></script>
-<!-- pretext (ESM) — 文字绕图,bug 2 用 -->
+<!-- pretext (ESM) — 文字绕图,bug 2 用。
+     本地 vendor(原 esm.sh/@chenglou/pretext@0.0.7)。远程 CDN import 在 Tauri WebKit
+     里走系统网络栈,被 Clash 的 TLS 拦截打断 → pretext-ready 永不触发 → 绕排失灵。
+     vendor 后跟 marked/dompurify 一样离线可用,不依赖网络/代理。换版本:重拉 tgz 覆盖 vendor/pretext/。 -->
 <script type="module">
-  import * as pretext from "https://esm.sh/@chenglou/pretext@0.0.7";
+  import * as pretext from "./vendor/pretext/layout.js";
   window.pretext = pretext;
   document.dispatchEvent(new Event("pretext-ready"));
 </script>
