@@ -1390,6 +1390,7 @@ def tool_list_my_uploads(args):
                 "filename": x.get("filename"),
                 "url": x.get("url"),
                 "original": x.get("original", ""),
+                "description": (x.get("vision") or {}).get("description", ""),
                 "ocr_preview": (x.get("ocr_text", "") or "")[:120],
             }
             for x in arr[:limit]
@@ -1406,7 +1407,13 @@ def tool_search_my_uploads(args):
     ql = q.lower()
     hits = []
     for x in arr:
-        hay = (x.get("filename", "") + " " + x.get("original", "") + " " + x.get("ocr_text", "")).lower()
+        v = x.get("vision") or {}
+        # 关键:haystack 加 vision 描述/kind/brand —— 否则没文字的照片(食物/玩偶/宠物)
+        # 永远搜不到(filename 是 hash)。5.27 论证的根因。
+        hay = " ".join([
+            x.get("filename", ""), x.get("original", ""), x.get("ocr_text", "") or "",
+            v.get("description", "") or "", v.get("kind", "") or "", v.get("brand", "") or "",
+        ]).lower()
         if ql in hay:
             hits.append(x)
     hits = sorted(hits, key=lambda x: x.get("date", ""), reverse=True)
@@ -1418,6 +1425,7 @@ def tool_search_my_uploads(args):
                 "filename": x.get("filename"),
                 "url": x.get("url"),
                 "original": x.get("original", ""),
+                "description": (x.get("vision") or {}).get("description", ""),
                 "ocr_preview": (x.get("ocr_text", "") or "")[:200],
             }
             for x in hits[:limit]
