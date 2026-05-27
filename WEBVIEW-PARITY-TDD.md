@@ -62,6 +62,29 @@ Playwright(系统 Chrome)只能测"逻辑对不对",**测不出 webview-only 的
 - **FIX(已落)**:`WebviewWindowBuilder` 链加 `.disable_drag_drop_handler()` → Tauri 传 `None` → wry 装 `|_| false` → 每个拖放事件落到 webview HTML5。**前端零改、不碰 JS 桥**。
 - **GREEN**:壳里拖图 = 浏览器里拖图,行为一致。
 
+### CASE-3 · 原生 JS 弹窗(confirm/alert/prompt)在 webview no-op
+
+- **症状**:依赖 `confirm()` 的删除/确认全失灵(点删除没反应);`prompt()` 拿不到输入;`alert()` 不弹。(5.27:照片删不掉 —— `if(!confirm(...))return;` 里 confirm 返 false → 删除分支永不跑。)
+- **根因**:嵌入式 webview 默认**抑制**原生 JS 对话框。`confirm()` 直接返回 false,`prompt()` 返回 null,`alert()` 静默。
+- **影响平台**:**三个都中**(壳层默认行为)。
+- **RED 测试**:
+  - 静态:`grep -rE "[^.](confirm|alert|prompt)\s*\(" shared/ index.html` → 除注释外**零命中**(全走 gatewayConfirm/Prompt/Alert)。
+  - 运行时:真 webview 里 `typeof gatewayConfirm==='function'` + 触发一次 confirm 流断言 resolve。
+- **FIX(已落)**:`shared/dialog.js` 自画页内弹窗(promise 版),替换全部 native 调用。**铁律:不依赖 webview 原生对话框,自己画。**
+- **附带 UX 升级**:删除类不做确认、改做**撤回**(`gatewayUndo`)——乐观隐藏 + 真删推迟到撤回窗口过后才发。点完即走、误删可救、零摩擦,且'没撤回前没真删'省掉所有恢复逻辑。
+- **GREEN**:真 webview 里删/确认/输入都弹得出、走得通;删除有 5s 撤回。
+
+### CASE-4 · webview 缓存 API 响应 → 内容不刷新
+
+- **症状**:人/AI 写完,页面不显示最新;轮询在跑也没用。(5.27:留言板/journal 最新内容不刷新,浏览器按 Cmd+R 能救、壳里没 Cmd+R。)
+- **根因**:webview 走系统网络栈,会缓存 `GET /api/*` 响应;若 server 没发 no-store,轮询每次命中缓存拿旧数据。
+- **影响平台**:**三个都可能**(取决于各栈缓存策略)。
+- **RED 测试**:
+  - 静态:server 中间件给 `/api/*` 设 `Cache-Control: no-store`。
+  - 运行时:`curl -D- /api/<某 GET>` 头里有 `no-store`;或真 webview 里隔窗口写一条 → 轮询周期内出现。
+- **FIX(已落)**:no-cache 中间件覆盖范围加 `/api/*`(原只 .html/.js/.css)。
+- **GREEN**:写入后 3-15s 轮询自动显示最新,无需手动刷新。
+
 ### CASE-N · _模板(撞到新的就照这个加)_
 
 - **症状**:_Chrome 好 / 壳坏的具体表现_
