@@ -1025,8 +1025,18 @@ def tool_check_daily_task(args):
     return {"error": f"task '{name}' 不在今天的清单里(检查名字是否完全一致,含括号)"}
 
 
+def _pick_attachment_url(args):
+    """容错:模型偶尔把 attachment_url 写成 image_path/url/image_url/path/attachment
+    (5.27 实测 deepseek 用了 image_path → 整个 set_daily_task_image 失败)。都认,挑第一个非空。"""
+    for k in ("attachment_url", "image_path", "image_url", "url", "attachment", "path"):
+        v = args.get(k)
+        if v and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
 def tool_set_water_cup_image(args):
-    url = (args.get("attachment_url") or "").strip()
+    url = _pick_attachment_url(args)
     if not url:
         return {"error": "need attachment_url"}
     processed, err = _get_or_create_processed_attachment(url)
@@ -1044,7 +1054,7 @@ def tool_set_water_cup_image(args):
 
 def tool_set_daily_task_image(args):
     task_name = (args.get("task_name") or "").strip()
-    url = (args.get("attachment_url") or "").strip()
+    url = _pick_attachment_url(args)
     if not task_name or not url:
         return {"error": "need task_name + attachment_url"}
     processed, err = _get_or_create_processed_attachment(url)
@@ -1144,7 +1154,7 @@ def _purge_task_keys(name: str) -> dict:
 def tool_place_scrapbook_image(args):
     """AI 把照片 absolute 浮在 .page 之上(v3 自由位置)。失败返 {error}。"""
     import random
-    url = (args.get("attachment_url") or "").strip()
+    url = _pick_attachment_url(args)
     date = (args.get("date") or "").strip()
     anchor_time = (args.get("anchor_time") or "").strip()
     # 新 schema:x_pct / y_px。容忍 legacy align/position 字段,转换。
@@ -1362,7 +1372,7 @@ def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
 
 
 def tool_vision_classify(args):
-    url = (args.get("attachment_url") or "").strip()
+    url = _pick_attachment_url(args)
     extra_q = (args.get("extra_question") or "").strip()
     if not url:
         return {"error": "need attachment_url"}
@@ -2524,111 +2534,125 @@ def _truncate_tool_result(content: str) -> str:
     return f"{keep}\n…(truncated, {omitted} chars omitted; re-call tool with narrower args if needed)"
 
 
+def _stream_final_reply(client, active_model, messages, loaded_groups, quota_used, last_actions):
+    """单一 chokepoint:流式产出最终回复 + done。**所有**流给前端的模型文本都过这。
+
+    内建 DSML 防漏:任一轮 stream 里冒出 ｜｜DSML 假 tool-call,一律 suppress
+    (绝不把 raw DSML yield 给前端)→ extract → execute → 继续下一轮 stream 让模型
+    看到 tool result 补回复。循环到拿干净文本 / DSML 抠不出 / 撞迭代上限为止。
+
+    取代旧的两处裸奔 stream 出口(last-round bonus + 模型不要 tool 的重流)——它们
+    各自 yield delta.content 无检测,是 DSML 泄漏进聊天的真因(5.27)。
+    """
+    LOOKAHEAD = 8          # 末尾留 8 char 等 ｜｜DSML 完整出现再判,防 marker 被切两半漏出
+    MAX_DSML_ITERS = 4     # DSML→执行→又 DSML 的循环上限,防死循环
+    reasoning_buf = ""
+    last_buffer = ""
+    emitted = False
+    hit_cap = True         # for 正常 break 会置 False;跑满循环没 break = 撞上限
+
+    for _it in range(MAX_DSML_ITERS):
+        try:
+            stream_resp = client.chat.completions.create(
+                model=active_model, messages=messages, stream=True,
+            )
+        except Exception as e:
+            yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
+            return
+
+        buffer = ""
+        yielded_len = 0
+        suppress = False
+        for chunk in stream_resp:
+            if not chunk.choices: continue
+            delta = chunk.choices[0].delta
+            if not delta: continue
+            rc = getattr(delta, "reasoning_content", None)
+            if rc:
+                reasoning_buf += rc
+            if not delta.content: continue
+            buffer += delta.content
+            if suppress: continue
+            if "｜｜DSML" in buffer or "<function_calls" in buffer:
+                suppress = True
+                continue
+            safe_end = max(yielded_len, len(buffer) - LOOKAHEAD)
+            if safe_end > yielded_len:
+                text = buffer[yielded_len:safe_end]
+                yielded_len = safe_end
+                emitted = True
+                yield _sse({"type": "delta", "text": text})
+        last_buffer = buffer
+
+        if not suppress:
+            # 无 DSML — flush 末尾 lookahead 留的尾巴,完成
+            if yielded_len < len(buffer):
+                tail = buffer[yielded_len:]
+                if tail:
+                    emitted = True
+                    yield _sse({"type": "delta", "text": tail})
+            hit_cap = False
+            break
+
+        # suppress:buffer 含 DSML → 抠 call
+        stripped, synth_calls = _extract_synthetic_tool_calls(buffer)
+        if not synth_calls:
+            # 抠不出(畸形/变体 DSML)→ 至少 yield 清理后的干净文本,**绝不漏 raw DSML**
+            if stripped:
+                emitted = True
+                yield _sse({"type": "delta", "text": stripped})
+            hit_cap = False
+            break
+
+        # 有 call:登记 asst + 执行(yield action)+ 写 tool result → 下一轮 stream 补回复
+        asst_msg = {"role": "assistant", "content": stripped,
+                    "tool_calls": [{
+                        "id": c["id"], "type": "function",
+                        "function": {"name": c["name"],
+                                     "arguments": json.dumps(c["args"], ensure_ascii=False)},
+                    } for c in synth_calls]}
+        if reasoning_buf:
+            asst_msg["reasoning_content"] = reasoning_buf
+        messages.append(asst_msg)
+        for c in synth_calls:
+            result = _dispatch_tool(c["name"], c["args"], loaded_groups, quota_used)
+            last_actions.append({"name": c["name"], "args": c["args"], "result": result})
+            yield _sse({"type": "action", "name": c["name"], "args": c["args"], "result": result})
+            messages.append({"role": "tool", "tool_call_id": c["id"],
+                             "content": _truncate_tool_result(json.dumps(result, ensure_ascii=False))})
+        # 继续循环 → 下一轮 stream
+
+    if hit_cap and last_actions:
+        names = ", ".join(a.get("name", "?") for a in last_actions)
+        yield _sse({"type": "delta", "text": f"(已执行 {names};模型仍反复调工具,已停)"})
+        emitted = True
+
+    # 收尾:fallback + claim audit + done(跟旧两处出口一致)
+    if not emitted and last_actions:
+        names = ", ".join(a.get("name", "?") for a in last_actions)
+        yield _sse({"type": "delta", "text": f"(已执行 {names},模型未补充文字)"})
+    if not last_actions and last_buffer and _CLAIM_PHRASE_RE.search(last_buffer):
+        yield _sse({"type": "delta", "text": _CLAIM_DISCLAIMER})
+    done_payload = {"type": "done", "actions": last_actions, "model_id": active_model}
+    if reasoning_buf:
+        done_payload["reasoning_content"] = reasoning_buf
+    yield _sse(done_payload)
+
+
 def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_used):
     """跑跟非 stream 一样的 tool loop,但最后一轮(无 tool_calls 那一次)
     用 stream=True 把 text 一段段 yield 出去。tool 调用之间 yield action 事件。
     active_tools 每轮重算(load_tool_group 可能改 loaded_groups)。
+    所有流式文本出口统一走 _stream_final_reply(单一 chokepoint,DSML 防漏)。
     """
     last_actions = []
     MAX_ROUNDS = 6
     for round_idx in range(MAX_ROUNDS):
         is_last_round = (round_idx == MAX_ROUNDS - 1)
-        # 非最后轮:先非 stream 让模型决定要不要 tool;
-        # 最后轮:stream + mid-stream DSML 检测。8-char lookahead 留尾巴扫
-        # ｜｜DSML 标记,一旦出现切 suppress mode + 兜底执行 + bonus stream。
-        # 既保 typing 一致又兜 DSML(5.21 21:48 实测 #25 漏的真因)。
+        # 非最后轮:先非 stream 让模型决定要不要 tool。
+        # 最后一轮:不再给 tool,模型必须出文本收尾 —— 统一走 chokepoint 流(内建 DSML 防漏)。
         if is_last_round:
-            try:
-                stream_resp = client.chat.completions.create(
-                    model=active_model, messages=messages, stream=True,
-                )
-                buffer = ""        # 完整累积,扫 DSML + 末尾 lookahead
-                reasoning_buf = "" # thinking 模式下回传必带,否则 bonus call 400
-                yielded_len = 0    # 已 yield 到 buffer 的哪个位置
-                suppress = False   # 一旦 detect 到 DSML 就 true,后续 delta 全憋住
-                emitted = False
-                LOOKAHEAD = 8      # 末尾留 8 char 等 ｜｜DSML 完整出现再判
-                for chunk in stream_resp:
-                    if not chunk.choices: continue
-                    delta = chunk.choices[0].delta
-                    if not delta: continue
-                    # DeepSeek reasoner / V4 thinking:delta.reasoning_content 跟
-                    # delta.content 分开发。不接 → bonus 回传时缺,400。
-                    rc = getattr(delta, "reasoning_content", None)
-                    if rc:
-                        reasoning_buf += rc
-                    if not delta.content: continue
-                    buffer += delta.content
-                    if suppress: continue
-                    # ｜｜DSML 是 deepseek 自家假 tool-call wrapper 的 telltale
-                    if "｜｜DSML" in buffer or "<function_calls" in buffer:
-                        suppress = True
-                        continue
-                    safe_end = max(yielded_len, len(buffer) - LOOKAHEAD)
-                    if safe_end > yielded_len:
-                        text = buffer[yielded_len:safe_end]
-                        yielded_len = safe_end
-                        emitted = True
-                        yield _sse({"type": "delta", "text": text})
-
-                # 流收尾
-                if suppress:
-                    # buffer 含 DSML,parse + 执行 + bonus stream 拿真正回复
-                    stripped, synth_calls = _extract_synthetic_tool_calls(buffer)
-                    if synth_calls:
-                        asst_msg = {"role": "assistant", "content": stripped,
-                                    "tool_calls": [{
-                                        "id": c["id"], "type": "function",
-                                        "function": {"name": c["name"],
-                                                     "arguments": json.dumps(c["args"], ensure_ascii=False)},
-                                    } for c in synth_calls]}
-                        if reasoning_buf:
-                            asst_msg["reasoning_content"] = reasoning_buf
-                        messages.append(asst_msg)
-                        for c in synth_calls:
-                            result = _dispatch_tool(c["name"], c["args"], loaded_groups, quota_used)
-                            last_actions.append({"name": c["name"], "args": c["args"], "result": result})
-                            yield _sse({"type": "action", "name": c["name"], "args": c["args"], "result": result})
-                            messages.append({"role": "tool", "tool_call_id": c["id"],
-                                             "content": _truncate_tool_result(json.dumps(result, ensure_ascii=False))})
-                        # bonus stream — model 看到 tool result 后给真正答复
-                        try:
-                            bonus = client.chat.completions.create(
-                                model=active_model, messages=messages, stream=True,
-                            )
-                            for chunk in bonus:
-                                if not chunk.choices: continue
-                                delta = chunk.choices[0].delta
-                                if not delta: continue
-                                # reasoning_content thinking 模式下也得吸,这轮不发回但
-                                # 防 SDK 内部状态机出怪味
-                                _ = getattr(delta, "reasoning_content", None)
-                                if delta.content:
-                                    emitted = True
-                                    yield _sse({"type": "delta", "text": delta.content})
-                        except Exception as e:
-                            yield _sse({"type": "error", "text": f"bonus stream 失败: {type(e).__name__}: {str(e)[:200]}"})
-                else:
-                    # 没 DSML — flush 末尾 lookahead 留的尾巴
-                    if yielded_len < len(buffer):
-                        tail = buffer[yielded_len:]
-                        if tail:
-                            emitted = True
-                            yield _sse({"type": "delta", "text": tail})
-
-                if not emitted and last_actions:
-                    names = ", ".join(a.get("name", "?") for a in last_actions)
-                    yield _sse({"type": "delta", "text": f"(已执行 {names},模型未补充文字)"})
-                # Path X 出口审计:claim 措辞 + actions 空 → append disclaimer
-                if not last_actions and buffer and _CLAIM_PHRASE_RE.search(buffer):
-                    yield _sse({"type": "delta", "text": _CLAIM_DISCLAIMER})
-                # done payload 带 reasoning_content + model_id 给前端存进 history(post-train 用)
-                done_payload = {"type": "done", "actions": last_actions, "model_id": active_model}
-                if reasoning_buf:
-                    done_payload["reasoning_content"] = reasoning_buf
-                yield _sse(done_payload)
-            except Exception as e:
-                yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
+            yield from _stream_final_reply(client, active_model, messages, loaded_groups, quota_used, last_actions)
             return
 
         # tool round:非 stream;每轮重算 tools(load_tool_group 可能改 loaded_groups)
@@ -2676,41 +2700,10 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
             continue  # 下一轮让 model 补 reply
 
         if not msg.tool_calls:
-            # 模型不要 tool 了 — pop 出已收的 asst 消息,改用 stream=True 真流
-            # (extra 1 API call,但保证真"弹字",跟最后一轮路径一致)
+            # 模型不要 tool 了 — pop 出空 asst,改用 chokepoint 真流(内建 DSML 防漏:
+            # 模型这轮若反悔又想调工具 → 吐 DSML 也不会裸漏给前端,会被抠出执行)
             messages.pop()
-            try:
-                stream_resp = client.chat.completions.create(
-                    model=active_model, messages=messages, stream=True,
-                )
-                emitted = False
-                accum = ""  # 累积所有 content,end-of-stream 时做 claim audit
-                reasoning_buf2 = ""  # thinking 模型 chain-of-thought 也存,post-train 用
-                for chunk in stream_resp:
-                    if not chunk.choices:
-                        continue
-                    delta = chunk.choices[0].delta
-                    if not delta:
-                        continue
-                    rc = getattr(delta, "reasoning_content", None)
-                    if rc:
-                        reasoning_buf2 += rc
-                    if delta.content:
-                        emitted = True
-                        accum += delta.content
-                        yield _sse({"type": "delta", "text": delta.content})
-                if not emitted and last_actions:
-                    names = ", ".join(a.get("name", "?") for a in last_actions)
-                    yield _sse({"type": "delta", "text": f"(已执行 {names},模型未补充文字)"})
-                # Path X 出口审计:claim 措辞 + actions 空 → append disclaimer
-                if not last_actions and accum and _CLAIM_PHRASE_RE.search(accum):
-                    yield _sse({"type": "delta", "text": _CLAIM_DISCLAIMER})
-                done_payload = {"type": "done", "actions": last_actions, "model_id": active_model}
-                if reasoning_buf2:
-                    done_payload["reasoning_content"] = reasoning_buf2
-                yield _sse(done_payload)
-            except Exception as e:
-                yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
+            yield from _stream_final_reply(client, active_model, messages, loaded_groups, quota_used, last_actions)
             return
 
         # 执行 tools,逐个 yield action 事件
