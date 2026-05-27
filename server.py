@@ -6023,7 +6023,10 @@ def root():
 async def no_cache_for_static_assets(request, call_next):
     response = await call_next(request)
     path = request.url.path
-    if path.endswith((".html", ".js", ".css")) or path == "/":
+    # /api/* 也禁缓存:Tauri 的 WKWebView 走系统网络栈,会缓存 API GET 响应 →
+    # journal(15s)/thread(3s)轮询每次拿到旧数据,"AI/人输入后最新的不显示"。
+    # 浏览器靠 Cmd+R 强制重新验证,Tauri 没 Cmd+R,所以这条对壳是刚需。
+    if path.endswith((".html", ".js", ".css")) or path == "/" or path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
