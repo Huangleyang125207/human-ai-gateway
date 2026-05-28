@@ -2530,7 +2530,7 @@ async def chat(req: Request):
             reply = re.sub(r"<think>.*?</think>\s*", "", reply, flags=re.DOTALL).strip()
             if not reply and last_actions:
                 names = ", ".join(a.get("name", "?") for a in last_actions)
-                reply = f"(已执行 {names},模型未补充文字)"
+                reply = f"✓ 完成: {names}"
             reply = _audit_unauthorized_claim(reply, last_actions)
             return {"reply": reply, "actions": last_actions}
 
@@ -2698,6 +2698,8 @@ def _stream_final_reply(client, active_model, messages, loaded_groups, quota_use
     hit_cap = True         # for 正常 break 会置 False;跑满循环没 break = 撞上限
 
     for _it in range(MAX_DSML_ITERS):
+        # ping 保活:thinking 模式下首个 delta 可能要等几十秒,客户端 90s 没字节就 abort
+        yield _sse({"type": "ping"})
         try:
             stream_resp = client.chat.completions.create(
                 model=active_model, messages=messages, stream=True,
@@ -2770,13 +2772,13 @@ def _stream_final_reply(client, active_model, messages, loaded_groups, quota_use
 
     if hit_cap and last_actions:
         names = ", ".join(a.get("name", "?") for a in last_actions)
-        yield _sse({"type": "delta", "text": f"(已执行 {names};模型仍反复调工具,已停)"})
+        yield _sse({"type": "delta", "text": f"✓ 完成: {names}（工具调用上限,已停止再调）"})
         emitted = True
 
     # 收尾:fallback + claim audit + done(跟旧两处出口一致)
     if not emitted and last_actions:
         names = ", ".join(a.get("name", "?") for a in last_actions)
-        yield _sse({"type": "delta", "text": f"(已执行 {names},模型未补充文字)"})
+        yield _sse({"type": "delta", "text": f"✓ 完成: {names}"})
     if not last_actions and last_buffer and _CLAIM_PHRASE_RE.search(last_buffer):
         yield _sse({"type": "delta", "text": _CLAIM_DISCLAIMER})
     done_payload = {"type": "done", "actions": last_actions, "model_id": active_model}
@@ -2802,6 +2804,10 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
             return
 
         # tool round:非 stream;每轮重算 tools(load_tool_group 可能改 loaded_groups)
+        # 先发个 SSE ping —— 客户端 90s 没新字节就 abort(thread.js:591);
+        # 一个轮的 model 阻塞调用可能 30-60s,多轮串起来很容易撞 90s。
+        # ping 给 client 一个 byte 重置那个 timer。客户端未知 type 静默忽略,安全。
+        yield _sse({"type": "ping"})
         try:
             resp = client.chat.completions.create(
                 model=active_model, messages=messages,
