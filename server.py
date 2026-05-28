@@ -1002,31 +1002,83 @@ def tool_append_journal_comment(args):
     return _append_comment_to_block(f, time_str, comment)
 
 
-def tool_check_daily_task(args):
-    """直接调 daily_task_check 内部逻辑(不走 HTTP)"""
-    name = (args.get("task_name") or "").strip()
-    checked = bool(args.get("checked"))
-    if not name:
-        return {"error": "need task_name"}
+def _list_today_tasks():
+    """读今天 md 顶部 - [ ] 行,返完整任务名列表 + 文件 + lines + bounds。
+    供 _resolve_task_name 和 tool_check_daily_task 共用。"""
     f = find_today_journal()
     if not f:
-        return {"error": "no today journal"}
+        return None, None, None, None, "no today journal"
     text = f.read_text(encoding="utf-8")
     bounds = _top_section_bounds(text)
     if not bounds:
-        return {"error": "no top section"}
+        return f, text, None, None, "no top section"
     lines = text.splitlines()
-    start, end = bounds
-    box = "x" if checked else " "
-    for i in range(start, end):
-        # 顶层 only
+    tasks = []
+    for i in range(bounds[0], bounds[1]):
         m = re.match(r"^(-\s*\[)([ x])(\]\s*)(.+)", lines[i])
-        if m and m.group(4).strip() == name:
+        if m:
+            tasks.append(m.group(4).strip())
+    return f, text, lines, tasks, None
+
+def _resolve_task_name(name):
+    """模糊解析 daily-task 名 → 完整规范名。
+    AI 实测倾向用'语义全名'省 suffix(如'南非醉茄 KSM-66（Nature Love）' 漏'，90粒新版'),
+    严格匹配会全失败。这里兜:子串包含(任一方向)唯一命中 → 用全名。多/无 → 报错带候选。
+    返 (full_name, None) 或 (None, error_dict)。"""
+    name = (name or "").strip()
+    if not name:
+        return None, {"error": "need task_name"}
+    _, _, _, tasks, err = _list_today_tasks()
+    if err:
+        return None, {"error": err}
+    if not tasks:
+        return None, {"error": "no tasks in today's checklist"}
+    # 1) 精确
+    for t in tasks:
+        if t == name:
+            return t, None
+    # 2) 子串(name in task 或 task in name) — 唯一命中算解析成功
+    matches = [t for t in tasks if (name in t) or (t in name)]
+    if len(matches) == 1:
+        return matches[0], None
+    if len(matches) > 1:
+        return None, {"error": f"task '{name}' 模糊匹配多条,请用更精确名",
+                      "candidates": matches}
+    # 3) 归一化(去掉中英括号内容 + 去空格 + 小写)再比 —— 兜 AI 漏 suffix
+    #    例:"南非醉茄 KSM-66（Nature Love）" vs "南非醉茄 KSM-66（Nature Love，90粒新版）"
+    #    步2 不命中(位置 25 处 `）` vs `，` 卡),步3 归一化后两边都是"南非醉茄ksm-66" → 命中
+    def _norm(s):
+        return re.sub(r"[\(（][^\)）]*[\)）]", "", s or "").lower().replace(" ", "").strip()
+    nn = _norm(name)
+    if nn:
+        nmatches = [t for t in tasks if _norm(t) == nn or nn in _norm(t) or _norm(t) in nn]
+        if len(nmatches) == 1:
+            return nmatches[0], None
+        if len(nmatches) > 1:
+            return None, {"error": f"task '{name}' 归一化后多条,请用更精确名",
+                          "candidates": nmatches}
+    return None, {"error": f"task '{name}' 不在今天的清单里", "candidates": tasks}
+
+
+def tool_check_daily_task(args):
+    """打卡。task_name 支持模糊匹配——传短名/缺 suffix 也能定位到全名行。"""
+    full, err = _resolve_task_name(args.get("task_name"))
+    if err:
+        return err
+    checked = bool(args.get("checked"))
+    f, text, lines, _, lerr = _list_today_tasks()
+    if lerr:
+        return {"error": lerr}
+    box = "x" if checked else " "
+    for i in range(*_top_section_bounds(text)):
+        m = re.match(r"^(-\s*\[)([ x])(\]\s*)(.+)", lines[i])
+        if m and m.group(4).strip() == full:
             lines[i] = f"{m.group(1)}{box}{m.group(3)}{m.group(4)}"
             new_text = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
             f.write_text(new_text, encoding="utf-8")
-            return {"ok": True, "task_name": name, "checked": checked}
-    return {"error": f"task '{name}' 不在今天的清单里(检查名字是否完全一致,含括号)"}
+            return {"ok": True, "task_name": full, "checked": checked,
+                    **({"resolved_from": args.get("task_name")} if args.get("task_name") != full else {})}
+    return {"error": f"task '{full}' 解析后仍未找到对应行(罕见,可能 md 顶部刚改动)"}
 
 
 def _pick_attachment_url(args):
@@ -1057,22 +1109,26 @@ def tool_set_water_cup_image(args):
 
 
 def tool_set_daily_task_image(args):
-    task_name = (args.get("task_name") or "").strip()
     url = _pick_attachment_url(args)
-    if not task_name or not url:
-        return {"error": "need task_name + attachment_url"}
+    if not url:
+        return {"error": "need attachment_url (or image_path/url alias)"}
+    # 模糊解析 task_name → 全名;否则 image_map 键跟任务行对不上,图标不显示(5.28 实测的坑)
+    full, name_err = _resolve_task_name(args.get("task_name"))
+    if name_err:
+        return name_err
     processed, err = _get_or_create_processed_attachment(url)
     if err:
         return {"error": err}
     DAILY_TASK_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    stem = _sanitize_task_filename(task_name)
+    stem = _sanitize_task_filename(full)
     out = DAILY_TASK_IMAGES_DIR / f"{stem}.png"
     out.write_bytes(processed.read_bytes())
     rel = _pretty_rel(out)
     image_map = _load_task_image_map()
-    image_map[task_name] = rel
+    image_map[full] = rel
     _save_task_image_map(image_map)
-    return {"ok": True, "task_name": task_name, "image_url": f"/{rel}"}
+    return {"ok": True, "task_name": full, "image_url": f"/{rel}",
+            **({"resolved_from": args.get("task_name")} if args.get("task_name") != full else {})}
 
 
 def tool_manage_daily_task(args):
