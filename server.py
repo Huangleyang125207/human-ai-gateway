@@ -3331,16 +3331,21 @@ def _get_or_create_processed_attachment(attachment_url: str, cutout: bool = True
         return cached, None
 
     # 1) 端侧:macOS Subject Lift → rembg(跨平台 ONNX)— 不联网,无 quota
+    #    端侧出来的 PNG 是原 aspect ratio,过 normalize_subject_frame 才能跟百度路径
+    #    一样:主体居中 1024 方形,视觉长边统一。少这一步 → 瘦长瓶 / 矮胖罐显示大小不一致
+    #    (5.28 南非醉茄实测的 bug)。
     try:
         from cutout_local import cutout_local
+        from cutout import normalize_subject_frame
         png = cutout_local(src)
         if png:
-            cached.write_bytes(png)
+            cached.write_bytes(normalize_subject_frame(png))
             return cached, None
     except Exception as e:
         log.warning(f"local cutout chain failed: {e}")
 
     # 2) 兜底:百度抠图(用户配了 key 才走;无 key 静默放原图)
+    #    baidu_cutout_image 内部已调 normalize_subject_frame,这里不需要再过。
     cfg = load_config() or {}
     api_key, sec = _cutout_keys(cfg)
     has_cutout_key = bool(api_key and sec and not api_key.startswith("YOUR_") and not sec.startswith("YOUR_"))

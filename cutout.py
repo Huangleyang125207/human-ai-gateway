@@ -74,9 +74,9 @@ def _prep_image_bytes(file_path: Path) -> bytes | None:
         return raw
 
 
-def _normalize_subject_frame(png_bytes: bytes,
-                              padding_ratio: float = 0.08,
-                              target_size: int = 1024) -> bytes:
+def normalize_subject_frame(png_bytes: bytes,
+                             padding_ratio: float = 0.08,
+                             target_size: int = 1024) -> bytes:
     """裁到主体 alpha 外框 → 等比缩使主体长边 = target × (1 − 2×padding) → 居中放方形透明画布。
     保证瘦长瓶/矮胖罐/方块罐显示时长边视觉大小一致。
     旧版按 bbox 长边 + pad 做画布尺寸 → 瘦长画布瘦长,object-fit:contain 后视觉小一截。
@@ -192,7 +192,7 @@ def baidu_cutout_image(file_path: Path | str, api_key: str, secret_key: str) -> 
             return None
         raw_png = base64.b64decode(b64_result)
         whitened = _whiten_to_transparent(raw_png)
-        return _normalize_subject_frame(whitened)
+        return normalize_subject_frame(whitened)
     except Exception as e:
         log.warning(f"baidu cutout request failed: {type(e).__name__}: {e}")
         return None
