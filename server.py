@@ -795,6 +795,21 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "search_journal",
+            "description": "全文搜 vault 里所有 md(半小时复盘 / 标签聚合 / PULSE / 知识库 / 散落 md),case-insensitive,多关键词空格分(AND)。返命中文件 + 行号 + ±2 行上下文,按文件 mtime 倒序。",
+            "parameters": {
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {"type": "string", "description": "搜索词,中英文都行。多关键词用空格分(全部要命中)。"},
+                    "limit": {"type": "integer", "description": "最多返几条,默认 20"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "delete_attachment",
             "description": "删一张已上传的图(硬盘 + 索引)。仅在用户明确要求时用,不主动建议。",
             "parameters": {
@@ -1504,6 +1519,51 @@ def tool_search_my_uploads(args):
     }
 
 
+def tool_search_journal(args):
+    """全文搜 vault 所有 md。case-insensitive,多关键词 AND。
+    跳过 attachments/ + .git/ + dotfiles。按 mtime desc(最新优先)。
+    """
+    q = (args.get("query") or "").strip()
+    if not q:
+        return {"error": "need query"}
+    terms = [t.lower() for t in q.split() if t.strip()]
+    if not terms:
+        return {"error": "need query"}
+    limit = max(1, min(int(args.get("limit") or 20), 100))
+    if not VAULT_DIR.exists():
+        return {"error": f"vault not found: {VAULT_DIR}"}
+
+    hits = []
+    for f in VAULT_DIR.rglob("*.md"):
+        # 跳过附件 / git / dotfile
+        parts = set(f.parts)
+        if "attachments" in parts or ".git" in parts:
+            continue
+        if any(p.startswith(".") for p in f.relative_to(VAULT_DIR).parts):
+            continue
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            continue
+        mtime = f.stat().st_mtime
+        for i, line in enumerate(lines):
+            low = line.lower()
+            if all(t in low for t in terms):
+                ctx_start = max(0, i - 2)
+                ctx_end = min(len(lines), i + 3)
+                ctx = "\n".join(lines[ctx_start:ctx_end])
+                hits.append({
+                    "file": str(f.relative_to(VAULT_DIR)),
+                    "line": i + 1,
+                    "context": ctx,
+                    "_mtime": mtime,
+                })
+    hits.sort(key=lambda h: -h["_mtime"])
+    for h in hits:
+        h.pop("_mtime", None)
+    return {"matches": hits[:limit], "total_hits": len(hits), "truncated": len(hits) > limit}
+
+
 def tool_delete_attachment(args):
     date = (args.get("date") or "").strip()
     filename = (args.get("filename") or "").strip()
@@ -1799,6 +1859,7 @@ TOOL_IMPL = {
     "place_scrapbook_image":tool_place_scrapbook_image,
     "list_my_uploads":      tool_list_my_uploads,
     "search_my_uploads":    tool_search_my_uploads,
+    "search_journal":       tool_search_journal,
     "delete_attachment":    tool_delete_attachment,
     "vision_classify":      tool_vision_classify,
     "web_search":           tool_web_search,
@@ -1832,7 +1893,7 @@ TOOL_GROUPS = {
 BOOTSTRAP_TOOL_NAMES = {
     # read-only / meta — 任意 chat 都该能用
     "read_today_schedule", "list_recent_days",
-    "list_my_uploads", "search_my_uploads", "vision_classify",
+    "list_my_uploads", "search_my_uploads", "search_journal", "vision_classify",
     "web_search", "fetch_url", "load_protocol", "load_tool_group",
 }
 
@@ -1870,6 +1931,7 @@ TOOL_QUOTA = {
     "list_recent_days":    2,
     "list_my_uploads":     2,
     "search_my_uploads":   3,
+    "search_journal":      5,  # 比 uploads 高一档 — vault 大,可能要 refine query 多搜几次
     "vision_classify":     3,
     "load_protocol":       3,
     "load_tool_group":     5,
