@@ -1278,6 +1278,10 @@ def _migrate_task_keys(old_name: str, new_name: str) -> dict:
             out["meta_migrated"] = True
     except Exception as e:
         out["meta_error"] = str(e)
+        # 改名后 intake_log 历史变孤儿,UI 看不出问题但数据断 — 必须响铃
+        _report_silent_failure("task_rename_meta_migrate_failed",
+            f"{type(e).__name__}: {str(e)[:120]}",
+            context={"old": old_name[:40], "new": new_name[:40]})
     try:
         img_map = _load_task_image_map()
         if old_name in img_map and new_name not in img_map:
@@ -1286,6 +1290,9 @@ def _migrate_task_keys(old_name: str, new_name: str) -> dict:
             out["image_migrated"] = True
     except Exception as e:
         out["image_error"] = str(e)
+        _report_silent_failure("task_rename_image_migrate_failed",
+            f"{type(e).__name__}: {str(e)[:120]}",
+            context={"old": old_name[:40], "new": new_name[:40]})
     return out
 
 
@@ -1302,6 +1309,9 @@ def _purge_task_keys(name: str) -> dict:
             out["meta_purged"] = True
     except Exception as e:
         out["meta_error"] = str(e)
+        _report_silent_failure("task_delete_meta_purge_failed",
+            f"{type(e).__name__}: {str(e)[:120]}",
+            context={"name": name[:40]})
     try:
         img_map = _load_task_image_map()
         if name in img_map:
@@ -1317,6 +1327,9 @@ def _purge_task_keys(name: str) -> dict:
                 pass
     except Exception as e:
         out["image_error"] = str(e)
+        _report_silent_failure("task_delete_image_purge_failed",
+            f"{type(e).__name__}: {str(e)[:120]}",
+            context={"name": name[:40]})
     return out
 
 
@@ -2093,6 +2106,11 @@ def _dispatch_tool(fn: str, args: dict, loaded_groups: set, quota_used: dict):
     except KeyError:
         return {"error": f"unknown tool: {fn}"}
     except Exception as e:
+        # tool 真崩了 — LLM 会拿 error 串往下走,常常导致幻觉回复("我已经做了 X")。
+        # claim audit 会兜底 detect,但根因丢了不利后续修。
+        _report_silent_failure("tool_dispatch_exception",
+            f"{fn}: {type(e).__name__}: {str(e)[:150]}",
+            context={"tool": fn})
         return {"error": str(e)}
 
 # ── app ──────────────────────────────────────────────────────────────
@@ -2213,7 +2231,10 @@ def _load_attachments_index() -> list:
         return []
     try:
         return json.loads(ATTACHMENTS_INDEX.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        _report_silent_failure("attachments_index_parse_failed",
+            f"{type(e).__name__}: {str(e)[:120]}",
+            context={"file_size_kb": ATTACHMENTS_INDEX.stat().st_size // 1024})
         return []
 
 
@@ -2547,6 +2568,12 @@ def _refs_to_vision_hints(refs):
                     )
             except Exception as e:
                 log.warning(f"sync vision failed for {url}: {e}")
+                # vision call 抛 — 不只是返 error,是裸异常逃出。
+                # _qwen_classify_image 内部已 hook 各类 return error,这一条
+                # 抓的是 import 失败 / SDK 崩 / cache lock 异常这种。
+                _report_silent_failure("vision_hint_inline_exception",
+                    f"{type(e).__name__}: {str(e)[:120]}",
+                    context={"url": url[-40:] if url else ""})
         if vision:
             # 用户 chip 上的"抠/原"开关传过来的偏好(default true)
             cutout_pref = (r.get("payload") or {}).get("cutout")
@@ -3390,7 +3417,10 @@ def _load_scrapbook(date_str: str) -> list:
         return []
     try:
         return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        _report_silent_failure("scrapbook_parse_failed",
+            f"{type(e).__name__}: {str(e)[:120]}",
+            context={"date": date_str, "file_size_kb": p.stat().st_size // 1024})
         return []
 
 
@@ -3579,7 +3609,12 @@ def _load_task_image_map() -> dict:
         return {}
     try:
         return json.loads(DAILY_TASK_IMAGES_MAP.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        # P0:parse 失败 silently 返 {} 会被后续 save 覆盖,损坏可恢复文件 → 数据丢
+        # 短期上报让 dashboard 看到;长期考虑 refuse_to_save guard。
+        _report_silent_failure("task_image_map_parse_failed",
+            f"{type(e).__name__}: {str(e)[:120]}",
+            context={"file_size_kb": DAILY_TASK_IMAGES_MAP.stat().st_size // 1024 if DAILY_TASK_IMAGES_MAP.exists() else 0})
         return {}
 
 
@@ -3596,7 +3631,11 @@ def _load_task_meta_map() -> dict:
         return {}
     try:
         return json.loads(DAILY_TASK_META_MAP.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        # P0:同上 — intake_log 不可再生数据,parse 失败要响铃
+        _report_silent_failure("task_meta_map_parse_failed",
+            f"{type(e).__name__}: {str(e)[:120]}",
+            context={"file_size_kb": DAILY_TASK_META_MAP.stat().st_size // 1024 if DAILY_TASK_META_MAP.exists() else 0})
         return {}
 
 
@@ -4529,6 +4568,11 @@ def thread_history_get():
         return {"history": data, "mtime": mtime}
     except Exception as e:
         log.warning(f"thread history read failed: {e}")
+        # 5.17 用户聊天历史被覆盖那条教训:即便 error 字段在,前端可能忽略 →
+        # 看起来像 history 被 wipe。这是不可接受的 silent loss
+        _report_silent_failure("thread_history_read_failed",
+            f"{type(e).__name__}: {str(e)[:120]}",
+            context={"file_size_kb": THREAD_HISTORY_PATH.stat().st_size // 1024 if THREAD_HISTORY_PATH.exists() else 0})
         return {"history": [], "mtime": 0, "error": str(e)}
 
 
@@ -5003,6 +5047,9 @@ async def eval_test(req: Request):
                 )
             except Exception as e:
                 log.info(f"eval json_object 失败 ({e}), 重试无 response_format")
+                _report_silent_failure("eval_response_format_unsupported",
+                    f"{type(e).__name__}: {str(e)[:120]}",
+                    context={"model": active_model})
                 return client.chat.completions.create(model=active_model, messages=messages)
         r = await asyncio.to_thread(_blocking)
         text = (r.choices[0].message.content or "").strip()
@@ -5012,7 +5059,11 @@ async def eval_test(req: Request):
         cleaned = re.sub(r"\s*```\s*$", "", cleaned).strip()
         try:
             return text, json.loads(cleaned)
-        except Exception:
+        except Exception as e:
+            # 留言板会落 _(empty)_ 卡 — 用户次晨看 AI"啥都没说"。最高 UX 影响。
+            _report_silent_failure("eval_json_parse_failed",
+                f"{type(e).__name__}: {str(e)[:80]}",
+                context={"model": active_model, "raw_preview": text[:120]})
             return text, None
 
     # call 1: 主 eval
@@ -5096,6 +5147,9 @@ def _eval_notify(target: datetime, parsed: dict):
         subprocess.run(["osascript", "-e", script], timeout=5, check=False)
     except Exception as e:
         log.warning(f"eval notify failed: {e}")
+        # 用户没听见 banner 会以为 21:30 eval 没跑 — UX silent miss
+        _report_silent_failure("eval_notify_failed",
+            f"{type(e).__name__}: {str(e)[:120]}")
 
 
 # 复用 compression hook —— 暂时 stub,evaluator memory-isolated 时用不到。
@@ -5162,6 +5216,9 @@ async def eval_run(req: Request):
                     response_format={"type": "json_object"})
             except Exception as e:
                 log.info(f"json_object failed ({e}), fallback")
+                _report_silent_failure("eval_response_format_unsupported",
+                    f"{type(e).__name__}: {str(e)[:120]}",
+                    context={"model": active_model})
                 return client.chat.completions.create(model=active_model, messages=messages)
         r = await asyncio.to_thread(_blocking)
         text = (r.choices[0].message.content or "").strip()
@@ -5170,7 +5227,10 @@ async def eval_run(req: Request):
         cleaned = re.sub(r"\s*```\s*$", "", cleaned).strip()
         try:
             return text, json.loads(cleaned)
-        except Exception:
+        except Exception as e:
+            _report_silent_failure("eval_json_parse_failed",
+                f"{type(e).__name__}: {str(e)[:80]}",
+                context={"model": active_model, "raw_preview": text[:120]})
             return text, None
 
     eval_raw, eval_parsed = await _call_json(_eval_build_messages(target, model_id=active_model))
@@ -5319,6 +5379,10 @@ def pulse_dashboard():
             text = f.read_text(encoding="utf-8")
         except Exception as e:
             log.warning(f"can't read PULSE {f}: {e}")
+            # 项目从 dashboard 静默消失,用户看不出是缺还是没建
+            _report_silent_failure("pulse_md_read_failed",
+                f"{type(e).__name__}: {str(e)[:120]}",
+                context={"project": f.stem})
             continue
         projects.append(_parse_pulse_md(text, f.stem))
     return {"projects": projects}

@@ -101,8 +101,19 @@ def ensure_repo(vault_dir: Path) -> str:
     if rc != 0:
         # baseline 失败不致命 — 后续 commit 还能 add 这些文件
         log.info(f"[vault_git] baseline commit: {err.strip() or 'empty?'}")
+        _report_silent("vault_git_baseline_commit_failed", err.strip()[:120] or "empty?")
     log.info(f"[vault_git] initialized git repo at {vault_dir}")
     return "ready"
+
+
+def _report_silent(error_type: str, message: str = "", context: dict = None):
+    """lazy 调 server._report_silent_failure 避免循环 import。
+    vault_git 由 server 在 thread 里调用,触发时 server 已 fully loaded。"""
+    try:
+        from server import _report_silent_failure
+        _report_silent_failure(error_type, message, context)
+    except Exception:
+        pass  # 反馈通道自己挂了不报错(避免递归)
 
 
 def commit_after_write(vault_dir: Path, summary: str, author: str = "ai",
@@ -145,6 +156,8 @@ def _commit_sync(vault_dir: Path, summary: str, author: str,
         rc, _, err = _run(add_args, vault_dir, timeout=15)
         if rc != 0:
             log.info(f"[vault_git] add failed: {err.strip()}")
+            _report_silent("vault_git_add_failed", err.strip()[:120],
+                context={"author": author, "summary": summary[:60]})
             return
         # 没变化 → skip(git diff --cached --quiet 返 1 表示有变化)
         rc, _, _ = _run(["git", "diff", "--cached", "--quiet"], vault_dir, timeout=10)
@@ -154,5 +167,10 @@ def _commit_sync(vault_dir: Path, summary: str, author: str,
         rc, _, err = _run(["git", "commit", "-q", "-m", msg], vault_dir, timeout=15)
         if rc != 0:
             log.info(f"[vault_git] commit failed: {err.strip()[:200]}")
+            _report_silent("vault_git_commit_failed", err.strip()[:200],
+                context={"author": author, "summary": summary[:60]})
     except Exception as e:
         log.info(f"[vault_git] commit thread crashed: {type(e).__name__}: {e}")
+        _report_silent("vault_git_thread_crashed",
+            f"{type(e).__name__}: {str(e)[:120]}",
+            context={"author": author, "summary": summary[:60]})
