@@ -283,7 +283,8 @@
 
   function card(w) {
     const el = document.createElement("article");
-    el.className = "market-card" + (w.active ? " on" : "");
+    const wip = w.status === "wip";
+    el.className = "market-card" + (w.active && !wip ? " on" : "") + (wip ? " wip" : "");
     el.innerHTML = `
       <div class="market-card-main">
         <div class="market-card-title">${escape(w.title)}</div>
@@ -291,16 +292,18 @@
         <div class="market-card-meta">
           ${w.audience ? `<span>受众:${escape(w.audience)}</span>` : ""}
           ${w.slot ? `<span>位置:${escape(w.slot)}</span>` : ""}
-          ${w.default_loaded ? `<span class="market-tag-default">默认</span>` : ""}
+          ${w.default_loaded && !wip ? `<span class="market-tag-default">默认</span>` : ""}
+          ${wip ? `<span class="market-tag-wip">开发中</span>` : ""}
         </div>
       </div>
       <div class="market-card-action">
-        <label class="market-toggle">
-          <input type="checkbox" ${w.active ? "checked" : ""}>
+        <label class="market-toggle" title="${wip ? "审核通过后才能启用" : ""}">
+          <input type="checkbox" ${w.active && !wip ? "checked" : ""} ${wip ? "disabled" : ""}>
           <span class="market-toggle-slider"></span>
         </label>
       </div>
     `;
+    if (wip) return el;  // wip 不挂 toggle handler
     const cb = el.querySelector("input");
     cb.addEventListener("change", async () => {
       cb.disabled = true;

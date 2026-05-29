@@ -4,6 +4,7 @@
   "description": "每日补剂 4 项 checklist + 连续天数 streak。从日记顶部 `- [x] <name>` 模式抽取。",
   "audience": "anyone (default core)",
   "category": "diary-core",
+  "status": "wip",
   "default_loaded": true,
   "slot": "top-strip",
   "script": true,

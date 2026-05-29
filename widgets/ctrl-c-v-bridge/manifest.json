@@ -4,6 +4,7 @@
   "description": "gateway ↔ Claude Code / Codex 协作桥。装机引导 + 项目 PULSE 看板。M1: 仅装机卡;M2: 加 4 项目并列 dashboard。",
   "audience": "项目管理者(写日记 + 用 CC/Codex 写代码 + 想看 PULSE 的人)",
   "category": "project-mgmt",
+  "status": "wip",
   "default_loaded": false,
   "slot": "project-panel",
   "script": true,

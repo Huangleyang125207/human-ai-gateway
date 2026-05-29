@@ -2490,34 +2490,45 @@ async def chat(req: Request):
             f"\n"
             f"  STEP A · 判 pin 意图(从用户消息文字 + entry ref 两路看):\n"
             f"    explicit-pin   = 消息含 '贴/po/放/记下/留个底/上墙/钉/pin' 或 entry ref [date time] → 走 pin path\n"
-            f"    explicit-discuss = 消息含 '看看/识别/这是/好不好/是啥/什么/帮我看' → 走 discuss path\n"
-            f"    ambiguous      = 无文字 / 含糊话(如 '哈哈'/'今天的'/'诶') → 走 ask path\n"
+            f"    explicit-discuss = 消息含 '看看/识别/这是/好不好/是啥/什么/帮我看/读一下/读下/ocr/认一下' → 走 discuss path\n"
+            f"    ambiguous      = 无文字 / 含糊话(如 '哈哈'/'今天的'/'诶') / 讨论意图但没明确触发词 → 走 ask path\n"
             f"\n"
             f"  ── pin path ──\n"
-            f"    1. 已有 vision hint — 不要再调 vision_classify\n"
-            f"    2. 若消息已含 entry ref [date time] → 直接拿 anchor_time + date,跳到 4\n"
-            f"    3. 否则: read_today_schedule(date='{view_date}') → 按 hint 描述匹配 entry → 拿 anchor_time\n"
-            f"       匹配不出来才反问 '贴到哪段?'\n"
-            f"    4. place_scrapbook_image(attachment_url=..., date='{view_date}',\n"
-            f"       anchor_time='HH:MM', cutout=<按用户抠图偏好>)\n"
-            f"    5. 一句话告诉用户贴到了哪段(例: '贴到 12:30 那条午饭旁边了')\n"
+            f"    通用图(scrapbook):\n"
+            f"      1. 已有 vision hint — 不要再调 vision_classify\n"
+            f"      2. 若消息已含 entry ref [date time] → 直接拿 anchor_time + date,跳到 4\n"
+            f"      3. 否则: read_today_schedule(date='{view_date}') → 按 hint 描述匹配 entry → 拿 anchor_time\n"
+            f"         匹配不出来才反问 '贴到哪段?'\n"
+            f"      4. place_scrapbook_image(attachment_url=..., date='{view_date}',\n"
+            f"         anchor_time='HH:MM', cutout=<按用户抠图偏好>)\n"
+            f"      5. 一句话告诉用户贴到了哪段(例: '贴到 12:30 那条午饭旁边了')\n"
+            f"    特例 · kind=doc + ocr_likely=true:\n"
+            f"      用 patch_journal_block 把 OCR 文本写进当前块,**不调** place_scrapbook_image\n"
+            f"      (pin 一份文档通常是想留文字版,不是留图)\n"
             f"\n"
             f"  ── discuss path ──\n"
-            f"    1. 直接根据 hint 描述 + 用户问题回复,**不要调** place_scrapbook_image\n"
-            f"    2. 回复末尾可以加一句 '想贴到日记上的话告诉我' — 给 user 留 escape hatch\n"
+            f"    通用图: 直接根据 hint 描述 + 用户问题回复,**不调** place_scrapbook_image。\n"
+            f"            回复末尾可加一句 '想贴到日记上的话告诉我' — 留 escape hatch。\n"
+            f"    特例 · kind=doc + ocr_likely=true:\n"
+            f"      根据 <图片 OCR 识别结果> 段的文本总结/回答用户的问题,**不写入日记**。\n"
+            f"      回复末尾加 '想把这段文字记到日记上的话告诉我' — escape hatch。\n"
             f"\n"
             f"  ── ask path ──\n"
-            f"    1. 一句话描述你从 hint 看到的内容(例: '看到一份羊排紫米饭的午餐')\n"
-            f"    2. 跟一句 '要贴到日记上吗?要的话我贴在 X 块旁边' — X 是按 hint 匹配的 entry\n"
-            f"    3. **不要调** place_scrapbook_image,等用户答\n"
+            f"    通用图:\n"
+            f"      1. 一句话描述你从 hint 看到的内容(例: '看到一份羊排紫米饭的午餐')\n"
+            f"      2. 跟一句 '要贴到日记上吗?要的话我贴在 X 块旁边' — X 是按 hint 匹配的 entry\n"
+            f"      3. **什么都不调**,等用户答\n"
+            f"    特例 · kind=doc + ocr_likely=true:\n"
+            f"      1. 一句话描述看到的文档(例: '看到一份戴尔财报截图')\n"
+            f"      2. 跟一句 '要我读出内容跟你聊,还是直接贴到日记上?'\n"
+            f"      3. **什么都不调**,等用户答\n"
             f"\n"
             f"  特殊类型分流(覆盖上面三 path):\n"
             f"    kind=supplement → 这是补剂打卡,三步连做(别只设图不勾):\n"
             f"      ① read_today_schedule(date='{view_date}') 拿 daily task 列表,按描述/品牌匹配是哪个;\n"
             f"         匹配不出来才列出来反问用户挑哪个\n"
             f"      ② set_daily_task_image(task_name, attachment_url) — 把照片设成该 task 的打卡图标\n"
-            f"      ③ check_daily_task(task_name, checked=true) — 勾上今天的打卡\n"
-            f"    kind=doc + ocr_likely=true → 走 patch_journal_block(把 OCR 文本写进当前块)"
+            f"      ③ check_daily_task(task_name, checked=true) — 勾上今天的打卡"
         )
         pre_sections.append("\n".join(v_lines))
 
@@ -5777,6 +5788,8 @@ def widgets_catalog():
                 "category": m.get("category", "uncategorized"),
                 "default_loaded": bool(m.get("default_loaded", False)),
                 "slot": m.get("slot", ""),
+                # 'wip' = 开发中,marketplace 灰显 + 禁切;'stable' = 审核通过可用
+                "status": m.get("status", "stable"),
                 "active": m.get("name", d.name) in active,
             })
     return {"widgets": items, "active": active}
@@ -5793,8 +5806,17 @@ async def widgets_toggle(req: Request):
     if not name:
         raise HTTPException(400, "need name")
     # 校验 widget 真实存在
-    if not (WIDGETS_DIR / name / "manifest.json").exists():
+    mf = WIDGETS_DIR / name / "manifest.json"
+    if not mf.exists():
         raise HTTPException(404, f"widget '{name}' not found")
+    # 拦 wip — 前端已禁切,这里兜底防止绕过(curl 直调)
+    try:
+        if json.loads(mf.read_text(encoding="utf-8")).get("status") == "wip":
+            raise HTTPException(403, f"widget '{name}' 仍在开发中,审核通过后才能启用")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
 
     cfg = {"active": []}
     if USER_WIDGETS_PATH.exists():

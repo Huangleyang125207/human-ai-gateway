@@ -4,6 +4,7 @@
   "description": "今日步数 + 9 日 sparkline。从日记内联 `vivo 步数 ~XXX` 模式抽取。",
   "audience": "运动追踪需求者",
   "category": "diary-core",
+  "status": "wip",
   "default_loaded": false,
   "slot": "sidebar",
   "script": true,

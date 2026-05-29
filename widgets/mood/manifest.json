@@ -4,6 +4,7 @@
   "description": "5 档心情 enum + 颜色映射。每日选一档，频度成 9 日色带。",
   "audience": "想跟踪情绪节律的人（默认不装）",
   "category": "diary-core",
+  "status": "wip",
   "default_loaded": false,
   "slot": "sidebar",
   "script": true,

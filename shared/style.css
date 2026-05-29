@@ -1495,6 +1495,32 @@ body.thread-resizing { transition: none; }
   border-radius: 8px;
   font-weight: 500;
 }
+.market-tag-wip {
+  background: rgba(120, 120, 120, 0.15);
+  color: #6b6b6b;
+  padding: 1px 8px;
+  border-radius: 8px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+/* wip = 开发中 — 整卡灰显 + toggle 禁切 */
+.market-card.wip {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(58, 52, 44, 0.06);
+}
+.market-card.wip .market-card-title,
+.market-card.wip .market-card-desc,
+.market-card.wip .market-card-meta {
+  opacity: 0.5;
+}
+.market-card.wip .market-toggle-slider {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: #c8c0b0;
+}
+.market-card.wip .market-toggle input:checked + .market-toggle-slider {
+  background: #c8c0b0;
+}
 .market-card-action {
   display: flex; align-items: center;
 }
