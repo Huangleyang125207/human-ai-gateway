@@ -20,10 +20,13 @@ import hashlib
 import json
 import logging
 import os
+import platform as _platform
+import random
 import re
 import subprocess
 import sys
 import threading
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -337,6 +340,97 @@ def list_profiles_full():
 def list_model_profiles():
     """前端 picker 用,去掉 api_key。"""
     return [{k: v for k, v in p.items() if k != "api_key"} for p in list_profiles_full()]
+
+
+# ── silent failure 反馈通道 (P1:本地落 jsonl,P3 加 cloud sender) ─────
+# 用途:在任何"返 error 但 silently swallow 不告诉 user"的代码路径调用
+# `_report_silent_failure(error_type, message, context)`。本地 jsonl ring
+# buffer 保留最近 _SILENT_FAILURES_RING_MAX 条,/api/silent-failures/recent
+# 返查。client_id 持久化(~/.human-ai/data/client-id.txt),匿名 UUID,跟用户
+# 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
+# 触发 X 类 failure → 优先修)。
+# 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
+APP_VERSION = "0.7-dev"  # P3 上送服务器时改成读 git short SHA / Info.plist
+
+SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
+CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
+_SILENT_FAILURES_RING_MAX = 5000
+_CLIENT_ID_CACHE = None
+
+
+def _load_or_create_client_id() -> str:
+    """读持久化 client_id,不存在则 UUID4 生成 + 写入。
+    匿名 ID:跨 .app 启动稳定,但跟用户身份无关。
+    """
+    try:
+        if CLIENT_ID_PATH.exists():
+            cid = CLIENT_ID_PATH.read_text(encoding="utf-8").strip()
+            uuid.UUID(cid)  # 验格式
+            return cid
+    except Exception:
+        pass
+    new_id = str(uuid.uuid4())
+    try:
+        CLIENT_ID_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CLIENT_ID_PATH.write_text(new_id, encoding="utf-8")
+    except Exception as e:
+        log.warning(f"client_id 持久化失败,本次启动用内存版: {e}")
+    return new_id
+
+
+def get_client_id() -> str:
+    global _CLIENT_ID_CACHE
+    if _CLIENT_ID_CACHE is None:
+        _CLIENT_ID_CACHE = _load_or_create_client_id()
+    return _CLIENT_ID_CACHE
+
+
+def _report_silent_failure(error_type: str, message: str = "", context: dict = None):
+    """记一条 silent failure 进本地 ring buffer。fire-and-forget,自身永不 raise。
+
+    error_type: 枚举 snake_case,server 侧分类用
+                例: vision_classify_auth / cutout_all_failed / web_search_degraded
+    message:    最长 200 字截断,不放用户内容
+    context:    可选 dict (model_id / file_size_kb / fallback_to / network 标记等)
+    """
+    try:
+        entry = {
+            "ts": datetime.now().isoformat(),
+            "client_id": get_client_id(),
+            "error_type": error_type,
+            "message": (message or "")[:200],
+            "context": context or {},
+            "app_version": APP_VERSION,
+            "platform": f"{sys.platform}-{_platform.machine()}",
+        }
+        SILENT_FAILURES_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with SILENT_FAILURES_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        # 偶尔 trim(每 100 条采样一次,均摊 IO)
+        if random.random() < 0.01:
+            _trim_silent_failures()
+    except Exception as e:
+        # 反馈通道自己挂了不能反复上报(避免递归),只 warn
+        try:
+            log.warning(f"silent_failure 记录失败: {e}")
+        except Exception:
+            pass
+
+
+def _trim_silent_failures():
+    """保留最近 _SILENT_FAILURES_RING_MAX 条。"""
+    try:
+        if not SILENT_FAILURES_LOG.exists():
+            return
+        lines = SILENT_FAILURES_LOG.read_text(encoding="utf-8").splitlines()
+        if len(lines) > _SILENT_FAILURES_RING_MAX:
+            kept = lines[-_SILENT_FAILURES_RING_MAX:]
+            SILENT_FAILURES_LOG.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    except Exception as e:
+        try:
+            log.warning(f"silent_failures trim 失败: {e}")
+        except Exception:
+            pass
 
 def get_profile(model_id=None):
     profiles = list_profiles_full()
@@ -1380,9 +1474,17 @@ def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
     if not key or (cfg.get("dashscope_api_key") == "" and "dashscope" not in base_for_check):
         # 没专用 dashscope key,顶层 base_url 也不是 dashscope → 不能保证 key 是百炼的
         if not key:
+            _report_silent_failure("vision_no_key",
+                "no dashscope_api_key + fallback api_key 也空")
             return {"error": "no_dashscope_key",
                     "hint": "请去 setup 面板填 Dashscope API key (Qwen-VL),才能用 vision 路由"}
+        # key 存在但 base_url 不是 dashscope — 5.29 那次 401 的真因(prod .env 漏 key)
+        _report_silent_failure("vision_key_config_inconsistent",
+            "dashscope_api_key 空,fallback 顶层 api_key 但 base_url 不是 dashscope endpoint",
+            context={"base_url": base_for_check})
     if not file_path.exists():
+        _report_silent_failure("vision_file_missing",
+            f"attachment 文件不存在: {file_path.name}")
         return {"error": f"file not found: {file_path}"}
     # 入口压缩(只动 vision 传输,不动原图)
     use_compressed = True
@@ -1433,6 +1535,11 @@ def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
             timeout=120.0,
         )
     except Exception as e:
+        # 区分 auth vs 其他(401/403 跟用户配置直接相关,priority 排高)
+        err_kind = "vision_classify_auth" if "401" in str(e) or "403" in str(e) else "vision_classify_call_failed"
+        _report_silent_failure(err_kind,
+            f"{type(e).__name__}: {str(e)[:150]}",
+            context={"model_id": model_id})
         return {"error": f"qwen vision call failed: {type(e).__name__}: {e}"}
 
     text = (resp.choices[0].message.content or "").strip()
@@ -1442,6 +1549,9 @@ def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
     try:
         parsed = json.loads(text)
     except Exception:
+        _report_silent_failure("vision_classify_non_json",
+            f"qwen 返了非 JSON: {text[:100]}",
+            context={"model_id": model_id})
         return {"error": f"qwen returned non-JSON: {text[:200]}"}
     return {"ok": True, **parsed}
 
@@ -1741,10 +1851,15 @@ def _do_web_search(query: str, max_results: int = 5, category: str = "general") 
     if r360 and not r360.startswith("[360"):   # 有真结果
         return r360
     log.info(f"[web_search] 360 无结果({r360[:40]}),试百炼兜底")
+    _report_silent_failure("web_search_360_degraded",
+        f"360 无结果,降级到百炼: {r360[:80]}")
     try:
-        return _bailian_web_search(query)
+        r = _bailian_web_search(query)
+        return r
     except Exception as e:
         log.info(f"[web_search] 百炼也降级 ddgs: {type(e).__name__}: {str(e)[:120]}")
+        _report_silent_failure("web_search_bailian_degraded",
+            f"360 + 百炼都没出货,降级到 ddgs: {type(e).__name__}")
         return _ddgs_search(query, max_results)
 
 def _ddgs_search(query: str, max_results: int = 5) -> str:
@@ -2142,24 +2257,33 @@ def _ocr_text(file_path: Path) -> str:
          rapidocr ONNX fallback)。返 str = 成功(可能空),None = 端侧不可用
       2. 端侧 None → 走 baidu(若 config 有 key);无 key → 返 ""
     """
+    local_ok = False
     try:
         from ocr_local import ocr_local
         local_result = ocr_local(file_path)
         if local_result is not None:
             return local_result
+        local_ok = False  # 端侧返 None — 不可用
     except Exception as e:
         log.info(f"ocr_local failed for {file_path.name}: {e}")
+        _report_silent_failure("ocr_local_exception",
+            f"{type(e).__name__}: {str(e)[:120]}")
     # 端侧不可用 → baidu cloud fallback
     try:
         cfg = load_config() or {}
         api_key = cfg.get("baidu_ocr_api_key", "")
         secret_key = cfg.get("baidu_ocr_secret_key", "")
         if not api_key or not secret_key:
-            return ""  # 都端侧不行 + baidu 没 key → 给空
+            # 端侧不行 + baidu 没 key — 用户图里的文字 server 看不见 → AI 也看不见
+            _report_silent_failure("ocr_all_unavailable",
+                "端侧 OCR 不可用且百度 OCR 未配 key,返空")
+            return ""
         from ocr import baidu_ocr_image
         return baidu_ocr_image(file_path, api_key, secret_key) or ""
     except Exception as e:
         log.warning(f"baidu OCR also failed for {file_path.name}: {e}")
+        _report_silent_failure("ocr_baidu_failed",
+            f"{type(e).__name__}: {str(e)[:120]}")
         return ""
 
 
@@ -3407,6 +3531,7 @@ def _get_or_create_processed_attachment(attachment_url: str, cutout: bool = True
     #    端侧出来的 PNG 是原 aspect ratio,过 normalize_subject_frame 才能跟百度路径
     #    一样:主体居中 1024 方形,视觉长边统一。少这一步 → 瘦长瓶 / 矮胖罐显示大小不一致
     #    (5.28 南非醉茄实测的 bug)。
+    local_failed = False
     try:
         from cutout_local import cutout_local
         from cutout import normalize_subject_frame
@@ -3414,8 +3539,12 @@ def _get_or_create_processed_attachment(attachment_url: str, cutout: bool = True
         if png:
             cached.write_bytes(normalize_subject_frame(png))
             return cached, None
+        local_failed = True  # cutout_local 返 None — 端侧链没出货
     except Exception as e:
+        local_failed = True
         log.warning(f"local cutout chain failed: {e}")
+        _report_silent_failure("cutout_local_exception",
+            f"{type(e).__name__}: {str(e)[:120]}")
 
     # 2) 兜底:百度抠图(用户配了 key 才走;无 key 静默放原图)
     #    baidu_cutout_image 内部已调 normalize_subject_frame,这里不需要再过。
@@ -3426,10 +3555,22 @@ def _get_or_create_processed_attachment(attachment_url: str, cutout: bool = True
         from cutout import baidu_cutout_image
         png = baidu_cutout_image(src, api_key, sec)
         if png:
+            # 端侧挂了用百度兜上 — 单独记一类,看 N 个用户里百度承担多少
+            if local_failed:
+                _report_silent_failure("cutout_local_failed_baidu_saved",
+                    "端侧链没出货,百度兜底成功",
+                    context={"file_size_kb": src.stat().st_size // 1024})
             cached.write_bytes(png)
             return cached, None
 
     # 3) 全失败 → 原图(不报错,日记还是能用)
+    # 用户视觉上得到的是没抠图的原图,但 UX 不报错。这是典型 silent degrade。
+    _report_silent_failure("cutout_all_failed_fallback_original",
+        "端侧 + 百度都没出货,落原图",
+        context={
+            "has_cutout_key": has_cutout_key,
+            "file_size_kb": src.stat().st_size // 1024,
+        })
     return src, None
 
 
@@ -4287,6 +4428,31 @@ def _startup_vault_audit():
             )
     except Exception as e:
         log.warning(f"[vault audit] startup audit failed: {e}")
+
+
+@app.on_event("startup")
+def _startup_config_sanity():
+    """启动时扫一遍 config 内部一致性,有 silent risk 立即报。
+    今天踩的 5.29 vision 401 — prod .env 缺 DASHSCOPE_API_KEY,
+    base_url 不是 dashscope,fallback 用 deepseek key 调 dashscope endpoint —
+    这种"配错了不报错,等真出问题再炸"的事必须启动就发现。
+    """
+    try:
+        cfg = load_config() or {}
+        dk = (cfg.get("dashscope_api_key") or "").strip()
+        bu = (cfg.get("base_url") or "").strip()
+        ak = (cfg.get("api_key") or "").strip()
+        if not dk and ak and "dashscope" not in bu:
+            # 顶层 key 是 deepseek-direct 类,vision 走 dashscope endpoint 会 401
+            _report_silent_failure("config_sanity_vision_no_dashscope_key",
+                f"dashscope_api_key 空 + base_url={bu[:60]} 不是 dashscope,vision 会 401",
+                context={"has_top_api_key": bool(ak)})
+            log.warning(
+                "[config sanity] vision 可能会 401 — "
+                "dashscope_api_key 没配且顶层 key 不是百炼 key (base_url 不指 dashscope)"
+            )
+    except Exception as e:
+        log.warning(f"[config sanity] startup check failed: {e}")
 
 
 @app.on_event("startup")
@@ -5756,6 +5922,27 @@ def tag_aggregate():
         return {"sections": [], "warning": f"not found: {TAG_AGGREGATE_PATH}"}
     text = TAG_AGGREGATE_PATH.read_text(encoding="utf-8")
     return {"sections": _parse_tag_aggregate(text)}
+
+
+@app.get("/api/silent-failures/recent")
+def silent_failures_recent(n: int = 100):
+    """返最近 N 条 silent failure log(本地 ring buffer)。
+    P1 调试 / P3 后给云端 audit dashboard。
+    """
+    n = max(1, min(int(n), _SILENT_FAILURES_RING_MAX))
+    if not SILENT_FAILURES_LOG.exists():
+        return {"items": [], "total": 0, "client_id": get_client_id()}
+    try:
+        lines = SILENT_FAILURES_LOG.read_text(encoding="utf-8").splitlines()
+        items = []
+        for line in lines[-n:]:
+            try:
+                items.append(json.loads(line))
+            except Exception:
+                continue
+        return {"items": items, "total": len(lines), "client_id": get_client_id()}
+    except Exception as e:
+        raise HTTPException(500, f"read failed: {type(e).__name__}: {e}")
 
 
 @app.post("/api/open-external")
