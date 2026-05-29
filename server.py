@@ -432,6 +432,97 @@ def _trim_silent_failures():
         except Exception:
             pass
 
+
+# ── P3: silent-failure 上送 cloud sink (feedback-sink 接收端) ────
+# 上送 cursor 记录"上送到哪一行了",下次启动从这里 +1 续上。
+# 失败重试 N 次后丢弃(不阻塞主流程),本地 jsonl 永远兜底,出问题事后能回灌。
+_SF_CURSOR_PATH = DATA_DIR / "silent-failures.cursor"
+_SF_SENDER_THREAD = None
+_SF_SENDER_STOP = threading.Event()
+SF_SENDER_INTERVAL = 60       # 秒,每分钟扫一次
+SF_SENDER_BATCH_MAX = 50      # 每批最多多少条(跟 server 端 BatchIn.max_length 对齐)
+SF_SENDER_HTTP_TIMEOUT = 10   # 秒
+
+
+def _sf_cursor_read() -> int:
+    try:
+        return int(_SF_CURSOR_PATH.read_text(encoding="utf-8").strip())
+    except Exception:
+        return 0
+
+
+def _sf_cursor_write(line_no: int):
+    try:
+        _SF_CURSOR_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _SF_CURSOR_PATH.write_text(str(line_no), encoding="utf-8")
+    except Exception:
+        pass  # cursor 丢失最坏后果:下次重发已发条目(server 不去重也无伤大雅)
+
+
+def _sf_sender_loop():
+    """后台 thread:每 SF_SENDER_INTERVAL 秒读 jsonl 未发条目 → batch POST。
+    server 端 URL 来自 env FEEDBACK_SINK_URL (e.g. https://feedback.example.com)。
+    没配 → 这个 thread 不做任何事(只本地 jsonl 兜底)。
+    """
+    url_base = os.environ.get("FEEDBACK_SINK_URL", "").strip().rstrip("/")
+    if not url_base:
+        log.info("[sf-sender] FEEDBACK_SINK_URL 未配,只本地兜底,不上送云端")
+        return
+    log.info(f"[sf-sender] started, target={url_base}, interval={SF_SENDER_INTERVAL}s")
+    while not _SF_SENDER_STOP.wait(SF_SENDER_INTERVAL):
+        try:
+            _sf_drain_once(url_base)
+        except Exception as e:
+            log.warning(f"[sf-sender] drain failed: {type(e).__name__}: {e}")
+
+
+def _sf_drain_once(url_base: str):
+    """读 jsonl 从 cursor 开始的未发条目,POST 上去,成功后推进 cursor。"""
+    if not SILENT_FAILURES_LOG.exists():
+        return
+    cursor = _sf_cursor_read()
+    try:
+        lines = SILENT_FAILURES_LOG.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return
+    if cursor >= len(lines):
+        return  # 都发过了
+    pending = lines[cursor:cursor + SF_SENDER_BATCH_MAX]
+    if not pending:
+        return
+    # 解析 jsonl → events
+    events = []
+    for line in pending:
+        try:
+            obj = json.loads(line)
+            # cursor advance 不依赖单条 parse 成功,坏行也算"处理过了"
+            events.append(obj)
+        except Exception:
+            continue
+    if not events:
+        # 全坏行,推进 cursor 防卡死
+        _sf_cursor_write(cursor + len(pending))
+        return
+    try:
+        r = requests.post(
+            f"{url_base}/silent-failure/batch",
+            json={"events": events},
+            timeout=SF_SENDER_HTTP_TIMEOUT,
+        )
+        if r.status_code == 200:
+            _sf_cursor_write(cursor + len(pending))
+        elif r.status_code == 429:
+            # rate limited — 下次再试,不推进 cursor
+            log.info("[sf-sender] rate-limited, will retry next interval")
+        else:
+            log.warning(f"[sf-sender] HTTP {r.status_code}: {r.text[:120]}")
+            # 4xx 一般是 schema 错,推进 cursor 防死循环;5xx 不推进等下次
+            if 400 <= r.status_code < 500:
+                _sf_cursor_write(cursor + len(pending))
+    except Exception as e:
+        log.warning(f"[sf-sender] POST failed: {type(e).__name__}: {e}")
+        # 网络 / DNS / 超时 — 不推进 cursor,下次再试
+
 def get_profile(model_id=None):
     profiles = list_profiles_full()
     if not profiles:
@@ -4467,6 +4558,23 @@ def _startup_vault_audit():
             )
     except Exception as e:
         log.warning(f"[vault audit] startup audit failed: {e}")
+
+
+@app.on_event("startup")
+def _startup_sf_sender():
+    """启动 silent-failure 上送后台 thread。FEEDBACK_SINK_URL 没配就 no-op。"""
+    global _SF_SENDER_THREAD
+    if _SF_SENDER_THREAD is not None and _SF_SENDER_THREAD.is_alive():
+        return
+    _SF_SENDER_THREAD = threading.Thread(
+        target=_sf_sender_loop, daemon=True, name="sf-sender"
+    )
+    _SF_SENDER_THREAD.start()
+
+
+@app.on_event("shutdown")
+def _shutdown_sf_sender():
+    _SF_SENDER_STOP.set()
 
 
 @app.on_event("startup")
