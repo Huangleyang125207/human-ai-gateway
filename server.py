@@ -786,7 +786,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "patch_journal_block",
-            "description": "改写某时间块的正文。保留 H1,替换到下一个 H1 或 ---。格式: `## #tag short-title` 单行 + 散文(规则见 schedule protocol)。",
+            "description": "**整段替换**某时间块 H1 之下的所有内容(到下一个 H1 或 ---)。**用错会丢数据** — 若块里已有 H2 entry,patch 会把它整段吃掉。想给现有块**加新 H2 entry** 用 `insert_journal_block`(会 append 不覆盖)。想给已有 entry 留评论用 `append_journal_comment`。patch 只在「明确要改写整块原内容」时用。格式: `## #tag short-title` 单行 + 散文。",
             "parameters": {
                 "type": "object",
                 "required": ["time", "new_md"],
@@ -6575,6 +6575,39 @@ def _patch_block(f: Path, time_label: str, new_md: str, author: str = "ai") -> d
                     return {"error": f"block @ {time_label} 是 @user 所有,AI 不能 patch。"
                                      f"想加评论用 append_journal_comment;想新加 entry 用 insert_journal_block。"}
                 break  # 只看第一个 H2
+
+    # AI 误用 patch 当 insert 的反向防御 — 对比现存第一条 H2 vs new_md 第一条 H2:
+    # 完整行(除 @marker 之外)不一致 → AI 大概率是想"加新 entry"误用 patch,
+    # 会把原 entry 整段吃掉。拒。
+    # 5.29 16:00 联想 entry 被 patch 写舜宇光学吃掉的真事故 = 这条 guard 没有的恶果。
+    # 注意:同 tag 同 title 但不同 body 是合法 patch(典型用例:补充 / 改散文措辞)。
+    if author != "user":
+        existing_first_h2 = None
+        for k in range(start + 1, end):
+            if lines[k].startswith("## "):
+                existing_first_h2 = lines[k]
+                break
+        new_first_h2 = None
+        for ln in new_md.splitlines():
+            if ln.startswith("## "):
+                new_first_h2 = ln
+                break
+
+        def _strip_author(h2):
+            # 去掉末尾 @ai / @user / @<handle> 让对比看 tag + title
+            return re.sub(r"\s*@\S+\s*$", "", h2 or "").strip()
+
+        if (existing_first_h2 and new_first_h2
+                and existing_first_h2.strip() != "##"
+                and _strip_author(existing_first_h2) != _strip_author(new_first_h2)):
+            return {"error":
+                f"block @ {time_label} 已有 H2:`{existing_first_h2.strip()}`。"
+                f"你的 new_md 第一个 H2 是:`{new_first_h2.strip()}` — 不一样。"
+                f"patch_journal_block 会**整段替换**,原 H2 + body 会被吃掉。"
+                f"如果想给块加新 H2 → 用 insert_journal_block(append,不覆盖)。"
+                f"如果真要替换 = 放弃原 entry(数据丢失),先 read_today_schedule 确认要丢什么,"
+                f"再在 new_md 里同时写原 H2 段 + 新 H2 段。"
+            }
 
     new_lines = lines[:start + 1] + [""] + new_md.rstrip().splitlines() + [""] + lines[end:]
     f.write_text("\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
