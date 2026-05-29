@@ -5758,6 +5758,33 @@ def tag_aggregate():
     return {"sections": _parse_tag_aggregate(text)}
 
 
+@app.post("/api/open-external")
+async def open_external(req: Request):
+    """打开外部 URL — 走系统默认浏览器。
+    解决 Tauri WKWebView `target="_blank"` 哑火问题(同类已知 webview quirk)。
+    安全:只白名单 http/https,挡 file:// + javascript: + 等本地 scheme。
+    """
+    import subprocess, sys as _sys
+    body = await req.json()
+    url = (body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(400, "need url")
+    if not re.match(r"^https?://", url, flags=re.I):
+        raise HTTPException(400, "only http(s) allowed")
+    plat = _sys.platform
+    try:
+        if plat == "darwin":
+            subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif plat == "win32":
+            subprocess.Popen(["cmd", "/c", "start", "", url],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
+        else:
+            subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, f"open failed: {type(e).__name__}: {e}")
+
+
 @app.get("/api/widgets/catalog")
 def widgets_catalog():
     """扫 gateway/widgets/*/manifest.json,返回全部 widget 元数据 + 当前激活状态。
