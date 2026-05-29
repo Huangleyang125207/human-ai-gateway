@@ -261,6 +261,7 @@ def _env_overlay() -> dict:
         "BAIDU_OCR_API_KEY", "BAIDU_OCR_SECRET_KEY",
         "BAIDU_CUTOUT_API_KEY", "BAIDU_CUTOUT_SECRET_KEY",
         "GEMINI_API_KEY",
+        "FEEDBACK_SINK_URL",
     ):
         ev = os.environ.get(k)
         if ev:
@@ -464,7 +465,10 @@ def _sf_sender_loop():
     server 端 URL 来自 env FEEDBACK_SINK_URL (e.g. https://feedback.example.com)。
     没配 → 这个 thread 不做任何事(只本地 jsonl 兜底)。
     """
-    url_base = os.environ.get("FEEDBACK_SINK_URL", "").strip().rstrip("/")
+    # 走 _env_overlay() — 这样 .env 文件里的 FEEDBACK_SINK_URL 也能读到
+    # (os.environ.get 直读只能拿 process env,装机后 .app 没显式 export 就拿不到)
+    url_base = (_env_overlay().get("FEEDBACK_SINK_URL", "")
+                or os.environ.get("FEEDBACK_SINK_URL", "")).strip().rstrip("/")
     if not url_base:
         log.info("[sf-sender] FEEDBACK_SINK_URL 未配,只本地兜底,不上送云端")
         return
