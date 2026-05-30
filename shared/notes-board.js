@@ -31,7 +31,8 @@
   async function loadBoard() {
     boardContent.innerHTML = `<div class="board-empty">载入中⋯</div>`;
     try {
-      const r = await fetch("/api/eval/list?n=14");
+      // include_missing=1 → 后端会补一条昨天的 missing 卡(如果昨天有 schedule 但没 eval)
+      const r = await fetch("/api/eval/list?n=14&include_missing=1");
       const d = await r.json();
       const items = d.items || [];
       if (!items.length) {
@@ -55,13 +56,16 @@
     document.getElementById("boardRunNow").addEventListener("click", runEvalNow);
   }
 
-  async function runEvalNow() {
-    const btn = document.getElementById("boardRunNow") || document.getElementById("boardRefreshBtn");
+  async function runEvalNow(btn) {
+    // btn 缺省 → 找今天的(空状态 / 重新生成)。给具体按钮才是补昨天那类。
+    btn = btn || document.getElementById("boardRunNow") || document.getElementById("boardRefreshBtn");
+    const targetDate = btn?.dataset?.runDate || ""; // 空 = 今天
+    const oldLabel = btn?.textContent;
     if (btn) { btn.disabled = true; btn.textContent = "AI 在写⋯ (可能要 1-2 分钟)"; }
     try {
       const r = await fetch("/api/eval/run", {
         method: "POST", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({}),
+        body: JSON.stringify(targetDate ? {date: targetDate} : {}),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || "未知错误");
@@ -85,7 +89,7 @@
       </div>`;
     const pastCards = items
       .filter(x => !x.is_today)
-      .map(x => cardHtml(x, true))
+      .map(x => x.missing ? missingCardHtml(x) : cardHtml(x, true))
       .join("");
 
     boardContent.innerHTML = `
@@ -93,9 +97,31 @@
       ${pastCards ? `<div class="board-past-divider">过去 ${items.filter(x=>!x.is_today).length} 晚</div>${pastCards}` : ""}
     `;
     const runBtn = document.getElementById("boardRunNow");
-    if (runBtn) runBtn.addEventListener("click", runEvalNow);
+    if (runBtn) runBtn.addEventListener("click", () => runEvalNow(runBtn));
     const refreshBtn = document.getElementById("boardRefreshBtn");
-    if (refreshBtn) refreshBtn.addEventListener("click", runEvalNow);
+    if (refreshBtn) refreshBtn.addEventListener("click", () => runEvalNow(refreshBtn));
+    // 补昨天的按钮 — data-run-date 标识哪天
+    document.querySelectorAll(".board-backfill-btn").forEach(b => {
+      b.addEventListener("click", () => runEvalNow(b));
+    });
+  }
+
+  function missingCardHtml(item) {
+    // 昨天没复盘 — cron 时刻 app 没启动是常见原因。让用户主动补,且只这一天。
+    const dateLabel = new Date(item.date).toLocaleDateString("zh-CN",
+      {month:"long", day:"numeric", weekday:"short"});
+    return `
+      <div class="board-card board-card-missing">
+        <div class="board-card-head">
+          <span class="board-card-title">${escapeHtml(dateLabel)} 没复盘</span>
+          <span class="board-card-date">${escapeHtml(item.date)}</span>
+        </div>
+        <div class="board-card-body" style="opacity:.75;">那晚 21:30 时 app 没启动 — 现在能补跑一份。</div>
+        <div class="board-actions">
+          <button class="board-backfill-btn" data-run-date="${escapeHtml(item.date)}">补跑那晚</button>
+        </div>
+      </div>
+    `;
   }
 
   function cardHtml(item, isPast) {

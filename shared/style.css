@@ -728,6 +728,16 @@ body.thread-resizing { transition: none; }
   background: rgba(254, 250, 242, 0.4);
   border-style: dashed;
 }
+.board-card.board-card-missing {
+  background: rgba(254, 250, 242, 0.5);
+  border-style: dashed;
+  border-left-color: rgba(168, 110, 70, 0.35);
+  border-color: rgba(168, 110, 70, 0.18);
+}
+.board-card.board-card-missing .board-card-title {
+  font-size: 13.5px;
+  color: var(--ink-3);
+}
 .board-past-divider {
   margin: 26px 4px 12px;
   font: 10.5px var(--sans);

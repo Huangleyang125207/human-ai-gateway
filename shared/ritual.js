@@ -37,8 +37,11 @@
   }
 
   let _cupImageUrl = null;  // 用户上传水杯抠完的 PNG url(若有)
-  let _viewDate = null;     // null = 今天;"YYYY-MM-DD" = 在看历史日(只读)
+  let _viewDate = null;     // null = 今天;"YYYY-MM-DD" = 在看历史日
   let _viewIsToday = true;
+  // 5.31:historic 日不再一律 readonly — 次日 12:00 前补昨天是允许的。
+  // server 返 is_writable;前端只 mirror,别自己算(时区/小时算错过)
+  let _viewWritable = true;
 
   async function init() {
     const care = document.getElementById("care");
@@ -67,6 +70,7 @@
       console.warn("[ritual] /api/daily-tasks failed:", e);
     }
     _viewIsToday = tasksR.is_today !== false;
+    _viewWritable = tasksR.is_writable !== false;
     const wt = (tasksR.tasks || []).find(t => t.name === WATER_TASK_NAME);
     let intakeFromMd = wt ? Math.max(0, Math.min(CUPS_TOTAL, wt.today_intake || 0)) : 0;
 
@@ -86,10 +90,16 @@
       try { localStorage.removeItem(LS_PREFIX + todayKey()); } catch {}
     }
 
-    care.classList.toggle("care-readonly", !_viewIsToday);
-    const state = { cups: intakeFromMd, readonly: !_viewIsToday };
+    care.classList.toggle("care-readonly", !_viewWritable);
+    const state = { cups: intakeFromMd, readonly: !_viewWritable };
     render(care, state);
-    renderTasksFromData(tasksR.tasks || [], !_viewIsToday);
+    renderTasksFromData(tasksR.tasks || [], !_viewWritable);
+  }
+
+  // 提交 daily-task 时附 date — 今天就空,补昨天就给 _viewDate。
+  // server 端 _writable_dates_set 守门;前端只是 mirror。
+  function _checkBodyDate() {
+    return (_viewIsToday || !_viewDate) ? {} : { date: _viewDate };
   }
 
   function render(care, state) {
@@ -141,7 +151,7 @@
         if (!pressT) return;          // long-press 已经触发
         clearTimeout(pressT); pressT = null;
         if (state.readonly) {
-          window.gatewayToast?.("回到今天才能打卡");
+          window.gatewayToast?.("这天已经过 12 点了 — 不能再补打卡");
           return;
         }
         // level-meter:click cup #k 把 state.cups 设到 k+1 (上调) 或 k (降到该级以下,把刚点的也清空)
@@ -168,7 +178,8 @@
         // 老用户已有 daily_dose=8 不受影响。
         fetch("/api/daily-tasks/check", {
           method: "POST", headers: {"Content-Type":"application/json"},
-          body: JSON.stringify({task_name: WATER_TASK_NAME, intake: next, daily_dose: CUPS_TOTAL}),
+          body: JSON.stringify({task_name: WATER_TASK_NAME, intake: next, daily_dose: CUPS_TOTAL,
+                                ..._checkBodyDate()}),
         }).catch(() => {});
         if (next > prev) {
           window.gateway.korok?.yahaha?.(...rectCenter(cup));
@@ -388,7 +399,7 @@
     photo.addEventListener("click", (e) => {
       if (longPressFired) { longPressFired = false; return; }   // 长按已开 modal,跳过 click
       if (readonly) {
-        window.gatewayToast?.("回到今天才能打卡");
+        window.gatewayToast?.("这天已经过 12 点了 — 不能再补打卡");
         return;
       }
       if (!t.image_url) return uploadForTask(t.name);
@@ -425,7 +436,7 @@
       fetch("/api/daily-tasks/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task_name: t.name, intake: next }),
+        body: JSON.stringify({ task_name: t.name, intake: next, ..._checkBodyDate() }),
       }).then(r => r.json()).then(data => {
         t.remaining = data.remaining;
         const badge = photo.querySelector(".task-remaining-badge");
@@ -611,7 +622,7 @@
       try {
         const r = await fetch("/api/daily-tasks/check", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ task_name: t.name, intake: v }),
+          body: JSON.stringify({ task_name: t.name, intake: v, ..._checkBodyDate() }),
         });
         const d = await r.json();
         $remaining.textContent = (typeof d.remaining === "number") ? `${d.remaining} 颗` : "—";

@@ -3746,6 +3746,17 @@ def _today_date_str() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+# 补卡窗口 — 今天总在;次日 12:00 前还能补昨天。
+# 用户语:"至少到第二天 12 点前可以补吧"(5.31 凌晨补 5.30 打卡)。
+# 12 点是宽容线,过了就让数据保持当时的样子,别再倒填污染。
+def _writable_dates_set() -> set:
+    out = {_today_date_str()}
+    now = datetime.now()
+    if now.hour < 12:
+        out.add((now - timedelta(days=1)).strftime("%Y-%m-%d"))
+    return out
+
+
 def _task_meta_state(name: str, meta_map: dict, target_date=None) -> dict:
     """单 task 的剂量/库存状态。无 meta 返默认。
     target_date=None → 今天 intake;target_date=datetime → 该日 intake。
@@ -3769,9 +3780,10 @@ def _task_meta_state(name: str, meta_map: dict, target_date=None) -> dict:
     }
 
 
-def _bump_intake(name: str, delta: int = 1, set_to=None) -> dict:
-    """改 intake_log[today]。delta 累加,set_to 直接置数(优先 set_to)。
-    返回新的 meta state(同 _task_meta_state)。
+def _bump_intake(name: str, delta: int = 1, set_to=None, for_date=None) -> dict:
+    """改 intake_log[date_key]。delta 累加,set_to 直接置数(优先 set_to)。
+    for_date=None → 今天;datetime → 该日。补卡窗口管控在 caller(_writable_dates_set)。
+    返回该日的 meta state。
     """
     meta_map = _load_task_meta_map()
     entry = dict(meta_map.get(name) or {})
@@ -3779,22 +3791,23 @@ def _bump_intake(name: str, delta: int = 1, set_to=None) -> dict:
     if daily_dose < 1:
         daily_dose = 1
     intake_log = dict(entry.get("intake_log") or {})
-    today = _today_date_str()
-    cur = int(intake_log.get(today, 0) or 0)
+    date_key = (for_date.strftime("%Y-%m-%d") if for_date is not None
+                else _today_date_str())
+    cur = int(intake_log.get(date_key, 0) or 0)
     if set_to is not None:
         new = max(0, int(set_to))
     else:
         new = cur + int(delta)
     new = max(0, min(new, daily_dose))
     if new == 0:
-        intake_log.pop(today, None)
+        intake_log.pop(date_key, None)
     else:
-        intake_log[today] = new
+        intake_log[date_key] = new
     entry["daily_dose"] = daily_dose
     entry["intake_log"] = intake_log
     meta_map[name] = entry
     _save_task_meta_map(meta_map)
-    return _task_meta_state(name, meta_map)
+    return _task_meta_state(name, meta_map, target_date=for_date)
 
 
 def _read_daily_tasks_from_md(target_date=None) -> list:
@@ -3901,9 +3914,10 @@ def _ensure_md_progress_children(name: str, daily_dose: int, today_intake: int,
     return changed
 
 
-def _set_md_checkbox(name: str, checked: bool) -> bool:
-    """改今天 md 顶部 - [ ] / - [x]。找到返 True;没找到 False(不抛)。"""
-    f = find_today_journal()
+def _set_md_checkbox(name: str, checked: bool, target_date=None) -> bool:
+    """改 md 顶部 - [ ] / - [x]。找到返 True;没找到 False(不抛)。
+    target_date=None → 今天;datetime → 该日(补卡用)。"""
+    f = find_today_journal(target_date) if target_date is not None else find_today_journal()
     if not f:
         return False
     text = f.read_text(encoding="utf-8")
@@ -3953,7 +3967,11 @@ def daily_tasks_catalog(date: str = ""):
                 _ensure_md_progress_children(t["name"], state["daily_dose"], state["today_intake"])
             except Exception as e:
                 log.warning(f"ensure md children for '{t['name']}' failed: {e}")
-    return {"tasks": tasks, "date": date or _today_date_str(), "is_today": is_today}
+    # is_writable: 今天总可写;过去看 _writable_dates_set(次日 12:00 前补昨天)
+    resolved_date = date or _today_date_str()
+    is_writable = resolved_date in _writable_dates_set()
+    return {"tasks": tasks, "date": resolved_date, "is_today": is_today,
+            "is_writable": is_writable}
 
 
 @app.post("/api/daily-tasks/check")
@@ -3962,6 +3980,7 @@ async def daily_task_check(req: Request):
       {task_name, checked: bool}  → 兼容旧用法。true=置满 daily_dose,false=置 0。
       {task_name, increment: ±1}  → 当前 intake ±1。
       {task_name, intake: N}      → 直接置数。
+    可选 date=YYYY-MM-DD:补卡昨天(仅 _writable_dates_set 允许的日期 — 次日 12:00 前补昨天)。
     md 的 - [x] / - [ ] 自动跟随 (intake >= daily_dose 才 [x])。
     返回:{ok, task_name, checked, ...meta_state}
     """
@@ -3969,6 +3988,18 @@ async def daily_task_check(req: Request):
     name = (body.get("task_name") or "").strip()
     if not name:
         raise HTTPException(400, "need task_name")
+
+    # 补卡日期解析。缺省 = 今天;有 date 字段就走窗口验证。
+    date_arg = (body.get("date") or "").strip()
+    for_date = None
+    if date_arg:
+        if date_arg not in _writable_dates_set():
+            raise HTTPException(400,
+                f"date {date_arg} 不在补卡窗口内(只能补今天 / 昨天 12:00 前)")
+        try:
+            for_date = datetime.strptime(date_arg, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(400, f"bad date: {date_arg}")
 
     # 可选:首次记录该 task 时用 caller 给的 daily_dose 初始化(没设过的话)。
     # 水杯特别需要 — 前端 CUPS_TOTAL=8,但 fresh meta 没这个 task,默认 dose=1
@@ -3987,25 +4018,26 @@ async def daily_task_check(req: Request):
             pass
 
     if "intake" in body:
-        state = _bump_intake(name, set_to=int(body["intake"]))
+        state = _bump_intake(name, set_to=int(body["intake"]), for_date=for_date)
     elif "increment" in body:
-        state = _bump_intake(name, delta=int(body["increment"]))
+        state = _bump_intake(name, delta=int(body["increment"]), for_date=for_date)
     else:
         # 兼容旧:checked=true → 置满 daily_dose;false → 置 0
         checked_flag = bool(body.get("checked"))
         meta_map = _load_task_meta_map()
-        cur = _task_meta_state(name, meta_map)
+        cur = _task_meta_state(name, meta_map, target_date=for_date)
         target = cur["daily_dose"] if checked_flag else 0
-        state = _bump_intake(name, set_to=target)
+        state = _bump_intake(name, set_to=target, for_date=for_date)
 
     md_checked = state["today_intake"] >= state["daily_dose"]
-    if not _set_md_checkbox(name, md_checked):
-        # md 没找到也不报错 — 可能 task 在 daily-tasks.md 但今天 file 顶部还未刷
-        log.info(f"check: md row '{name}' not found in today (meta updated only)")
+    if not _set_md_checkbox(name, md_checked, target_date=for_date):
+        # md 没找到也不报错 — 可能 task 在 daily-tasks.md 但当日 file 顶部还未刷
+        log.info(f"check: md row '{name}' not found in {date_arg or 'today'} (meta updated only)")
     # daily_dose>1:同步进度子 box(前 K 个 [x],其余 [ ])
     if state["daily_dose"] > 1:
         try:
-            _ensure_md_progress_children(name, state["daily_dose"], state["today_intake"])
+            _ensure_md_progress_children(name, state["daily_dose"], state["today_intake"],
+                                          target_date=for_date)
         except Exception as e:
             log.warning(f"ensure md children for '{name}' failed: {e}")
     return {
@@ -5074,15 +5106,21 @@ def _eval_build_feature_intro_messages(target: datetime) -> list:
 
 
 @app.get("/api/eval/list")
-def eval_list(n: int = 14):
+def eval_list(n: int = 14, include_missing: bool = False):
     """返最近 N 天的 eval 复盘原文(按日期降序),给留言板做垂直 stack 渲染。
     item: {date, is_today, markdown}。没记录返 {items: []}。
+
+    include_missing=True 时,若**昨天**没 eval md 但有 schedule md,追一条
+    {date, is_today: false, missing: true, markdown: null} 让 UI 渲染"补跑"卡片。
+    窗口故意窄:只昨天 — cron 偶尔挂(app 没启动)是常见原因,补当天意义清晰;
+    再往前拉数据陈旧、AI 生成质量也差。
     """
-    if not EVAL_LOG_DIR.exists():
+    if not EVAL_LOG_DIR.exists() and not include_missing:
         return {"items": []}
     n = max(1, min(60, int(n)))  # clamp 防滥用
     today_str = datetime.now().strftime("%Y-%m-%d")
-    files = sorted(EVAL_LOG_DIR.glob("????-??-??.md"), key=lambda p: p.name, reverse=True)[:n]
+    files = (sorted(EVAL_LOG_DIR.glob("????-??-??.md"), key=lambda p: p.name, reverse=True)[:n]
+             if EVAL_LOG_DIR.exists() else [])
     items = []
     for f in files:
         try:
@@ -5093,6 +5131,19 @@ def eval_list(n: int = 14):
             })
         except Exception:
             continue
+    if include_missing:
+        # 只查昨天是否缺。日期降序,所以塞到合适位置。
+        y_dt = datetime.now() - timedelta(days=1)
+        y_str = y_dt.strftime("%Y-%m-%d")
+        existing = {it["date"] for it in items}
+        if y_str not in existing and find_today_journal(y_dt) is not None:
+            items.append({
+                "date": y_str,
+                "is_today": False,
+                "missing": True,
+                "markdown": None,
+            })
+            items.sort(key=lambda x: x["date"], reverse=True)
     return {"items": items}
 
 
