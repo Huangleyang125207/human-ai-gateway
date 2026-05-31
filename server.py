@@ -719,15 +719,40 @@ def build_system_prompt(context: dict = None, model_id: str = None) -> str:
     return "\n".join(parts)
 
 
+_TIMEBLOCK_HOOK_PATH = Path.home() / ".claude" / "scripts" / "timeblock-stamp.sh"
+
+
 def _compute_time_block_hint() -> str:
-    """对齐 ~/.claude/scripts/timeblock-stamp.sh 的 [time-block] 输出格式。
-    floor 到半小时(NOT round),全角冒号,中文星期。
+    """source CC 那边的 ~/.claude/scripts/timeblock-stamp.sh — single source of truth。
+    CC 和 deepseek 看到完全一致的 [time-block] / [schedule-voice] baseline,
+    未来在 bash 里改 hook,两边自动同步,不必两份维护。
+
+    cwd 设到 JOURNAL_DIR 父级,让 hook 里的 has_schedule_dir gate 通过(否则空输出)。
+    `[skill-required]` 行对 deepseek 没意义(它不能 invoke Skill),过滤掉。
+
+    fallback:bash 没装 / 文件缺 / 超时 → 内联 Python 算最小版,保证 chat 不挂。
     """
+    if _TIMEBLOCK_HOOK_PATH.exists():
+        try:
+            result = subprocess.run(
+                ["bash", str(_TIMEBLOCK_HOOK_PATH)],
+                cwd=str(VAULT_DIR if VAULT_DIR.exists() else Path.home()),
+                capture_output=True, text=True, timeout=2,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                lines = [l for l in result.stdout.splitlines()
+                         if not l.startswith("[skill-required]")]
+                return "\n".join(lines).rstrip()
+        except (subprocess.SubprocessError, OSError) as e:
+            log.warning(f"timeblock-stamp.sh failed ({e}), inline fallback")
+    return _compute_time_block_hint_inline()
+
+
+def _compute_time_block_hint_inline() -> str:
+    """fallback:hook 不可用时的最小内联实现。"""
     now = datetime.now()
-    # floor 到 30 分钟边界
     block_minute = 30 if now.minute >= 30 else 0
-    block_label = f"{now.hour}：{block_minute:02d}"  # ： = 全角冒号
-    # 区间结束(同小时 29 或 59,跨小时)
+    block_label = f"{now.hour}：{block_minute:02d}"
     end_minute = 59 if block_minute == 30 else 29
     weekday_cn = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"][now.weekday()]
     return (
@@ -5043,7 +5068,10 @@ def _eval_build_messages(target: datetime, model_id: str = None) -> list:
     替换 — 让 AI 用自己的真实模型 id 署名。
     """
     base_sys = build_system_prompt({}, model_id=model_id)  # 保留原本身份
-    sys_prompt = base_sys + _EVAL_INJECTION
+    # 5.31:eval 也注入 [time-block] + [schedule-voice],让 deepseek 写复盘 entry
+    # 时遵守 § H5 voice baseline(否则就写函数名 / endpoint 那种 6 个月后看不懂的)
+    time_hint = _compute_time_block_hint()
+    sys_prompt = base_sys + "\n\n" + time_hint + "\n" + _EVAL_INJECTION
 
     today_f = find_today_journal(target)
     today_md = today_f.read_text(encoding="utf-8") if (today_f and today_f.exists()) else "(今天 md 不存在)"
