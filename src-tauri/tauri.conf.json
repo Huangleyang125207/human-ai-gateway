@@ -33,7 +33,7 @@
       "endpoints": [
         "http://101.42.108.30:18080/updates/latest.json"
       ],
-      "pubkey": "RWQdbciPNmZ8WhjLXfCavVq0AoLkI7YNPGL0ouM/J4REOeIBVcoOVtgp",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFERUEwQUE2QjM0QUQyMkEKUldRcTBrcXpwZ3JxcmIzeEx1bUNWZk1RRUNPUDhyL2xvVG5NTTZ3TElUcFBIMStYdGk2SDlRK2kK",
       "dangerousInsecureTransportProtocol": true
     }
   }
