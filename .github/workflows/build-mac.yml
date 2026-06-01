@@ -48,6 +48,14 @@ jobs:
           pip install -r requirements.txt
           pip install rapidocr-onnxruntime rembg pyinstaller
 
+      - name: Prepare .venv-build (build-sidecar.sh 依赖这个 venv)
+        # 本地开发场景 venv 由 build-mac-pyinstaller.sh 建好,CI 上需要 inline 重做一次
+        run: |
+          python3 -m venv .venv-build
+          .venv-build/bin/pip install --quiet --upgrade pip
+          .venv-build/bin/pip install --quiet -r requirements.txt
+          .venv-build/bin/pip install --quiet pyinstaller rapidocr-onnxruntime rembg
+
       - name: Build sidecar (freeze server.py)
         # 把 server.py 打成单文件 sidecar 给 Tauri externalBin 用
         run: |
