@@ -23,7 +23,9 @@ jobs:
     # macos-14 = arm64 (Apple Silicon) runner
     # Tauri 桌面壳 + sidecar 都得在 native arch 上 build
     runs-on: macos-14
-    timeout-minutes: 45
+    # timeout 90min:rsync 28M 推国内 yanpai 反向出口实测 ~10-25KB/s,
+    # 单 push 阶段就要 ~20-50min;Tauri build cold cache 3-5min;留 buffer
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
