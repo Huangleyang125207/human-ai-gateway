@@ -2865,7 +2865,7 @@ async def chat(req: Request):
     # multi-turn tool loop (max 6 rounds);最后一轮 force-no-tool 逼出文本回复,
     # 避免某些模型(如 DeepSeek)search 完仍想继续 search 撞 loop 上限返空 reply。
     last_actions = []
-    MAX_ROUNDS = 6
+    MAX_ROUNDS = 10
     for round_idx in range(MAX_ROUNDS):
         is_last_round = (round_idx == MAX_ROUNDS - 1)
         try:
@@ -3070,7 +3070,7 @@ def _audit_unauthorized_claim(content: str, actions: list) -> str:
 
 # tool result 上限:multi-round 时同一 result 跨轮重发,大 JSON 会把 token 拉爆。
 # 3000 char ≈ 1500 token,普通 read 类够用;真要全文 model 可再调一次同 tool。
-_TOOL_RESULT_CAP = 3000
+_TOOL_RESULT_CAP = 5000
 
 def _truncate_tool_result(content: str) -> str:
     if len(content) <= _TOOL_RESULT_CAP:
@@ -3194,7 +3194,7 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
     所有流式文本出口统一走 _stream_final_reply(单一 chokepoint,DSML 防漏)。
     """
     last_actions = []
-    MAX_ROUNDS = 6
+    MAX_ROUNDS = 10
     for round_idx in range(MAX_ROUNDS):
         is_last_round = (round_idx == MAX_ROUNDS - 1)
         # 非最后轮:先非 stream 让模型决定要不要 tool。
