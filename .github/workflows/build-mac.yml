@@ -23,9 +23,8 @@ jobs:
     # macos-14 = arm64 (Apple Silicon) runner
     # Tauri 桌面壳 + sidecar 都得在 native arch 上 build
     runs-on: macos-14
-    # timeout 90min:rsync 28M 推国内 yanpai 反向出口实测 ~10-25KB/s,
-    # 单 push 阶段就要 ~20-50min;Tauri build cold cache 3-5min;留 buffer
-    timeout-minutes: 90
+    # 6.1 改:不再 push yanpai,只 upload artifact;Tauri build cold 3-5min + 其他 step 5min
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -105,27 +104,11 @@ jobs:
           EOF
           cat /tmp/latest.json
 
-      - name: Rsync push 到 yanpai (deploy key sandbox 限制在 /opt/feedback-sink/data/updates/)
-        # SSH_PRIVATE_KEY 是 deploy 专用 key,yanpai authorized_keys 里加了 forced-command:
-        #   "/usr/bin/rrsync -wo /opt/feedback-sink/data/updates/"
-        # 攻击面:这把 key 泄露 → 只能往 base 目录推文件;不能拿 shell,不能改 base 之外
-        # 跟你本机 SSH key 完全隔离,审计 fingerprint 可区分
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H 101.42.108.30 >> ~/.ssh/known_hosts 2>/dev/null
-          # rsync :./ = 推到 rrsync base path (base 自动 prepend)
-          rsync -e "ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes" \
-                src-tauri/target/release/bundle/macos/Gateway.app.tar.gz \
-                src-tauri/target/release/bundle/macos/Gateway.app.tar.gz.sig \
-                /tmp/latest.json \
-                ubuntu@101.42.108.30:./
-
-      - name: Upload artifact (GitHub 备份)
-        # GitHub 30 天保留 — 万一 yanpai 挂了还能从 GitHub 取
+      - name: Upload artifact (主入口 — 本机当中转站,GitHub artifact 是真分发源)
+        # 6.1 改路径:GitHub Actions → yanpai 国际反向带宽实测 18-25KB/s,150M 一次
+        # 推 80min 还 timeout。改成:Actions 只 upload artifact (GitHub 内部走得快),
+        # 本机跑 sync 脚本 gh run download → rsync 推 yanpai (国内→国内,几秒)。
+        # 完整链:Actions build → GitHub artifact → 本机 pull → yanpai → client
         uses: actions/upload-artifact@v4
         with:
           name: Gateway-mac-arm64-${{ steps.meta.outputs.version }}
