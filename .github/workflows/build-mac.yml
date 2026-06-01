@@ -1,0 +1,127 @@
+name: Build & Release Mac (Tauri + auto-update)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.py'
+      - '**.html'
+      - 'shared/**'
+      - 'widgets/**'
+      - 'vendor/**'
+      - 'brand/**'
+      - 'protocols/**'
+      - 'tools/**'
+      - 'requirements.txt'
+      - 'src-tauri/**'
+      - 'build-sidecar.sh'
+      - '.github/workflows/build-mac.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    # macos-14 = arm64 (Apple Silicon) runner
+    # Tauri 桌面壳 + sidecar 都得在 native arch 上 build
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Rust + tauri-cli
+        # 用 rustup 装 stable + 加 aarch64-apple-darwin target;tauri-cli 走 cargo install
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          source "$HOME/.cargo/env"
+          rustup target add aarch64-apple-darwin
+          cargo install tauri-cli --version "^2.0" --locked
+
+      - name: Install Python deps + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install rapidocr-onnxruntime rembg pyinstaller
+
+      - name: Build sidecar (freeze server.py)
+        # 把 server.py 打成单文件 sidecar 给 Tauri externalBin 用
+        run: |
+          chmod +x build-sidecar.sh
+          bash build-sidecar.sh
+
+      - name: Tauri build
+        # createUpdaterArtifacts=true 让 tauri 自动 sign .app.tar.gz
+        # TAURI_SIGNING_PRIVATE_KEY = secret 里存的 minisign 私钥文件内容
+        # TAURI_SIGNING_PRIVATE_KEY_PASSWORD = 当前 no-passphrase 模式留空
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          source "$HOME/.cargo/env"
+          cargo tauri build
+
+      - name: Read version + sig
+        id: meta
+        run: |
+          VERSION=$(jq -r .version src-tauri/tauri.conf.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          # sig 是 tauri auto-sign 出来的(没 manual minisign 步骤)
+          SIG=$(cat src-tauri/target/release/bundle/macos/Gateway.app.tar.gz.sig)
+          # 多行 sig 通过 GITHUB_OUTPUT 用 heredoc 传
+          echo "sig<<EOF" >> $GITHUB_OUTPUT
+          echo "$SIG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Generate latest.json manifest
+        # platforms.darwin-aarch64.signature = .sig 文件全文;url 指 yanpai endpoint
+        run: |
+          cat > /tmp/latest.json <<EOF
+          {
+            "version": "${{ steps.meta.outputs.version }}",
+            "notes": "auto-release ${{ github.sha }}",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": $(jq -Rs . <<< "${{ steps.meta.outputs.sig }}"),
+                "url": "http://101.42.108.30:18080/updates/Gateway.app.tar.gz"
+              }
+            }
+          }
+          EOF
+          cat /tmp/latest.json
+
+      - name: Rsync push 到 yanpai (deploy key sandbox 限制在 /opt/feedback-sink/data/updates/)
+        # SSH_PRIVATE_KEY 是 deploy 专用 key,yanpai authorized_keys 里加了 forced-command:
+        #   "/usr/bin/rrsync -wo /opt/feedback-sink/data/updates/"
+        # 攻击面:这把 key 泄露 → 只能往 base 目录推文件;不能拿 shell,不能改 base 之外
+        # 跟你本机 SSH key 完全隔离,审计 fingerprint 可区分
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 101.42.108.30 >> ~/.ssh/known_hosts 2>/dev/null
+          # rsync :./ = 推到 rrsync base path (base 自动 prepend)
+          rsync -e "ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes" \
+                src-tauri/target/release/bundle/macos/Gateway.app.tar.gz \
+                src-tauri/target/release/bundle/macos/Gateway.app.tar.gz.sig \
+                /tmp/latest.json \
+                ubuntu@101.42.108.30:./
+
+      - name: Upload artifact (GitHub 备份)
+        # GitHub 30 天保留 — 万一 yanpai 挂了还能从 GitHub 取
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gateway-mac-arm64-${{ steps.meta.outputs.version }}
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/Gateway.app.tar.gz
+            src-tauri/target/release/bundle/macos/Gateway.app.tar.gz.sig
+            /tmp/latest.json
+          retention-days: 30

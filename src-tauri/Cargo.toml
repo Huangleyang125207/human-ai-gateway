@@ -15,13 +15,19 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.6.2" }
+tauri-build = { version = "2.6.2", features = [] }
 
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.11.2" }
+tauri = { version = "2.11.2", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2.3.5"
 tauri-plugin-single-instance = "2.4.2"
+# updater:自动更新 — 启动时拉 latest.json 比对版本,minisign 验签后下载新 binary
+# 走 yanpai feedback-sink /updates/ 同 host,不依赖 GitHub Release(国内用户无 Clash 也通)
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+# 只为 updater startup delay,不引入运行时
+tokio = { version = "1", features = ["time"] }

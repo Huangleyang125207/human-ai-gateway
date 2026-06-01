@@ -16,6 +16,7 @@
     "active": true,
     "targets": "all",
     "externalBin": ["binaries/gateway-server"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -25,6 +26,15 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "http://101.42.108.30:18080/updates/latest.json"
+      ],
+      "pubkey": "RWQdbciPNmZ8WhjLXfCavVq0AoLkI7YNPGL0ouM/J4REOeIBVcoOVtgp",
+      "dangerousInsecureTransportProtocol": true
     }
   }
 }

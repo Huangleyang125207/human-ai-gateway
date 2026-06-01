@@ -3,9 +3,37 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_updater::UpdaterExt;
+
+/// 启动时后台 check 是否有新版本。失败 silent — 不阻塞主流程。
+/// 走 yanpai feedback-sink /updates/latest.json,minisign 验签,有新版本下载到临时位置后
+/// 触发应用重启(用户确认 dialog 在前端做,这里只做检测+下载机制)
+async fn check_for_updates(app: AppHandle) {
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            log::warn!("[updater] init failed: {e}");
+            return;
+        }
+    };
+    match updater.check().await {
+        Ok(Some(update)) => {
+            log::info!("[updater] new version available: {}", update.version);
+            // 下载 + 安装 — 用户重启时生效;失败 silent
+            if let Err(e) = update
+                .download_and_install(|_chunk, _total| {}, || {})
+                .await
+            {
+                log::warn!("[updater] download/install failed: {e}");
+            }
+        }
+        Ok(None) => log::info!("[updater] no new version"),
+        Err(e) => log::warn!("[updater] check failed: {e}"),
+    }
+}
 
 /// 选一个空闲端口(bind :0 让内核分配,拿到号再释放)。动态端口根治"重绑 4321 撞 TIME_WAIT/孤儿"
 /// 那整类 bug:孤儿占着旧端口也无所谓,新实例直接用另一个空闲口。
@@ -60,7 +88,17 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_shell::init())
+        // T9 自动更新:启动后台 check yanpai /updates/latest.json,minisign 验签
+        // 后下载新 binary;走 feedback-sink 同 host(国内直连稳)
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            // 启动 5s 后后台 check 更新(不阻塞窗口建,失败 silent)
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                check_for_updates(handle).await;
+            });
             // T4 自启 sidecar:动态空闲端口 + headless(GATEWAY_NO_OPEN=1)。
             // 用动态端口后,上次崩溃的孤儿占着旧口也不影响 —— 不在启动时杀(那会跟新 spawn 抢资源),
             // 退出时才清(见下 ExitRequested)。
