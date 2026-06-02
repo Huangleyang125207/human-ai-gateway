@@ -4,6 +4,7 @@
  * 两 tab:
  *   1. 插件市场 — widget catalog,GET /api/widgets/catalog
  *   2. API 钥匙 — DeepSeek (chat) + 阿里云百炼 (vision) + 百度抠图 (可选) 配置,GET /api/setup/current
+ *   3. 数据 — 训练语料浏览/导出(history.html)+ 训练授权(consent.html)+ 云上报开关(/api/telemetry/consent)
  */
 
 (function () {
@@ -11,7 +12,7 @@
   if (!btn) return;
 
   let overlay = null;
-  let activeTab = "widgets";   // "widgets" | "keys"
+  let activeTab = "widgets";   // "widgets" | "keys" | "corpus"
 
   async function open(initialTab) {
     if (overlay) return;
@@ -38,6 +39,7 @@
         <nav class="market-tabs">
           <button class="market-tab${activeTab==='widgets' ? ' on':''}" data-tab="widgets">插件市场</button>
           <button class="market-tab${activeTab==='keys' ? ' on':''}" data-tab="keys">API 钥匙</button>
+          <button class="market-tab${activeTab==='corpus' ? ' on':''}" data-tab="corpus">数据</button>
         </nav>
         <div class="market-body" id="marketBody"></div>
       </div>
@@ -62,11 +64,109 @@
       const resp = await fetch("/api/widgets/catalog");
       const data = await resp.json();
       renderWidgets(data.widgets || []);
+    } else if (activeTab === "corpus") {
+      renderCorpus();
     } else {
       const resp = await fetch("/api/setup/current");
       const cfg = await resp.json();
       renderKeys(cfg);
     }
+  }
+
+  async function renderCorpus() {
+    const body = document.getElementById("marketBody");
+    body.innerHTML = '<div class="market-loading">⋯</div>';
+    let telemetry = {};
+    try {
+      const r = await fetch("/api/telemetry/consent");
+      telemetry = await r.json();
+    } catch (e) { /* keep empty */ }
+
+    body.innerHTML = `
+      <div class="market-hint">
+        vault 自动 git commit 出的 markdown 是这个产品的"训练语料"——
+        人和 AI 在日记里写的每一笔都是带作者签名的 jsonl,可以喂回模型做 DPO,也可以纯当备份。
+        训练语料全部在你机器上,不传第三方。
+      </div>
+
+      <section class="setup-section setup-section-primary">
+        <h3>① 训练语料浏览 / 导出</h3>
+        <div class="setup-howto">
+          时间线 + 标签 + 作者(@user / @ai / @system)三个维度拆。
+          一键 rebuild 全部 jsonl(all / by-tag / by-author / 含 reasoning_content)。
+          <br><br>
+          <button class="key-add-btn" id="corpusOpenHistory">打开训练语料浏览</button>
+        </div>
+      </section>
+
+      <section class="setup-section">
+        <h3>② 训练授权</h3>
+        <div class="setup-howto setup-howto-secondary">
+          按 source / tag / author 筛选,预览匹配 commit 数,定一份"哪些段允许导出"的 license 配置。
+          默认全部允许,改了之后语料导出按这份白名单走。
+          <br><br>
+          <button class="key-add-btn" id="corpusOpenConsent">打开授权配置</button>
+        </div>
+      </section>
+
+      <section class="setup-section">
+        <h3>③ 云上报(帮我们改进软件)</h3>
+        <div class="setup-howto setup-howto-secondary">
+          只上送匿名错误码 + 使用心跳,<b>不含</b> vault 内容、聊天、文件名。
+          <br><br>
+          <label class="consent-check" style="margin-bottom:8px;">
+            <input type="checkbox" id="tm-failures" ${telemetry.failures ? 'checked' : ''}>
+            <span class="consent-title">错误上报</span>
+          </label>
+          <div class="consent-desc" style="margin-bottom:12px;">
+            识图 / 抠图 / 搜索 / API 调用 失败的错误码 + 简短上下文(模型 id / 文件大小 / 网络标记)
+          </div>
+
+          <label class="consent-check" style="margin-bottom:8px;">
+            <input type="checkbox" id="tm-heartbeat" ${telemetry.heartbeat ? 'checked' : ''}>
+            <span class="consent-title">使用心跳</span>
+          </label>
+          <div class="consent-desc" style="margin-bottom:12px;">
+            每天一次,含:版本 / 平台 / 时区。看活跃用户和版本分布。
+          </div>
+
+          <div class="consent-meta" style="margin:12px 0;">
+            <div>匿名 ID:<code id="tm-cid">${telemetry.client_id || '—'}</code>
+              <button class="km-test" style="margin-left:8px;font-size:11px;" id="tm-reset">重置</button>
+            </div>
+            <div>已上报错误:${telemetry.silent_failures_local || 0} · 最后心跳:${telemetry.heartbeat_last_day || '从未'}</div>
+          </div>
+
+          <button class="key-add-btn" id="tm-save">保存</button>
+          <span class="tm-saved-msg" id="tm-saved" style="margin-left:10px;color:var(--ink-3);font-size:12px;display:none;">已保存</span>
+        </div>
+      </section>
+    `;
+
+    document.getElementById("corpusOpenHistory").addEventListener("click", () => {
+      window.open("/history.html", "_blank", "noopener");
+    });
+    document.getElementById("corpusOpenConsent").addEventListener("click", () => {
+      window.open("/consent.html", "_blank", "noopener");
+    });
+    document.getElementById("tm-save").addEventListener("click", async () => {
+      const failures = document.getElementById("tm-failures").checked;
+      const heartbeat = document.getElementById("tm-heartbeat").checked;
+      await fetch("/api/telemetry/consent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ failures, heartbeat }),
+      });
+      const msg = document.getElementById("tm-saved");
+      msg.style.display = "inline";
+      setTimeout(() => { msg.style.display = "none"; }, 2000);
+    });
+    document.getElementById("tm-reset").addEventListener("click", async () => {
+      if (!confirm("重置 client_id 后,云上报会把你看作新设备(对你没任何影响,只是 DAU 重算)。确定?")) return;
+      const r = await fetch("/api/telemetry/reset-client-id", { method: "POST" });
+      const d = await r.json();
+      if (d.client_id) document.getElementById("tm-cid").textContent = d.client_id;
+    });
   }
 
   function renderWidgets(widgets) {
