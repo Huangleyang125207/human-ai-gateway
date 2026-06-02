@@ -1,21 +1,10 @@
 name: Build & Release Mac (Tauri + auto-update)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '**.py'
-      - '**.html'
-      - 'shared/**'
-      - 'widgets/**'
-      - 'vendor/**'
-      - 'brand/**'
-      - 'protocols/**'
-      - 'tools/**'
-      - 'requirements.txt'
-      - 'src-tauri/**'
-      - 'build-sidecar.sh'
-      - '.github/workflows/build-mac.yml'
+  # 6.2 改:mac build 转本机跑(M2 arm64 = macos-14 等价,Keychain 已有 signing identity)。
+  # macos runner $0.08/min × cold build 12min ≈ $1/次,private repo free 配额一个月 ~12 次烧完。
+  # 本地 cold ~5min,incremental 1-2min,更快也更省。CI 留 workflow_dispatch 作 fallback。
+  # 本地脚本:scripts/build-mac-local.sh
   workflow_dispatch:
 
 jobs:
