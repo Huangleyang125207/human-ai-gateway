@@ -351,7 +351,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.7-dev"  # P3 上送服务器时改成读 git short SHA / Info.plist
+APP_VERSION = "0.1.3"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -386,6 +386,31 @@ def get_client_id() -> str:
     return _CLIENT_ID_CACHE
 
 
+def _telemetry_consent() -> dict:
+    """返当前 cloud_telemetry 同意状态。
+    无 config / 无字段 → 视为未同意(默认全关,直到 consent modal 写入)。
+    """
+    cfg = load_config() or {}
+    ct = cfg.get("cloud_telemetry") or {}
+    return {
+        "failures": bool(ct.get("failures", False)),
+        "heartbeat": bool(ct.get("heartbeat", False)),
+        "consented_at": ct.get("consented_at"),  # ISO string or None
+    }
+
+
+def _telemetry_save(failures: bool, heartbeat: bool):
+    """写 consent 状态,记录 consented_at 戳子。"""
+    cfg = load_config() or {}
+    cfg["cloud_telemetry"] = {
+        "failures": bool(failures),
+        "heartbeat": bool(heartbeat),
+        "consented_at": datetime.now().isoformat(),
+    }
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _report_silent_failure(error_type: str, message: str = "", context: dict = None):
     """记一条 silent failure 进本地 ring buffer。fire-and-forget,自身永不 raise。
 
@@ -393,6 +418,9 @@ def _report_silent_failure(error_type: str, message: str = "", context: dict = N
                 例: vision_classify_auth / cutout_all_failed / web_search_degraded
     message:    最长 200 字截断,不放用户内容
     context:    可选 dict (model_id / file_size_kb / fallback_to / network 标记等)
+
+    consent: 用户未同意"错误上报"时只写本地 jsonl,不进 cursor 队列(sender 也读 consent)。
+    本地兜底始终在,这样 toggle 开了之后历史失败仍能回灌。
     """
     try:
         entry = {
@@ -475,9 +503,75 @@ def _sf_sender_loop():
     log.info(f"[sf-sender] started, target={url_base}, interval={SF_SENDER_INTERVAL}s")
     while not _SF_SENDER_STOP.wait(SF_SENDER_INTERVAL):
         try:
+            # consent gate — 用户没同意"错误上报"则 drain 跳过(本地 jsonl 兜底仍在,
+            # toggle 打开后历史失败可回灌)
+            if not _telemetry_consent().get("failures"):
+                continue
             _sf_drain_once(url_base)
         except Exception as e:
             log.warning(f"[sf-sender] drain failed: {type(e).__name__}: {e}")
+
+
+# ── 日活心跳 sender (0.1.3 加) ──────────────────────────────────────
+_HB_SENDER_THREAD = None
+_HB_SENDER_STOP = threading.Event()
+_HB_LAST_SENT_PATH = DATA_DIR / "heartbeat.last"
+HB_STARTUP_DELAY = 30 * 60   # 启动后延 30min 才首发,避开开机 spike
+HB_INTERVAL = 6 * 3600       # 每 6h 醒一次看要不要发(实际一天最多一次)
+HB_HTTP_TIMEOUT = 10
+
+
+def _hb_last_sent_day() -> str:
+    try:
+        return _HB_LAST_SENT_PATH.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+def _hb_mark_sent(day: str):
+    try:
+        _HB_LAST_SENT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _HB_LAST_SENT_PATH.write_text(day, encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _hb_sender_loop():
+    """日活心跳 — 每天一次。同 silent-failure sender 一样 fire-and-forget。
+    consent 关闭则只 sleep 不发;开启时 day 已发过也跳过。
+    """
+    url_base = (_env_overlay().get("FEEDBACK_SINK_URL", "")
+                or os.environ.get("FEEDBACK_SINK_URL", "")).strip().rstrip("/")
+    if not url_base:
+        return
+    # 启动延迟,避开开机 spike(用户重启 app / 重启电脑都不应立刻 ping)
+    if _HB_SENDER_STOP.wait(HB_STARTUP_DELAY):
+        return
+    log.info(f"[hb-sender] started, target={url_base}, daily")
+    while True:
+        try:
+            if not _telemetry_consent().get("heartbeat"):
+                pass  # consent 关,本周期不发
+            else:
+                today = datetime.utcnow().strftime("%Y-%m-%d")
+                if _hb_last_sent_day() != today:
+                    tz_off = int(-time.timezone / 60)  # local UTC offset(分钟)
+                    payload = {
+                        "client_id": get_client_id(),
+                        "version": APP_VERSION,
+                        "platform": f"{sys.platform}-{_platform.machine()}",
+                        "tz_offset_min": tz_off,
+                    }
+                    r = requests.post(f"{url_base}/heartbeat", json=payload,
+                                      timeout=HB_HTTP_TIMEOUT)
+                    if r.status_code == 200:
+                        _hb_mark_sent(today)
+                    elif r.status_code != 429:
+                        log.warning(f"[hb-sender] HTTP {r.status_code}: {r.text[:120]}")
+        except Exception as e:
+            log.warning(f"[hb-sender] tick failed: {type(e).__name__}: {e}")
+        if _HB_SENDER_STOP.wait(HB_INTERVAL):
+            break
 
 
 def _sf_drain_once(url_base: str):
@@ -4834,9 +4928,22 @@ def _startup_sf_sender():
     _SF_SENDER_THREAD.start()
 
 
+@app.on_event("startup")
+def _startup_hb_sender():
+    """启动日活心跳后台 thread。consent 关 / FEEDBACK_SINK_URL 没配都 no-op。"""
+    global _HB_SENDER_THREAD
+    if _HB_SENDER_THREAD is not None and _HB_SENDER_THREAD.is_alive():
+        return
+    _HB_SENDER_THREAD = threading.Thread(
+        target=_hb_sender_loop, daemon=True, name="hb-sender"
+    )
+    _HB_SENDER_THREAD.start()
+
+
 @app.on_event("shutdown")
 def _shutdown_sf_sender():
     _SF_SENDER_STOP.set()
+    _HB_SENDER_STOP.set()
 
 
 @app.on_event("startup")
@@ -5876,6 +5983,60 @@ def setup_status():
     if not has_real:
         return {"configured": False, "reason": "所有 api_key 都是 YOUR_* 占位符"}
     return {"configured": True, "profile_count": len(profiles)}
+
+
+# ── 0.1.3 加: cloud telemetry consent ────────────────────────────────
+@app.get("/api/telemetry/consent")
+def telemetry_consent_get():
+    """前端读 consent 状态 + 上报统计 + client_id (透明给用户看)。"""
+    consent = _telemetry_consent()
+    # 上报统计
+    try:
+        sf_count = len(SILENT_FAILURES_LOG.read_text(encoding="utf-8").splitlines()) \
+                   if SILENT_FAILURES_LOG.exists() else 0
+    except Exception:
+        sf_count = 0
+    return {
+        **consent,
+        "client_id": get_client_id(),
+        "silent_failures_local": sf_count,
+        "heartbeat_last_day": _hb_last_sent_day(),
+        "needs_consent": consent.get("consented_at") is None,
+    }
+
+
+@app.post("/api/telemetry/consent")
+async def telemetry_consent_set(req: Request):
+    """前端 consent modal / 设置 tab 调,写两个开关。
+    body: {failures: bool, heartbeat: bool}
+    """
+    body = await req.json()
+    failures = bool(body.get("failures", False))
+    heartbeat = bool(body.get("heartbeat", False))
+    _telemetry_save(failures, heartbeat)
+    return {"ok": True, **_telemetry_consent()}
+
+
+@app.post("/api/telemetry/reset-client-id")
+def telemetry_reset_client_id():
+    """用户主动重置 client_id (在设置 → 数据 → 云上报里可点)。
+    重置后 server 端看作新设备,DAU 会重复计一次,无副作用。
+    """
+    global _CLIENT_ID_CACHE
+    try:
+        import uuid as _uuid
+        new_id = _uuid.uuid4().hex
+        CLIENT_ID_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CLIENT_ID_PATH.write_text(new_id, encoding="utf-8")
+        _CLIENT_ID_CACHE = new_id
+        # 重置 heartbeat 标记(让新 id 立刻发一次)
+        try:
+            _HB_LAST_SENT_PATH.unlink()
+        except Exception:
+            pass
+        return {"ok": True, "client_id": new_id}
+    except Exception as e:
+        raise HTTPException(500, f"reset failed: {type(e).__name__}: {e}")
 
 
 @app.get("/api/setup/templates")
