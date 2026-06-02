@@ -690,8 +690,11 @@ def build_system_prompt(context: dict = None, model_id: str = None) -> str:
     tool_catalog = (
         "\n=== 工具按需加载 ===\n"
         "默认能用(read + 搜):read_today_schedule / list_recent_days / "
-        "list_my_uploads / search_my_uploads / web_search / vision_classify / "
+        "list_my_uploads / search_my_uploads / ask_photo_curator / web_search / vision_classify / "
         "load_protocol / load_tool_group\n"
+        "  · **找照片硬规则**:用户要'回顾/找/汇总/带上 X 的照片' → 先 ask_photo_curator(单 call 返完整集),**别凭记忆/凭训练数据 cite filename**。\n"
+        "    精确 OCR 关键词(发票号/截图文字)才走 search_my_uploads。跨称呼(狗=哈士奇=茅茅) / 模糊语义 / 长期回顾都走 curator。\n"
+        "    cite filename 前必须经过 list_my_uploads 或 ask_photo_curator 返回 — 没出现在结果里就不存在,不能脑补。\n"
         "\n要写 / 改东西,先 load_tool_group(group_name=...):\n"
         "· write_journal — patch_journal_block / insert_journal_block / check_daily_task\n"
         "· images — place_scrapbook_image / delete_attachment / set_*_image\n"
@@ -995,13 +998,32 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_my_uploads",
-            "description": "关键词搜历史上传图(grep 文件名 + 原文件名 + OCR 文本)。",
+            "description": "关键词搜历史上传图(grep 文件名 + 原文件名 + vision 描述 + OCR 文本)。**精确关键词**走这条;**语义/跨 terminology**(狗=哈士奇=茅茅)走 ask_photo_curator。",
             "parameters": {
                 "type": "object",
                 "required": ["query"],
                 "properties": {
                     "query": {"type": "string", "description": "搜索词,支持中英文。会 case-insensitive 匹配。"},
                     "limit": {"type": "integer", "description": "最多返几条,默认 15"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ask_photo_curator",
+            "description": (
+                "图书管理员子 agent (deepseek-v4-flash) — 自然语言找照片。"
+                "适用: 长期回顾 / 跨 terminology (狗=哈士奇=茅茅) / 模糊语义。"
+                "**不适用**: 精确 OCR 关键词(走 search_my_uploads)。"
+                "quota=1/轮,失败自动降级 grep。一次返完整匹配集,不像 search 受 quota 限。"
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {"type": "string", "description": "自然语言问题,如 '找我家狗的所有照片'"},
                 },
             },
         },
@@ -1762,6 +1784,116 @@ def tool_search_my_uploads(args):
     }
 
 
+def _curator_fallback(q: str):
+    """子 agent 挂时降级 grep,主 agent 仍有结果。"""
+    r = tool_search_my_uploads({"query": q, "limit": 15})
+    r["source"] = "fallback_grep"
+    return r
+
+
+def tool_ask_photo_curator(args):
+    """图书管理员子 agent — 自然语言找照片。
+
+    用 deepseek-v4-flash 官方直连,system 装全部照片描述 (frozen 文件 cache 友好),
+    user 装自然语言 query。返 {items:[...], matched, source}。
+
+    silent-failure 时降级 search_my_uploads。
+    """
+    q = (args.get("query") or "").strip()
+    if not q:
+        return {"error": "need query"}
+
+    # ensure system prompt 存在 (冷启 / 索引刚迁移)
+    if not CURATOR_SYSTEM_PATH.exists():
+        _rebuild_curator_system_prompt()
+    if not CURATOR_SYSTEM_PATH.exists():
+        return _curator_fallback(q)
+    try:
+        sys_prompt = CURATOR_SYSTEM_PATH.read_text(encoding="utf-8")
+    except Exception as e:
+        _report_silent_failure("curator_system_read_failed",
+            f"{type(e).__name__}: {str(e)[:120]}")
+        return _curator_fallback(q)
+
+    profile = get_profile("deepseek-v4-flash")
+    if not profile:
+        _report_silent_failure("curator_no_profile",
+            "deepseek-v4-flash profile 不存在 — 检查 .env DEEPSEEK_API_KEY")
+        return _curator_fallback(q)
+    client = get_client(profile)
+    if client is None:
+        return _curator_fallback(q)
+
+    # v4-flash 实测先 reasoning 再生 content,thinking 占大头。
+    # 样本: in=2120 out=1715 content 458 chars (~250 tokens) → 1400+ token 在 reasoning。
+    # 试 extra_body 关 thinking 被 endpoint 拒(BadRequest),不省那一两毛钱,
+    # 给 max_tokens=3000 兜住 reasoning + content 即可。
+    try:
+        resp = client.chat.completions.create(
+            model=profile.get("model", "deepseek-v4-flash"),
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": q},
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=3000,
+            temperature=0.1,
+            timeout=30,
+        )
+    except Exception as e:
+        err_kind = "curator_call_auth" if ("401" in str(e) or "403" in str(e)) else "curator_call_failed"
+        _report_silent_failure(err_kind,
+            f"{type(e).__name__}: {str(e)[:150]}",
+            context={"query": q[:60]})
+        return _curator_fallback(q)
+
+    _log_cache_usage(resp, "curator")
+    text = (resp.choices[0].message.content or "").strip()
+    # 空 content (reasoning 烧完 max_tokens 是常见因) → fallback,不当 0 matches 处理
+    if not text:
+        _report_silent_failure("curator_empty_content",
+            "v4-flash content 空 (可能 reasoning 吃完 max_tokens)",
+            context={"query": q[:60]})
+        return _curator_fallback(q)
+    # 容忍 ``` fence(v4-flash 偶尔加)
+    text = re.sub(r"^```(json)?\s*", "", text).strip()
+    text = re.sub(r"\s*```\s*$", "", text).strip()
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        _report_silent_failure("curator_non_json",
+            f"返非 JSON: {text[:120]}",
+            context={"query": q[:60]})
+        return _curator_fallback(q)
+
+    # stem → full record 映射,把主 agent 想要的 url + description 拼回去
+    arr = _load_attachments_index()
+    by_stem = {}
+    for x in arr:
+        fn = x.get("filename", "")
+        stem = fn.rsplit(".", 1)[0] if "." in fn else fn
+        by_stem[f"{x.get('date')}/{stem}"] = x
+
+    matches = parsed.get("matches") or []
+    items = []
+    for m in matches[:30]:
+        x = by_stem.get(m)
+        if not x:
+            continue
+        items.append({
+            "date": x["date"],
+            "filename": x["filename"],
+            "url": x.get("url"),
+            "description": (x.get("vision") or {}).get("description", "") or "",
+        })
+    return {
+        "items": items,
+        "matched": len(items),
+        "curator_note": parsed.get("note", "") or "",
+        "source": "curator",
+    }
+
+
 def tool_search_journal(args):
     """全文搜 vault 所有 md。case-insensitive,多关键词 AND。
     跳过 attachments/ + .git/ + dotfiles。按 mtime desc(最新优先)。
@@ -2107,6 +2239,7 @@ TOOL_IMPL = {
     "place_scrapbook_image":tool_place_scrapbook_image,
     "list_my_uploads":      tool_list_my_uploads,
     "search_my_uploads":    tool_search_my_uploads,
+    "ask_photo_curator":    tool_ask_photo_curator,
     "search_journal":       tool_search_journal,
     "delete_attachment":    tool_delete_attachment,
     "vision_classify":      tool_vision_classify,
@@ -2141,7 +2274,8 @@ TOOL_GROUPS = {
 BOOTSTRAP_TOOL_NAMES = {
     # read-only / meta — 任意 chat 都该能用
     "read_today_schedule", "list_recent_days",
-    "list_my_uploads", "search_my_uploads", "search_journal", "vision_classify",
+    "list_my_uploads", "search_my_uploads", "ask_photo_curator",
+    "search_journal", "vision_classify",
     "web_search", "fetch_url", "load_protocol", "load_tool_group",
 }
 
@@ -2179,6 +2313,7 @@ TOOL_QUOTA = {
     "list_recent_days":    2,
     "list_my_uploads":     2,
     "search_my_uploads":   3,
+    "ask_photo_curator":   1,  # 单 call 返完整集,quota 给 1 就够;主 agent 应优先调它做语义检索
     "search_journal":      5,  # 比 uploads 高一档 — vault 大,可能要 refine query 多搜几次
     "vision_classify":     3,
     "load_protocol":       3,
@@ -2344,6 +2479,10 @@ def get_attachment(date: str, name: str):
 # 每次上传 → 后台 OCR → 写 _index.json
 # AI 工具能 list / search / delete,做"持续文件管理"
 ATTACHMENTS_INDEX = ATTACHMENTS_DIR / "_index.json"
+# Curator 子 agent 的 frozen system prompt — 月分块 (老月在前)。
+# 写在 upload 路径 (_index_upsert),读在 ask_photo_curator tool。
+# 分离文件而非内存:多 worker / restart 后立即可用。
+CURATOR_SYSTEM_PATH = ATTACHMENTS_DIR / "_curator_system.txt"
 
 
 def _load_attachments_index() -> list:
@@ -2363,6 +2502,66 @@ def _save_attachments_index(arr: list):
     ATTACHMENTS_INDEX.write_text(
         json.dumps(arr, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+
+
+# ── Curator system prompt 重建 ──────────────────────────────────────
+# 月分块 + 老月在前 = DeepSeek implicit prefix cache 友好。
+# 加 1 张新图只 invalidate 当月段以后(几乎全部历史月份 hit)。
+# 行格式 CSV-like 压缩(~30 token/张 vs JSON ~100):date|stem|kind|desc
+
+def _format_curator_line(x: dict) -> str:
+    date = x.get("date", "")
+    fn = x.get("filename", "")
+    stem = fn.rsplit(".", 1)[0] if "." in fn else fn
+    v = x.get("vision") or {}
+    kind = (v.get("kind", "") or "?").replace("|", " ")
+    desc = (v.get("description", "") or "").replace("\n", " ").replace("|", " ")[:80]
+    # 没 vision 时 ocr 兜 — curator 找截图里的字也需要
+    if not desc:
+        ocr = (x.get("ocr_text", "") or "").replace("\n", " ").replace("|", " ")[:40]
+        if ocr:
+            desc = f"ocr:{ocr}"
+    return f"{date}|{stem}|{kind}|{desc}"
+
+
+def _rebuild_curator_system_prompt():
+    """读全部索引 → 按 YYYY-MM 分块 (老月在前) → 写 frozen system prompt 文件。
+    在 _index_upsert 里调一次 (upload / vision 完成时)。chat 时只读文件,不重建。
+    """
+    arr = _load_attachments_index()
+    by_month: dict = {}
+    for x in arr:
+        m = (x.get("date", "") or "")[:7]
+        if not m:
+            continue
+        by_month.setdefault(m, []).append(x)
+
+    lines = [
+        "你是相册管理员 (curator)。下面是用户全部照片元数据,每行格式:",
+        "date | filename_stem | kind | description",
+        "",
+        "任务: 用户问什么,你只返匹配的 stem 列表,date 拼接成 'YYYY-MM-DD/stem'。",
+        '严格 JSON: {"matches":["2026-05-16/115227-6002ea", ...],"total":N,"note":""}',
+        "结果 > 15 时按时间倒序截到 15,note 写 'truncated, total=N'。无匹配返 matches=[]。",
+        "不解释。不复述描述。不评论。**仅 JSON**。",
+        "",
+        "跨 terminology 推理: '狗'='哈士奇'='茅茅' (用户家狗) 等需要从 description 推出来。",
+        "",
+    ]
+    for month in sorted(by_month.keys()):  # 老在前 = cache 友好
+        photos = sorted(by_month[month], key=lambda x: (x.get("date", ""), x.get("filename", "")))
+        lines.append(f"--- {month} ({len(photos)} 张) ---")
+        for x in photos:
+            lines.append(_format_curator_line(x))
+        lines.append("")
+    txt = "\n".join(lines)
+    try:
+        CURATOR_SYSTEM_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CURATOR_SYSTEM_PATH.write_text(txt, encoding="utf-8")
+    except Exception as e:
+        _report_silent_failure("curator_system_rebuild_failed",
+            f"{type(e).__name__}: {str(e)[:120]}",
+            context={"entries": len(arr)})
 
 
 # Lock + upsert 化解 race:后台 OCR task 和 chat 触发的 vision call 都要写索引,
@@ -2385,6 +2584,8 @@ def _index_upsert(date: str, filename: str, **fields):
         else:
             arr[idx].update(fields)
         _save_attachments_index(arr)
+        # 同步刷新 curator system prompt — 几 ms 字符串拼接,值得为 cache 友好换
+        _rebuild_curator_system_prompt()
 
 
 def _ocr_text(file_path: Path) -> str:
