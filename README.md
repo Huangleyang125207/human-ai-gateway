@@ -70,6 +70,10 @@ Tauri 桌面壳 → PyInstaller sidecar(FastAPI)→ 本地 vault + SQLite + Deep
 
 前端 vanilla JS,无 npm / build step。
 
+## 隐私
+
+Gateway 默认收集匿名错误码 + 使用心跳,帮我们改进软件。两个都可在 设置 → 数据 → 云上报 关闭。**不收**任何 vault 内容、聊天、文件名。详见 [PRIVACY.md](PRIVACY.md)。
+
 ## License
 
 MIT — 详见 [LICENSE](LICENSE)。
