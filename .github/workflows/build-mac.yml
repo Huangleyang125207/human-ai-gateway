@@ -23,8 +23,8 @@ jobs:
     # macos-14 = arm64 (Apple Silicon) runner
     # Tauri 桌面壳 + sidecar 都得在 native arch 上 build
     runs-on: macos-14
-    # 6.1 改:不再 push yanpai,只 upload artifact;Tauri build cold 3-5min + 其他 step 5min
-    timeout-minutes: 30
+    # 6.1 起 30min(Tauri build cold 3-5min + sidecar freeze + 其他);6.2 起 notarize 等 Apple 服务 5-15min,提到 45
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -63,13 +63,20 @@ jobs:
           chmod +x build-sidecar.sh
           bash build-sidecar.sh
 
-      - name: Tauri build
-        # createUpdaterArtifacts=true 让 tauri 自动 sign .app.tar.gz
-        # TAURI_SIGNING_PRIVATE_KEY = secret 里存的 minisign 私钥文件内容
-        # TAURI_SIGNING_PRIVATE_KEY_PASSWORD = 当前 no-passphrase 模式留空
+      - name: Tauri build (codesign + notarize)
+        # 6.2 起开 Apple codesign + notarize:
+        # Tauri 2 见 APPLE_CERTIFICATE 自动 import 临时 keychain → sign;
+        # 见 APPLE_ID+APPLE_PASSWORD+APPLE_TEAM_ID 自动 notarytool submit + staple。
+        # minisign 签 .app.tar.gz(updater 用)仍走 TAURI_SIGNING_PRIVATE_KEY。
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           source "$HOME/.cargo/env"
           cargo tauri build

@@ -32,14 +32,16 @@ if [ -z "$RUN_ID" ]; then
 fi
 echo "→ 用 run id: $RUN_ID"
 
-# 2. 拿这个 run 的 artifact name (含 version)
-ART_NAME=$(gh run view "$RUN_ID" --json artifacts --jq '.artifacts[0].name')
-[ -z "$ART_NAME" ] && { echo "✗ run $RUN_ID 没 artifact"; exit 1; }
-echo "→ artifact: $ART_NAME"
-
-# 3. 下到本地 tmp
+# 2. 下所有 artifact (run 只一个,不必指 name)
 echo "→ download to $TMP_DIR..."
-gh run download "$RUN_ID" --name "$ART_NAME" --dir "$TMP_DIR"
+gh run download "$RUN_ID" --dir "$TMP_DIR"
+
+# artifact 解到 $TMP_DIR/Gateway-mac-arm64-X.Y.Z/ 子目录,扁平化方便后面操作
+ART_SUBDIR=$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)
+if [ -n "$ART_SUBDIR" ] && [ "$ART_SUBDIR" != "$TMP_DIR" ]; then
+  mv "$ART_SUBDIR"/* "$TMP_DIR/" 2>/dev/null || true
+  rmdir "$ART_SUBDIR" 2>/dev/null || true
+fi
 
 # 4. 检查关键文件齐
 for f in Gateway.app.tar.gz Gateway.app.tar.gz.sig latest.json; do
