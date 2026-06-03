@@ -27,6 +27,9 @@ ADDS=(
   --add-data "history_exporter.py:." --add-data "outcome_tracker.py:."
   --add-data "cutout.py:." --add-data "cutout_local.py:."
   --add-data "ocr.py:." --add-data "ocr_local.py:." --add-data "tools:tools"
+  # consent modal + 设置数据 tab 链 /PRIVACY.md /README.md /LICENSE,
+  # 没 add-data 用户点了 404
+  --add-data "PRIVACY.md:." --add-data "README.md:." --add-data "LICENSE:."
 )
 HIDDEN=(
   --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto
