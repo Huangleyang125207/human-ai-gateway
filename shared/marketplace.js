@@ -110,31 +110,34 @@
       </section>
 
       <section class="setup-section">
-        <h3>③ 云上报(帮我们改进软件)</h3>
+        <h3>③ 云端数据收集</h3>
         <div class="setup-howto setup-howto-secondary">
-          只上送匿名错误码 + 使用心跳,<b>不含</b> vault 内容、聊天、文件名。
+          Gateway 默认收集两类匿名诊断数据,用于改进产品质量。完整政策见 <a href="/PRIVACY.md" target="_blank" rel="noopener">PRIVACY.md</a>。
           <br><br>
           <label class="consent-check" style="margin-bottom:8px;">
             <input type="checkbox" id="tm-failures" ${telemetry.failures ? 'checked' : ''}>
-            <span class="consent-title">错误上报</span>
+            <span class="consent-title">错误诊断</span>
           </label>
           <div class="consent-desc" style="margin-bottom:12px;">
-            识图 / 抠图 / 搜索 / API 调用 失败的错误码 + 简短上下文(模型 id / 文件大小 / 网络标记)
+            <b>收集</b>:API 调用 / 识图 / 抠图 / 搜索 失败时的错误码、调用元数据(模型标识、文件尺寸、网络层标记)。
+            <br><b>不收集</b>:日记内容、对话记录、文件名、附件、密钥。
           </div>
 
           <label class="consent-check" style="margin-bottom:8px;">
             <input type="checkbox" id="tm-heartbeat" ${telemetry.heartbeat ? 'checked' : ''}>
-            <span class="consent-title">使用心跳</span>
+            <span class="consent-title">使用统计(每日心跳)</span>
           </label>
           <div class="consent-desc" style="margin-bottom:12px;">
-            每天一次,含:版本 / 平台 / 时区。看活跃用户和版本分布。
+            <b>收集</b>:应用版本、操作系统平台、UTC 时区偏移,每 24 小时一次。
+            <br><b>不收集</b>:任何 vault 数据或可关联到个人身份的信息。
           </div>
 
           <div class="consent-meta" style="margin:12px 0;">
-            <div>匿名 ID:<code id="tm-cid">${telemetry.client_id || '—'}</code>
+            <div><span class="consent-meta-k">匿名标识</span><code id="tm-cid">${telemetry.client_id || '—'}</code>
               <button class="km-test" style="margin-left:8px;font-size:11px;" id="tm-reset">重置</button>
             </div>
-            <div>已上报错误:${telemetry.silent_failures_local || 0} · 最后心跳:${telemetry.heartbeat_last_day || '从未'}</div>
+            <div><span class="consent-meta-k">已上报</span>错误 ${telemetry.silent_failures_local || 0} 条 · 最后心跳 ${telemetry.heartbeat_last_day || '从未'}</div>
+            <div><span class="consent-meta-k">接收端</span>腾讯云国内服务器(自托管)</div>
           </div>
 
           <button class="key-add-btn" id="tm-save">保存</button>

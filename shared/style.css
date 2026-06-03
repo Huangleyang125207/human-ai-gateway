@@ -3362,3 +3362,84 @@ body.thread-resizing { transition: none; }
 .consent-btn-primary:hover { background: #a04f33; }
 .consent-btn-secondary { background: #fff; color: var(--ink, #3a342c); }
 .consent-btn-secondary:hover { background: rgba(168, 110, 70, 0.08); }
+
+/* consent metadata 段加 labelkey 样式 */
+.consent-meta-k {
+  display: inline-block;
+  min-width: 60px;
+  margin-right: 8px;
+  font-weight: 600;
+  color: var(--ink-2, #4d4538);
+}
+.consent-meta a {
+  color: var(--cinnabar, #b85a3b);
+  text-decoration: underline;
+}
+
+/* consent agreement (合同必勾) + shake 抖动 */
+.consent-agreement {
+  margin: 16px 0 12px;
+  padding: 12px 14px;
+  background: rgba(168, 110, 70, 0.07);
+  border: 1px dashed rgba(168, 110, 70, 0.3);
+  border-radius: 6px;
+  font-size: 13px;
+}
+.consent-agreement label { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.consent-agreement a {
+  color: var(--cinnabar, #b85a3b);
+  text-decoration: underline;
+  font-weight: 500;
+}
+.consent-btn-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.consent-btn-disabled:hover { background: inherit; }
+
+@keyframes consent-shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-6px); }
+  20%, 40%, 60%, 80% { transform: translateX(6px); }
+}
+.consent-shake {
+  animation: consent-shake 0.45s cubic-bezier(.36, .07, .19, .97) both;
+  background: rgba(184, 90, 59, 0.12) !important;
+  border-color: var(--cinnabar, #b85a3b) !important;
+}
+
+/* compact-ring — Claude Code 风格小圆环 (context 用量) */
+.compact-ring {
+  --pct: 0;
+  --ring-color: #8cab68;
+  --ring-track: rgba(58, 52, 44, 0.14);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--ring-color) calc(var(--pct) * 1%),
+    var(--ring-track) 0%
+  );
+  cursor: help;
+  margin: 0 6px;
+  flex-shrink: 0;
+  transition: background 0.4s ease;
+  position: relative;
+}
+.compact-ring::after {
+  /* 中心小空洞,做成"环"而不是"扇形" */
+  content: "";
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 6px; height: 6px;
+  margin: -3px 0 0 -3px;
+  background: var(--paper, #fdf8ed);
+  border-radius: 50%;
+}
+.compact-ring-over {
+  animation: compact-ring-pulse 1.4s ease-in-out infinite;
+}
+@keyframes compact-ring-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.18); opacity: 0.75; }
+}

@@ -1,72 +1,105 @@
-# Privacy
+# 隐私政策
 
-Gateway 默认收集两类匿名数据,帮我们改进软件。两类都可以在 设置 → 数据 → 云上报 里关闭,关了之后立刻不再上送。
+> 适用版本:Gateway 0.1.3 起
+> 最近更新:2026-06-03
 
-## 收什么
+Gateway 是本地优先的桌面应用。所有日记内容、对话记录、附件均仅存于您本机,不会传输至任何外部服务器。本政策仅适用于两类**匿名诊断数据**——这些数据用于改进产品质量,默认启用,可随时撤回。
 
-### 错误上报(failures)
+## 数据收集范围
 
-API 调用 / 识图 / 抠图 / 搜索 等失败的错误码 + 简短上下文,只用来反向定位 bug。
+### 1. 错误诊断(failures)
 
-示例:
+**触发条件**:第三方 API 调用、本地图像识别(识图 / 抠图)、全文搜索等操作返回错误或降级路径时。
 
-```json
-{
-  "ts": "2026-06-03T00:00:00",
-  "client_id": "a3b9c2... (匿名 UUID, 不绑邮箱/姓名)",
-  "error_type": "vision_classify_auth",
-  "message": "qwen returned 401",
-  "context": { "model_id": "qwen3-vl-flash", "file_size_kb": 1240 },
-  "app_version": "0.1.3",
-  "platform": "darwin-arm64"
-}
-```
+**收集字段**:
 
-### 使用心跳(heartbeat)
+| 字段 | 类型 | 示例 |
+|------|------|------|
+| `error_type` | 枚举字符串 | `vision_classify_auth`、`cutout_all_failed` |
+| `message` | 截断 200 字符 | `qwen returned 401` |
+| `context.model_id` | 字符串 | `qwen3-vl-flash` |
+| `context.file_size_kb` | 整数 | `1240` |
+| `context.network_marker` | 枚举 | `proxy_offline`、`dns_fail` |
+| `app_version` | 字符串 | `0.1.3` |
+| `platform` | 字符串 | `darwin-arm64` |
 
-每天一次,看活跃用户和版本分布:
+**用途**:定位 API 提供方故障、模型路由 bug、跨地域网络问题。
 
-```json
-{
-  "client_id": "a3b9c2...",
-  "version": "0.1.3",
-  "platform": "darwin-arm64",
-  "tz_offset_min": 480
-}
-```
+### 2. 使用统计(heartbeat)
 
-## 不收什么
+**触发条件**:应用启动后延迟 30 分钟首发,此后每 24 小时一次(避免短间隔重启造成的偏差)。
 
-明确不收的:
+**收集字段**:
 
-- vault markdown 内容(任何日记内容)
-- 聊天对话(任何用户消息或 AI 回复)
-- 文件名 / 路径 / 任何附件
-- API key / 密钥 / 凭据
-- 邮箱 / 真名 / 手机号
-- IP 地址(server 端代码层 drop,不写入 SQLite)
-- 浏览器历史 / 系统信息 / cookies
+| 字段 | 类型 | 示例 |
+|------|------|------|
+| `version` | 字符串 | `0.1.3` |
+| `platform` | 字符串 | `darwin-arm64` |
+| `tz_offset_min` | 整数 | `480`(粗略时区) |
 
-## 端点
+**用途**:衡量发布质量、版本分布、跨时区使用模式。
 
-腾讯云国内服务器:`http://101.42.108.30:18080`(规划接入 TLS 后切 HTTPS)
+## 明确不收集
 
-服务端只我们看,不卖、不分享、不接广告系统。
+以下类别在客户端代码层不进入上送流水,即使开关启用也不会传输:
 
-## 如何关闭
+- 日记 markdown 内容(vault 全部 .md 文件)
+- 对话记录(主对话、子 agent 调用、留言板)
+- 文件名、目录路径、附件二进制
+- API 密钥、minisign 私钥、SSH 凭据
+- 邮箱、姓名、手机号、其他实名信息
+- IP 地址(服务端代码层 drop,不写入数据库)
+- 浏览器历史、系统状态、cookies
 
-- **设置 → 数据 → 云上报**:勾两个 checkbox 自由开关
-- **完全断网**:Gateway 没网也能本地用,只是云上报相关数据进本地 jsonl ring buffer 兜底
+## 标识符
 
-## 重置匿名 ID
+每台设备一次性生成一个匿名 UUID(`client_id`),存于本地 `~/.human-ai/data/client-id.txt`。该标识符:
 
-担心 ID 关联多个事件?设置里点"重置"会换新 UUID,server 端看作新设备。
+- 不与任何账号、邮箱、姓名绑定
+- 用于在服务端区分"同一设备的多次上报"以避免重复计数
+- 可在 **设置 → 数据 → 云上报** 中随时点击"重置"生成新 UUID,服务端将视作新设备,不再关联历史记录
 
-## 源码可审
+## 接收端
 
-所有上报代码在 `server.py` 里搜 `_report_silent_failure` / `_hb_sender_loop` 看完整链路;
-接收端在 `agents/feedback-sink/app/main.py`。
+- **服务方**:腾讯云国内 IDC(华东 1 区)
+- **架构**:自托管 FastAPI + SQLite,不接入任何第三方分析平台
+- **传输**:HTTP(域名 + TLS 接入完成后切换 HTTPS;当前依赖 minisign 验签保护更新通道,诊断数据上送通道无端到端加密)
+- **访问控制**:仅项目维护者(签名身份 `yang chunyan / L2QPVXA6DT`)持有 SSH 访问凭据
 
-## 联系
+## 数据保留
 
-发现 bug / 想关掉某个具体上报字段:开 issue。
+- 错误诊断记录:服务端保留至磁盘容量限制(当前 ≤ 7.6 GB),无主动 retention 策略。后续将引入 180 天滚动清理。
+- 使用统计:同上,无主动清理。后续将引入 365 天滚动清理。
+
+> 上述保留期为目标值,完整实现见 issue 跟踪。
+
+## 撤回方式
+
+任意时刻可在 **设置 → 数据 → 云上报** 关闭任一类别:
+
+- 关闭后本机仍写本地兜底文件,但**不再向服务端上送**
+- 关闭后服务端已有记录不主动删除;如需删除,请通过 issue 提供 `client_id` 申请
+
+## 数据用途与共享
+
+收集到的诊断数据:
+
+- 仅用于改进 Gateway 本身的产品质量
+- 不出售、不交换、不用于广告投放
+- 不与任何第三方共享(法律要求除外)
+- 不用于训练任何机器学习模型
+
+## 源码审计
+
+完整上送链路在 GitHub 公开源码中可审计:
+
+- 客户端:[`server.py`](server.py) 搜 `_report_silent_failure` / `_hb_sender_loop`
+- 服务端:[`agents/feedback-sink/app/main.py`](https://github.com/Huangleyang125207/human-ai-gateway)(独立 repo 待移入主仓)
+
+## 联系与反馈
+
+发现政策与实际行为不符 / 希望收紧某字段 / 申请删除已有记录:请通过 GitHub Issues 反馈。
+
+## 变更通知
+
+本政策的任何变更将通过更新本文件 + 在新版本首次启动弹出 consent modal 重新征求同意的方式通知。
