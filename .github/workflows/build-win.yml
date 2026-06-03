@@ -15,7 +15,13 @@ on:
       - 'requirements.txt'
       - 'build-win.bat'
       - '.github/workflows/build-win.yml'
+    # 6.3:tag v* push 时也跑,完了直接挂 GitHub Release
+    tags: ['v*']
   workflow_dispatch:
+
+# release publish 步要写 release 资产
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -94,3 +100,16 @@ jobs:
           name: Gateway-windows-x64
           path: Gateway-windows-x64.zip
           retention-days: 30
+
+      - name: Publish to GitHub Release (tag push 时)
+        # tag v* push 触发,把 .zip 挂到 GitHub Release。
+        # Win 暂无代码签名(DigiCert 没买),用户首次运行 SmartScreen 会拦,
+        # 点"更多信息 → 仍要运行"即可。README 写明这条。
+        # softprops/action-gh-release 幂等,跟 mac workflow 推到同一 release。
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Gateway-windows-x64.zip
+          draft: true
+          fail_on_unmatched_files: true
+          generate_release_notes: true

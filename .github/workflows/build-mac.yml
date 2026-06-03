@@ -5,7 +5,14 @@ on:
   # macos runner $0.08/min × cold build 12min ≈ $1/次,private repo free 配额一个月 ~12 次烧完。
   # 本地 cold ~5min,incremental 1-2min,更快也更省。CI 留 workflow_dispatch 作 fallback。
   # 本地脚本:scripts/build-mac-local.sh
+  # 6.3 改:tag v* push 时跑,完了上 GitHub Release(给陌生用户下载)。
+  push:
+    tags: ['v*']
   workflow_dispatch:
+
+# release publish 步要写 release 资产,需要 contents: write
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -100,11 +107,10 @@ jobs:
           EOF
           cat /tmp/latest.json
 
-      - name: Upload artifact (主入口 — 本机当中转站,GitHub artifact 是真分发源)
-        # 6.1 改路径:GitHub Actions → yanpai 国际反向带宽实测 18-25KB/s,150M 一次
-        # 推 80min 还 timeout。改成:Actions 只 upload artifact (GitHub 内部走得快),
-        # 本机跑 sync 脚本 gh run download → rsync 推 yanpai (国内→国内,几秒)。
-        # 完整链:Actions build → GitHub artifact → 本机 pull → yanpai → client
+      - name: Upload artifact (workflow_dispatch 时走这条 → 本机 gh run download → rsync yanpai)
+        # 历史:本机当中转站,GitHub Actions → 本机 pull → rsync yanpai → client。
+        # 走 artifact 而非 release,因为 yanpai 路径不依赖 tag。
+        # tag push 路径(下一步)直接发 GitHub Release,绕开 yanpai。
         uses: actions/upload-artifact@v4
         with:
           name: Gateway-mac-arm64-${{ steps.meta.outputs.version }}
@@ -114,3 +120,20 @@ jobs:
             src-tauri/target/release/bundle/macos/Gateway.app.tar.gz.sig
             /tmp/latest.json
           retention-days: 30
+
+      - name: Publish to GitHub Release (tag push 时)
+        # tag v* push 触发:把 codesigned + notarized .dmg 直接挂到 GitHub Release。
+        # 用户从 /releases/latest 下载,双击 .dmg 装,Gatekeeper 不再警告。
+        # 多 workflow(mac + win)同时推到同一 release;softprops/action-gh-release 幂等,
+        # 谁先到谁建 release,后到的 append assets。
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/Gateway.app.tar.gz
+            src-tauri/target/release/bundle/macos/Gateway.app.tar.gz.sig
+            /tmp/latest.json
+          draft: true
+          fail_on_unmatched_files: true
+          generate_release_notes: true
