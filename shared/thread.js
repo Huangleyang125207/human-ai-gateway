@@ -579,6 +579,8 @@
     const SCHEDULE_MUTATING = /^(patch_journal_block|insert_journal_block)$/;
     const SCRAPBOOK_MUTATING = /^place_scrapbook_image$/;
     let streamMsgEl = null;
+    // 0.1.4 起: 本轮所有 tool 调用累计存这,done 时附在 assistant 消息上,下轮 send 时展开成 OpenAI tool_calls
+    const turnActions = [];
     let streamBodyEl = null;
     let accumText = "";
     let needTaskRefresh = false, needScheduleRefresh = false, needScrapbookRefresh = false;
@@ -601,12 +603,46 @@
         view_date: window.gateway?.journal?.current?.date || todayLocalISO(),
         refs: sentRefs.map(r => ({ kind: r.kind, label: r.label, payload: r.payload })),
       };
-      const history = state.history.slice(-MAX_HISTORY - 1, -1).map(m => ({
-        role: m.role,
-        content: m.refs && m.refs.length
-          ? `(用户指着这些):\n${m.refs.map(r => `[${r.kind}] ${r.label}`).join("\n")}\n\n${m.content}`
-          : m.content,
-      }));
+      // 0.1.4 起: assistant 消息里附带 _actions 数组 (本轮所有 tool 调用 + 结果),
+      // 这里展开成 OpenAI/DeepSeek 期望的 assistant.tool_calls + role:tool 多条。
+      // 不这样做的话工具结果丢失,AI 下轮重复 call 同一只读工具 → cache miss 飙升。
+      const recentMsgs = state.history.slice(-MAX_HISTORY - 1, -1);
+      const history = [];
+      for (const m of recentMsgs) {
+        if (m.role === "user") {
+          const content = m.refs && m.refs.length
+            ? `(用户指着这些):\n${m.refs.map(r => `[${r.kind}] ${r.label}`).join("\n")}\n\n${m.content}`
+            : m.content;
+          history.push({ role: "user", content });
+        } else if (m.role === "assistant") {
+          const acts = (m._actions || []).filter(a => a && a.id);
+          if (acts.length) {
+            // 1) assistant 带 tool_calls (content 可空)
+            history.push({
+              role: "assistant",
+              content: m.content || "",
+              tool_calls: acts.map(a => ({
+                id: a.id,
+                type: "function",
+                function: {
+                  name: a.name,
+                  arguments: typeof a.args === "string" ? a.args : JSON.stringify(a.args || {}),
+                },
+              })),
+            });
+            // 2) 每个 tool 调用一条 role:tool 结果
+            for (const a of acts) {
+              history.push({
+                role: "tool",
+                tool_call_id: a.id,
+                content: typeof a.result === "string" ? a.result : JSON.stringify(a.result),
+              });
+            }
+          } else {
+            history.push({ role: "assistant", content: m.content });
+          }
+        }
+      }
       const r = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -654,6 +690,12 @@
           } else if (data.type === "action") {
             const summary = `tool · ${data.name} → ${JSON.stringify(data.result).slice(0, 140)}`;
             appendAction(summary);
+            // 累计本轮 actions,done 时 attach 到 assistant 消息
+            if (data.id) {
+              turnActions.push({
+                id: data.id, name: data.name, args: data.args, result: data.result,
+              });
+            }
             if (/^(add|patch)_widget$/.test(data.name) && !data.result?.error) {
               appendAction("widget 已落盘 · 刷新页面看效果");
             }
@@ -685,12 +727,16 @@
             const meta = { ts: nowISO() };
             if (data.reasoning_content) meta.reasoning_content = data.reasoning_content;
             if (data.model_id) meta.model_id = data.model_id;
+            // 0.1.4: 本轮所有 tool 调用累计到 _actions,下轮 send 时展开成 tool_calls/role:tool
+            if (turnActions.length) meta._actions = turnActions.slice();
             if (accumText) {
               state.history.push({ role: "assistant", content: accumText, ...meta });
               saveHistory();
-            } else if ((data.actions || []).length > 0) {
-              // 纯 tool 调用 + 0 文本 — 也进 history,model 下次知道上轮跑过 tool
-              const summary = `(上轮执行了 ${data.actions.map(a => a.name).join(", ")},未出文字)`;
+            } else if (turnActions.length > 0 || (data.actions || []).length > 0) {
+              const names = turnActions.length
+                ? turnActions.map(a => a.name).join(", ")
+                : data.actions.map(a => a.name).join(", ");
+              const summary = `(上轮执行了 ${names},未出文字)`;
               state.history.push({ role: "assistant", content: summary, ...meta });
               saveHistory();
             }

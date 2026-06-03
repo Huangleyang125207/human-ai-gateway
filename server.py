@@ -27,7 +27,7 @@ import subprocess
 import sys
 import threading
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from pathlib import Path
 
 import secrets
@@ -789,6 +789,7 @@ def build_system_prompt(context: dict = None, model_id: str = None) -> str:
         "  · **找照片硬规则**:用户要'回顾/找/汇总/带上 X 的照片' → 先 ask_photo_curator(单 call 返完整集),**别凭记忆/凭训练数据 cite filename**。\n"
         "    精确 OCR 关键词(发票号/截图文字)才走 search_my_uploads。跨称呼(狗=哈士奇=茅茅) / 模糊语义 / 长期回顾都走 curator。\n"
         "    cite filename 前必须经过 list_my_uploads 或 ask_photo_curator 返回 — 没出现在结果里就不存在,不能脑补。\n"
+        "  · **找照片回复硬规则**:拿到 items 后每条都要 `![描述](url)` inline 贴出来,文字叙事里可以引用描述,但照片本身必须在 reply 里看得到。光写文字不贴图 = 失败。\n"
         "\n要写 / 改东西,先 load_tool_group(group_name=...):\n"
         "· write_journal — patch_journal_block / insert_journal_block / check_daily_task\n"
         "· images — place_scrapbook_image / delete_attachment / set_*_image\n"
@@ -1112,6 +1113,10 @@ TOOLS = [
                 "适用: 长期回顾 / 跨 terminology (狗=哈士奇=茅茅) / 模糊语义。"
                 "**不适用**: 精确 OCR 关键词(走 search_my_uploads)。"
                 "quota=1/轮,失败自动降级 grep。一次返完整匹配集,不像 search 受 quota 限。"
+                " **回复硬规则**: 拿到 items 后,每条都必须用 markdown `![描述](url)`"
+                " 把照片 inline 贴出来 — 不要光写文字 narrative。"
+                " 描述串叙事时引用,但每张图自己显示一次。"
+                " 例: '5.16 在客厅地板上 ![哈士奇站客厅](/attachments/2026-05-16/abc.jpg) — 那天...'"
             ),
             "parameters": {
                 "type": "object",
@@ -2866,6 +2871,44 @@ _OCR_FILENAME_RE = re.compile(r'图片 \[([^\]]+)\]:')
 # history 里 thread.js 把 ref 拼成 `[image] filename`(或其他 kind),抓 image 那条
 _HISTORY_IMG_LABEL_RE = re.compile(r'\[image\]\s+([^\n]+?)(?=\n|$)')
 
+def _trim_history_tool_volume(history: list, max_tool_chars: int) -> list:
+    """从最早往后,把超过 max_tool_chars 总量的 tool result 段砍掉。
+    被砍的 tool 同步去掉它对应 assistant.tool_calls 里的条目 (避免 schema 孤儿)。
+    """
+    # 1. 统计所有 tool 段总字符
+    total = sum(len(m.get("content") or "") for m in history if m.get("role") == "tool")
+    if total <= max_tool_chars:
+        return history
+    # 2. 从前往后扫,把 tool 段标记为待删,直到剩余总量 <= cap
+    overflow = total - max_tool_chars
+    dropped_tool_ids: set = set()
+    out = []
+    for m in history:
+        if m.get("role") == "tool" and overflow > 0:
+            tcid = m.get("tool_call_id") or ""
+            overflow -= len(m.get("content") or "")
+            dropped_tool_ids.add(tcid)
+            continue   # 丢这条 tool
+        out.append(m)
+    # 3. 扫所有 assistant.tool_calls,去掉孤儿条目;若整 assistant 的 tool_calls 全孤儿,
+    #    保留 content 但删 tool_calls 字段(变成普通文字回复)
+    final = []
+    for m in out:
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            kept = [tc for tc in m["tool_calls"] if (tc.get("id") or "") not in dropped_tool_ids]
+            if kept:
+                final.append({**m, "tool_calls": kept})
+            else:
+                # 全部 tool 段被砍了,这条 assistant 也去掉 tool_calls
+                stripped = {k: v for k, v in m.items() if k != "tool_calls"}
+                # 文本空且无 tool_calls = 没价值,跳过
+                if (stripped.get("content") or "").strip():
+                    final.append(stripped)
+        else:
+            final.append(m)
+    return final
+
+
 def _enrich_history_image_labels(history: list) -> list:
     """history 里 thread.js 把图 ref 拼成 `[image] filename.jpg`,但 AI 视角下
     filename 通常是 hash(如 `54cacfb2c68036b56b26.jpg`)— 看不出内容,
@@ -3115,15 +3158,40 @@ async def chat(req: Request):
     )
 
     # ── history processing: strip OCR + sliding-window summarize ──
+    # 0.1.4 起 tool 段也保留 (assistant.tool_calls + role:tool 结果) —
+    # 之前丢这些导致 AI 每轮 re-call read_today_schedule 等只读工具,cache 频繁 miss。
+    # 上限: TOOL_HISTORY_CAP 个 tool result 字符总量,超了从最早的开始扔。
     cleaned_history = []
     for m in history:
         role = m.get("role")
-        content = m.get("content")
-        if role not in ("user", "assistant") or not content:
-            continue
         if role == "user":
+            content = m.get("content")
+            if not content:
+                continue
             content = _strip_ocr_from_history(content)
-        cleaned_history.append({"role": role, "content": content})
+            cleaned_history.append({"role": "user", "content": content})
+        elif role == "assistant":
+            content = m.get("content") or ""
+            entry = {"role": "assistant", "content": content}
+            # 保 tool_calls — 没它,下条 tool 消息会被 DeepSeek 拒(must follow tool_calls)
+            tcs = m.get("tool_calls")
+            if tcs and isinstance(tcs, list):
+                entry["tool_calls"] = tcs
+            cleaned_history.append(entry)
+        elif role == "tool":
+            content = m.get("content") or ""
+            tcid = m.get("tool_call_id") or ""
+            if not tcid:
+                continue   # 没 id 关联不上 assistant.tool_calls,DeepSeek 拒
+            # 每条 tool 结果再 truncate 一次 (避免历史里堆几条 5K MD 的)
+            content = _truncate_tool_result(content)
+            cleaned_history.append({
+                "role": "tool", "tool_call_id": tcid, "content": content,
+            })
+
+    # 历史 tool 总量限额: 从最早开始扔超额的 tool result 字符。
+    # 注意不能扔单独的 assistant.tool_calls (会孤儿)— 跟它配对的 tool 一起扔。
+    cleaned_history = _trim_history_tool_volume(cleaned_history, max_tool_chars=24000)
 
     # 把 history 里裸的 [image] filename 换成带 vision/OCR brief 的形式 —
     # 防止 AI 回头引用过去上传过的图时凭空捏造话题。cache miss 时 label 保持原样。
@@ -3237,7 +3305,7 @@ async def chat(req: Request):
             fn = tc.function.name
             args = json.loads(tc.function.arguments or "{}")
             result = _dispatch_tool(fn, args, loaded_groups, quota_used)
-            tool_results.append({"name": fn, "args": args, "result": result})
+            tool_results.append({"id": tc.id, "name": fn, "args": args, "result": result})
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
@@ -3245,6 +3313,9 @@ async def chat(req: Request):
             })
 
         # save side-effect summary for the client
+        # NOTE: 0.1.4 起 = 而非 extend,导致只看见最后一轮的工具调用 — known bug,
+        # 见 6.2 测试 trace 漏 actions。先不改避免破坏 actions array contract,
+        # client 拿 tool 历史的真路径是 stream "action" 事件累积,不是 done.actions。
         if tool_results:
             last_actions = tool_results
 
@@ -3332,7 +3403,7 @@ def _exec_synth_calls(synth_calls, messages, last_actions, loaded_groups, quota_
     """执行 synth_calls,把 tool result 写进 messages + last_actions。"""
     for c in synth_calls:
         result = _dispatch_tool(c["name"], c["args"], loaded_groups, quota_used)
-        last_actions.append({"name": c["name"], "args": c["args"], "result": result})
+        last_actions.append({"id": c["id"], "name": c["name"], "args": c["args"], "result": result})
         messages.append({
             "role": "tool",
             "tool_call_id": c["id"],
@@ -3459,8 +3530,8 @@ def _stream_final_reply(client, active_model, messages, loaded_groups, quota_use
         messages.append(asst_msg)
         for c in synth_calls:
             result = _dispatch_tool(c["name"], c["args"], loaded_groups, quota_used)
-            last_actions.append({"name": c["name"], "args": c["args"], "result": result})
-            yield _sse({"type": "action", "name": c["name"], "args": c["args"], "result": result})
+            last_actions.append({"id": c["id"], "name": c["name"], "args": c["args"], "result": result})
+            yield _sse({"type": "action", "id": c["id"], "name": c["name"], "args": c["args"], "result": result})
             messages.append({"role": "tool", "tool_call_id": c["id"],
                              "content": _truncate_tool_result(json.dumps(result, ensure_ascii=False))})
         # 继续循环 → 下一轮 stream
@@ -3537,8 +3608,8 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
         if synth_calls:
             for c in synth_calls:
                 result = _dispatch_tool(c["name"], c["args"], loaded_groups, quota_used)
-                last_actions.append({"name": c["name"], "args": c["args"], "result": result})
-                yield _sse({"type": "action", "name": c["name"], "args": c["args"], "result": result})
+                last_actions.append({"id": c["id"], "name": c["name"], "args": c["args"], "result": result})
+                yield _sse({"type": "action", "id": c["id"], "name": c["name"], "args": c["args"], "result": result})
                 messages.append({
                     "role": "tool",
                     "tool_call_id": c["id"],
@@ -3564,7 +3635,7 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
             except Exception:
                 pass
             result = _dispatch_tool(fn, args, loaded_groups, quota_used)
-            action_payload = {"name": fn, "args": args, "result": result}
+            action_payload = {"id": tc.id, "name": fn, "args": args, "result": result}
             last_actions.append(action_payload)
             yield _sse({"type": "action", **action_payload})
             messages.append({
@@ -5807,6 +5878,137 @@ def pulse_detail(name: str):
     if not f.exists():
         raise HTTPException(404, f"PULSE for '{name}' not found")
     return {"name": name, "markdown": f.read_text(encoding="utf-8")}
+
+
+# ── USER_PULSE 自演化 (0.1.4 起) ─────────────────────────────────────
+# LLM 重写整份 PULSE,自己决定:
+#   - 哪条记录还有效 → ts 改成今天
+#   - 哪条过时 → 自己删
+#   - 新事实 → 加,ts 今天
+# server 只验三条机械规则: ts 格式合规 / 总长度 ≤ 12000 字 / ts 是合法日期。
+PULSE_BUDGET_CHARS = 12000
+PULSE_STALE_DAYS = 60
+_TS_RE = re.compile(r"<!--\s*ts:(\d{4}-\d{2}-\d{2})\s*-->")
+
+
+def _pulse_validate(text: str):
+    """返 (ok: bool, error: str)。"""
+    if len(text) > PULSE_BUDGET_CHARS:
+        return False, f"超 budget: {len(text)} > {PULSE_BUDGET_CHARS}"
+    matches = _TS_RE.findall(text)
+    if not matches:
+        return False, "没找到任何 <!-- ts:YYYY-MM-DD --> 标记"
+    for m in matches:
+        try:
+            datetime.strptime(m, "%Y-%m-%d")
+        except Exception:
+            return False, f"ts 不是合法日期: {m}"
+    return True, ""
+
+
+_PULSE_UPDATE_PROMPT = """这是当前 USER_PULSE.md 全文:
+═══════════════════════════════════════════
+{pulse}
+═══════════════════════════════════════════
+
+这是刚才那段对话(用户和 AI 协作记录):
+═══════════════════════════════════════════
+{conversation}
+═══════════════════════════════════════════
+
+今天: {today}
+
+请重写整份 USER_PULSE。
+
+机械要求(server 会校验,违反就被拒):
+- 每条记录前必须有 `<!-- ts:YYYY-MM-DD -->` 标记(HTML 注释格式)
+- 整份 PULSE 不超过 {budget} 字
+- ts 必须是合法 YYYY-MM-DD 日期
+
+内容自由(没人限制你):
+- 这条记录还有效?→ 把 ts 改成今天 {today}
+- 这条记录过时了 / 不再适用 / 已完成?→ 自己删掉,别留
+- 对话里冒出新事实 / 新决定?→ 加进去,ts 今天
+- 结构、段落、语气怎么排你定 — 旧 PULSE 的 9 段不是合同,你想重新分段就重新分
+- ts 超过 {stale} 天没刷新的强烈嫌疑要删,自己评估
+- 你认为这条记录是「硬合同」(踩了就炸的那种),保留并刷新 ts;只有真过时才删
+
+返回纯 markdown,不要解释、不要 ``` 包裹。"""
+
+
+@app.post("/api/pulse/user-update")
+async def pulse_user_update(req: Request):
+    """LLM 重写 USER_PULSE — compact 前置步骤。
+    body: { "conversation": "对话原文 (任意格式)" }
+    """
+    body = await req.json()
+    conversation = (body.get("conversation") or "").strip()
+    if not conversation:
+        raise HTTPException(400, "需要 conversation")
+    if not _USER_PULSE_PATH.exists():
+        raise HTTPException(404, f"USER_PULSE 不存在: {_USER_PULSE_PATH}")
+
+    old_pulse = _USER_PULSE_PATH.read_text(encoding="utf-8")
+    today = date.today().isoformat()
+    prompt = _PULSE_UPDATE_PROMPT.format(
+        pulse=old_pulse,
+        conversation=conversation,
+        today=today,
+        budget=PULSE_BUDGET_CHARS,
+        stale=PULSE_STALE_DAYS,
+    )
+
+    profile = get_profile("deepseek-v4-pro") or get_profile()
+    if not profile:
+        raise HTTPException(503, "deepseek 主模型未配置")
+    client = get_client(profile)
+    if client is None:
+        raise HTTPException(503, "deepseek client 起不来")
+
+    last_err = ""
+    new_pulse = ""
+    for attempt in range(2):  # 1 次正常 + 1 次重试
+        try:
+            resp = client.chat.completions.create(
+                model=profile.get("model", "deepseek-v4-pro"),
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=8000,
+                temperature=0.3,
+                timeout=120,
+            )
+        except Exception as e:
+            last_err = f"LLM call 失败: {type(e).__name__}: {e}"
+            continue
+        text = (resp.choices[0].message.content or "").strip()
+        text = re.sub(r"^```(markdown|md)?\s*", "", text).strip()
+        text = re.sub(r"\s*```\s*$", "", text).strip()
+        ok, err = _pulse_validate(text)
+        if ok:
+            new_pulse = text
+            break
+        last_err = err
+        # 失败时下一轮 prompt 加上错误信息,让 LLM 修
+        prompt = prompt + f"\n\n上次返回被校验拒了: {err}。修这条再返。"
+
+    if not new_pulse:
+        raise HTTPException(500, f"USER_PULSE 更新失败: {last_err}")
+
+    # 备份 + 写盘 + git
+    backup = _USER_PULSE_PATH.with_suffix(".md.bak")
+    try:
+        backup.write_text(old_pulse, encoding="utf-8")
+    except Exception:
+        pass
+    _USER_PULSE_PATH.write_text(new_pulse, encoding="utf-8")
+
+    return {
+        "ok": True,
+        "old_chars": len(old_pulse),
+        "new_chars": len(new_pulse),
+        "old_records": len(_TS_RE.findall(old_pulse)),
+        "new_records": len(_TS_RE.findall(new_pulse)),
+        "backup": str(backup),
+    }
 
 
 @app.post("/api/pulse/refresh-mirror")
