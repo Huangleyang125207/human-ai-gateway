@@ -19,8 +19,10 @@ jobs:
     # macos-14 = arm64 (Apple Silicon) runner
     # Tauri 桌面壳 + sidecar 都得在 native arch 上 build
     runs-on: macos-14
-    # 6.1 起 30min(Tauri build cold 3-5min + sidecar freeze + 其他);6.2 起 notarize 等 Apple 服务 5-15min,提到 45
-    timeout-minutes: 45
+    # 6.1 30min(Tauri cold 3-5min + sidecar freeze);6.2 加 notarize 等 Apple 5-15min → 45。
+    # 6.3 实测一次 Apple notarytool submit 等了 30+ min 没回应被 timeout cancel,
+    # 给到 90min 兜 Apple 服务慢/排队的常见情况。CI 一次成本上限 ~$7,只 tag push 时跑。
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
