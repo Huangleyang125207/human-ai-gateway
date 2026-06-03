@@ -389,9 +389,18 @@
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])
     );
   }
+  // 模型时不时会把相对 URL 自动补 http://localhost:NNNN(端口往往瞎编)前缀,
+  // 导致 attachments 图全 404。剥掉这种本地前缀,留下原相对路径让 Tauri 解析。
+  function stripLocalUrlPrefix(s) {
+    return String(s || "").replace(
+      /https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(\/attachments\/)/g,
+      "$1"
+    );
+  }
   function renderText(t) {
+    const cleaned = stripLocalUrlPrefix(t);
     // 走全局 gatewayMd (marked + DOMPurify);fallback 到纯 escape
-    return window.gatewayMd ? window.gatewayMd(t) : escapeHtml(t).replace(/\n/g, "<br>");
+    return window.gatewayMd ? window.gatewayMd(cleaned) : escapeHtml(cleaned).replace(/\n/g, "<br>");
   }
 
   function renderRefsCard(refs) {
@@ -686,6 +695,13 @@
             // layout reflow 锁主线程,macOS IME composition 事件被延迟 → 输入法抽。
             // append textNode 只触发 incremental layout(成本 ~O(new chars))。
             if (chunk) streamBodyEl.appendChild(document.createTextNode(chunk));
+            // 含 markdown 图(![描述](url))时实时渲染,不然用户看到的是
+            // streaming 期间的源码 ![描述](url) 直到 done 才转图,体验上
+            // 像是 AI 没贴图。throttle 到 600ms 避免每 chunk 重 render。
+            if (accumText.includes("![") && (Date.now() - (streamMsgEl._lastMdRender || 0) > 600)) {
+              streamMsgEl._lastMdRender = Date.now();
+              streamBodyEl.innerHTML = renderText(accumText);
+            }
             scrollToBottom();
           } else if (data.type === "action") {
             const summary = `tool · ${data.name} → ${JSON.stringify(data.result).slice(0, 140)}`;

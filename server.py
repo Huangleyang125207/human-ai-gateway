@@ -1116,6 +1116,8 @@ TOOLS = [
                 " **回复硬规则**: 拿到 items 后,每条都必须用 markdown `![描述](url)`"
                 " 把照片 inline 贴出来 — 不要光写文字 narrative。"
                 " 描述串叙事时引用,但每张图自己显示一次。"
+                " **URL 必须原样照抄 items[i].url(形如 `/attachments/2026-05-16/xxx.jpg`)— "
+                "不要加任何 host/port/http 前缀,浏览器自己会解析相对路径。**"
                 " 例: '5.16 在客厅地板上 ![哈士奇站客厅](/attachments/2026-05-16/abc.jpg) — 那天...'"
             ),
             "parameters": {
@@ -2542,6 +2544,21 @@ async def chat_upload_image(file: UploadFile = File(...), background_tasks: Back
     if len(data) == 0:
         raise HTTPException(400, "empty file")
 
+    # sha256 去重:同字节图(用户重传 / vision-pre-router race / drag 重操作)直接复用既有
+    # url + 跳过 OCR/vision call,既省空间也避免 curator 把同图返多次("找狗"返 5 张
+    # 一模一样客厅照那条 5.16 bug 的根治)。
+    sha = hashlib.sha256(data).hexdigest()
+    existing = _find_by_hash(sha)
+    if existing and existing.get("url"):
+        return {
+            "url": existing["url"],
+            "filename": existing.get("filename", ""),
+            "original": file.filename,
+            "size": existing.get("size", len(data)),
+            "deduped": True,
+            "deduped_to": f"{existing.get('date','')}/{existing.get('filename','')}",
+        }
+
     today = datetime.now().strftime("%Y-%m-%d")
     day_dir = ATTACHMENTS_DIR / today
     day_dir.mkdir(parents=True, exist_ok=True)
@@ -2550,14 +2567,16 @@ async def chat_upload_image(file: UploadFile = File(...), background_tasks: Back
     rand = secrets.token_hex(3)
     saved_name = f"{stamp}-{rand}.{ext}"
     (day_dir / saved_name).write_bytes(data)
-    # 后台跑 OCR + 写索引(不阻塞上传响应)
+    # 后台跑 OCR + 写索引(不阻塞上传响应);把 hash 一起写进 record,
+    # 下次同字节 upload _find_by_hash 才能命中
     if background_tasks is not None:
-        background_tasks.add_task(_index_attachment, today, saved_name, file.filename, len(data))
+        background_tasks.add_task(_index_attachment, today, saved_name, file.filename, len(data), sha)
     return {
         "url": f"/attachments/{today}/{saved_name}",
         "filename": saved_name,
         "original": file.filename,
         "size": len(data),
+        "deduped": False,
     }
 
 
@@ -2670,6 +2689,18 @@ import threading as _threading
 _attachments_index_lock = _threading.Lock()
 
 
+def _find_by_hash(sha256_hex: str):
+    """同字节 upload 去重的关键:扫 index 查 hash。命中返既有 record,没命中返 None。
+    O(N) 扫;index 体量 < 几百条,无需建额外索引。
+    """
+    if not sha256_hex:
+        return None
+    for x in _load_attachments_index():
+        if x.get("hash") == sha256_hex:
+            return x
+    return None
+
+
 def _index_upsert(date: str, filename: str, **fields):
     """Find-or-create by (date, filename),只 merge 传进来的字段;不动其余。
     在 lock 下做完整 read-modify-write 防并发覆盖。
@@ -2728,11 +2759,12 @@ def _ocr_text(file_path: Path) -> str:
         return ""
 
 
-def _index_attachment(date: str, filename: str, original: str, size: int):
+def _index_attachment(date: str, filename: str, original: str, size: int, sha256_hex: str = ""):
     """后台跑 OCR + 写索引。失败也不抛(索引降级)。
     vision 分类不在这里跑(成本考虑):upload 即跑 vision 对"上传多但不讨论"
     场景白花钱。lazy 策略 — chat 时 _refs_to_vision_hints 现场 sync call 一次
     + 回写索引,后续命中 cache。
+    sha256_hex 由 upload 入口算好传进来,用于后续 _find_by_hash 同字节去重。
     """
     f = ATTACHMENTS_DIR / date / filename
     ocr_text = ""
@@ -2740,15 +2772,17 @@ def _index_attachment(date: str, filename: str, original: str, size: int):
         ocr_text = _ocr_text(f)
     except Exception as e:
         log.warning(f"index OCR failed for {filename}: {e}")
+    fields = {
+        "original": original,
+        "size": size,
+        "ocr_text": ocr_text[:2000],
+        "url": f"/attachments/{date}/{filename}",
+    }
+    if sha256_hex:
+        fields["hash"] = sha256_hex
     # upsert 而非 append:若 vision call 先到、已建好 entry,这里只补 OCR / 元数据,
     # 不动已有的 vision 字段(原来 append + skip-if-exists 的逻辑碰上 race 会丢 vision)
-    _index_upsert(
-        date, filename,
-        original=original,
-        size=size,
-        ocr_text=ocr_text[:2000],
-        url=f"/attachments/{date}/{filename}",
-    )
+    _index_upsert(date, filename, **fields)
 
 
 @app.get("/api/attachments")
