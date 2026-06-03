@@ -2567,8 +2567,16 @@ async def chat_upload_image(file: UploadFile = File(...), background_tasks: Back
     rand = secrets.token_hex(3)
     saved_name = f"{stamp}-{rand}.{ext}"
     (day_dir / saved_name).write_bytes(data)
-    # 后台跑 OCR + 写索引(不阻塞上传响应);把 hash 一起写进 record,
-    # 下次同字节 upload _find_by_hash 才能命中
+    # 同步 upsert 最小 record(hash + url + size):防同字节连续 upload 的 race —
+    # 不然 #2 在 #1 的后台 OCR 还没跑完时去 _find_by_hash 找不到东西就误判 新图。
+    # OCR 仍走后台不阻塞响应。
+    _index_upsert(
+        today, saved_name,
+        url=f"/attachments/{today}/{saved_name}",
+        hash=sha,
+        size=len(data),
+        original=file.filename,
+    )
     if background_tasks is not None:
         background_tasks.add_task(_index_attachment, today, saved_name, file.filename, len(data), sha)
     return {
