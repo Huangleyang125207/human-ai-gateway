@@ -30,7 +30,8 @@
     "macOS": {
       "signingIdentity": "Developer ID Application: yang chunyan (L2QPVXA6DT)",
       "hardenedRuntime": true,
-      "providerShortName": "L2QPVXA6DT"
+      "providerShortName": "L2QPVXA6DT",
+      "entitlements": "./entitlements.plist"
     }
   },
   "plugins": {

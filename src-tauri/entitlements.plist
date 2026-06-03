@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTD/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+    PyInstaller sidecar 内嵌 Python3.framework 是 Python.org 签的,Team ID 跟我们不同。
+    hardenedRuntime 默认 library validation 会拒绝跨 Team 的 dylib → sidecar 拒启动。
+    放开这条就行,其他 hardened 保护(JIT / unsigned exec memory)仍可启用。
+    notarize 接受这种 entitlement(很多带 Python/Node sidecar 的 app 都这么做)。
+    -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- PyInstaller bootloader 会 mmap + jump 到解压的 Python 字节码,
+         hardened runtime 需要显式允许 unsigned executable memory -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- Tauri WebKit 进程需要 JIT 跑 JavaScript -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+</dict>
+</plist>
