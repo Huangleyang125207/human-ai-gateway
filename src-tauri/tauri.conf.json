@@ -32,6 +32,17 @@
       "hardenedRuntime": true,
       "providerShortName": "L2QPVXA6DT",
       "entitlements": "./entitlements.plist"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "perUser",
+        "languages": ["English", "SimpChinese"],
+        "displayLanguageSelector": false
+      }
     }
   },
   "plugins": {

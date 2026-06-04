@@ -1,4 +1,10 @@
-name: Build Windows .exe
+name: Build Windows (Tauri + auto-update)
+
+# 6.4 Win Tauri 化:从 PyInstaller standalone + Inno Setup 切到 Tauri 桌面壳。
+# 装出来:独立窗口 + 任务栏 Gateway 图标 + 关 X 退 server + Tauri updater 跟 yanpai 同步。
+# Inno Setup 那条退场 — Tauri 2 自带 NSIS installer 出 -setup.exe。
+#
+# 之前 PyInstaller standalone 模式留在 git history (commit b7dfae0),要复原直接看老 yml。
 
 on:
   push:
@@ -12,21 +18,19 @@ on:
       - 'brand/**'
       - 'protocols/**'
       - 'tools/**'
+      - 'src-tauri/**'
       - 'requirements.txt'
-      - 'build-win.bat'
       - '.github/workflows/build-win.yml'
-    # 6.3:tag v* push 时也跑,完了直接挂 GitHub Release
     tags: ['v*']
   workflow_dispatch:
 
-# release publish 步要写 release 资产
 permissions:
   contents: write
 
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -37,22 +41,32 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install deps
+      - name: Install Python deps + PyInstaller
         shell: cmd
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install rapidocr-onnxruntime rembg pyinstaller
 
-      - name: Build .exe with PyInstaller
+      - name: Install Rust + tauri-cli
+        # Win runner 自带 rustup,只需加 target + 装 tauri-cli
+        shell: cmd
+        run: |
+          rustup default stable
+          rustup target add x86_64-pc-windows-msvc
+          cargo install tauri-cli --version "^2.0" --locked
+
+      - name: Build sidecar (PyInstaller freeze server.py → gateway-server-x86_64-pc-windows-msvc.exe)
+        # build-sidecar.sh 是 bash + Mac 路径假设,Win 上 inline 跑 PyInstaller。
+        # 输出文件必须按 Tauri externalBin 约定命名:binaries/gateway-server-<TRIPLE>.exe
         shell: cmd
         run: |
           pyinstaller ^
-            --name Gateway ^
+            --name gateway-server ^
             --noconsole ^
             --noconfirm ^
-            --distpath dist-pyinstaller ^
-            --workpath build ^
+            --distpath dist-sidecar ^
+            --workpath build-sidecar ^
             --add-data "index.html;." ^
             --add-data "day.html;." ^
             --add-data "reset.html;." ^
@@ -73,6 +87,9 @@ jobs:
             --add-data "ocr.py;." ^
             --add-data "ocr_local.py;." ^
             --add-data "tools;tools" ^
+            --add-data "PRIVACY.md;." ^
+            --add-data "README.md;." ^
+            --add-data "LICENSE;." ^
             --hidden-import uvicorn.logging ^
             --hidden-import uvicorn.loops.auto ^
             --hidden-import uvicorn.loops.asyncio ^
@@ -87,93 +104,147 @@ jobs:
             --hidden-import rapidocr_onnxruntime ^
             --hidden-import rembg ^
             server.py
+          mkdir src-tauri\binaries 2>nul
+          copy dist-sidecar\gateway-server\gateway-server.exe src-tauri\binaries\gateway-server-x86_64-pc-windows-msvc.exe
+          dir src-tauri\binaries
 
-      - name: Zip Gateway folder (fallback,杀软拦 setup.exe 时用户备用)
-        shell: pwsh
+      - name: Tauri build (NSIS installer + updater)
+        # Tauri 2 自带 NSIS 模板出 Gateway_X.Y.Z_x64-setup.exe + Gateway_X.Y.Z_x64-setup.nsis.zip(updater)
+        # Win 暂无 DigiCert 代码签名,SmartScreen 会拦,跟 0.1.5/0.1.6 setup.exe 一样
+        # 用户体感:"更多信息→仍要运行"
+        shell: cmd
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
-          Compress-Archive -Path dist-pyinstaller\Gateway -DestinationPath Gateway-windows-x64.zip
-          Get-Item Gateway-windows-x64.zip | Select-Object Name, @{Name='SizeMB';Expression={[math]::Round($_.Length/1MB,1)}}
+          cargo tauri build --target x86_64-pc-windows-msvc
 
-      - name: Read version from tauri.conf.json
+      - name: Read version + sig
+        id: meta
         shell: pwsh
         run: |
           $ver = (Get-Content src-tauri\tauri.conf.json | ConvertFrom-Json).version
-          "GATEWAY_VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $sig_path = Get-ChildItem -Path "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.nsis.zip.sig" | Select-Object -First 1
+          if ($sig_path) {
+            $sig = Get-Content $sig_path.FullName -Raw
+            "sig<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            $sig | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
           Write-Host "version: $ver"
-
-      - name: Install Inno Setup
-        shell: cmd
-        run: choco install innosetup -y --no-progress
-
-      - name: Compile Gateway-Setup-x.y.z-x64.exe with Inno Setup
-        shell: cmd
-        # PyInstaller onedir 已在 dist-pyinstaller\Gateway\,Inno 把它打成单 setup.exe。
-        # 装机后:开始菜单 + 卸载注册到控制面板,装在 %LOCALAPPDATA%\Gateway,不要求 admin。
-        run: |
-          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DGatewayVersion=%GATEWAY_VERSION% installer\gateway.iss
+          Get-ChildItem -Recurse src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\ 2>$null | Select Name, Length
 
       - name: Smoke test installer (装+起+探,fail 则阻止 release publish)
-        # build 出 setup.exe 后立刻在同 runner 上 silent 装 + 双击启动 + 探端口。
-        # 0.1.6 stdout None 那种 Mac dogfood 验不出的 Win-only crash 在这步会立刻 fail,
-        # 后续 Upload + Publish 都不会跑,坏 setup.exe 永远进不了 GitHub Release。
+        # Tauri 桌面壳模式:setup.exe silent 装 → 启 Gateway.exe(Tauri WebView 拉起 sidecar)
+        # → 等 sidecar 写 .gateway-port 文件 → 探动态端口 HTTP 200
+        # 之前 PyInstaller standalone 直接探 4321,Tauri 给的是 bind:0 动态端口,得读 port-file
         shell: pwsh
         run: |
-          $setup = Get-ChildItem -Path "installer\Output\Gateway-Setup-*-x64.exe" | Select-Object -First 1
-          if (-not $setup) { Write-Error "setup.exe not found"; exit 1 }
+          $setup = Get-ChildItem -Path "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*-setup.exe" | Select-Object -First 1
+          if (-not $setup) { Write-Error "NSIS setup.exe not found"; exit 1 }
           Write-Host "smoke target: $($setup.FullName)"
 
-          Start-Process $setup.FullName -ArgumentList '/SILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
-          $installed = "$env:LOCALAPPDATA\Gateway\Gateway.exe"
-          if (-not (Test-Path $installed)) { Write-Error "install path missing"; exit 1 }
-          Write-Host "OK installed"
-
-          $proc = Start-Process $installed -PassThru
-          Start-Sleep 10
-          if ($proc.HasExited) {
-            Write-Error "Startup crash. ExitCode=$($proc.ExitCode)"
+          # NSIS silent install:/S 标志 (Tauri 默认 NSIS 模板 mode = perMachine,但本 conf 设
+          # perUser 装到 %LOCALAPPDATA%\Programs\Gateway)
+          Start-Process $setup.FullName -ArgumentList '/S' -Wait
+          $candidates = @(
+            "$env:LOCALAPPDATA\Programs\Gateway\Gateway.exe",
+            "$env:LOCALAPPDATA\Gateway\Gateway.exe",
+            "$env:ProgramFiles\Gateway\Gateway.exe"
+          )
+          $installed = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $installed) {
+            Write-Error "install path missing — tried: $($candidates -join ', ')"
+            Get-ChildItem "$env:LOCALAPPDATA\Programs" -ErrorAction SilentlyContinue
             exit 1
           }
-          Write-Host "OK process alive after 10s"
+          Write-Host "OK installed at $installed"
 
-          $up = $false
+          $proc = Start-Process $installed -PassThru
+          Start-Sleep 12
+          if ($proc.HasExited) {
+            Write-Error "Process exited within 12s — startup crash. ExitCode=$($proc.ExitCode)"
+            exit 1
+          }
+          Write-Host "OK process alive after 12s"
+
+          # Tauri shell + sidecar 模式,sidecar 写真实端口到 ~/.human-ai/.gateway-port
+          $port_file = "$env:USERPROFILE\.human-ai\.gateway-port"
+          $port = $null
+          for ($i = 0; $i -lt 8; $i++) {
+            if (Test-Path $port_file) {
+              $port = (Get-Content $port_file -Raw).Trim()
+              if ($port -match '^\d+$') { break }
+            }
+            Start-Sleep 2
+          }
+          if (-not $port) {
+            Write-Error ".gateway-port not written by sidecar within 16s — sidecar likely failed"
+            exit 1
+          }
+          Write-Host "sidecar port: $port"
+
           try {
-            $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4321/ -TimeoutSec 5
-            Write-Host "OK port 4321 HTTP $($r.StatusCode)"
-            $up = $true
+            $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/" -TimeoutSec 5
+            Write-Host "OK port $port HTTP $($r.StatusCode)"
           } catch [System.Net.WebException] {
             if ($_.Exception.Response) {
               $code = [int]$_.Exception.Response.StatusCode
-              Write-Host "OK port 4321 HTTP $code"
-              $up = $true
+              Write-Host "OK port $port HTTP $code"
+            } else {
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+              Write-Error "port $port unreachable: $($_.Exception.Message)"
+              exit 1
             }
-          } catch { }
+          }
 
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-          if (-not $up) {
-            Write-Error "port 4321 unreachable but process alive — sidecar bound but listener broken"
-            exit 1
-          }
           Write-Host "smoke pass"
+
+      - name: Generate latest.json manifest (Win-side updater)
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.meta.outputs.version }}"
+          $sig = @"
+          ${{ steps.meta.outputs.sig }}
+          "@
+          $json = @{
+            version = $ver
+            notes = "auto-release ${{ github.sha }}"
+            pub_date = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+            platforms = @{
+              "windows-x86_64" = @{
+                signature = $sig.Trim()
+                url = "https://gateway.yanpaidb.cn/dl/Gateway_${ver}_x64-setup.nsis.zip"
+              }
+            }
+          } | ConvertTo-Json -Depth 4
+          $json | Out-File -FilePath latest-win.json -Encoding utf8
+          Get-Content latest-win.json
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Gateway-windows-x64
+          name: Gateway-windows-x64-${{ steps.meta.outputs.version }}
           path: |
-            Gateway-windows-x64.zip
-            installer\Output\Gateway-Setup-*-x64.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.nsis.zip
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.nsis.zip.sig
+            latest-win.json
           retention-days: 30
 
       - name: Publish to GitHub Release (tag push 时)
-        # tag v* push 触发,setup.exe 主推 + zip 作为兜底(杀软误报 setup.exe 时用户备用)。
-        # Win 暂无代码签名,SmartScreen 会拦,点"更多信息 → 仍要运行"即可。
-        # softprops/action-gh-release 幂等,跟 mac workflow 推到同一 release。
+        # tag v* push 触发,Tauri NSIS 安装包 + updater zip+sig 挂 release。
+        # 跟 Mac workflow 推到同一 release,softprops 幂等 append。
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            installer/Output/Gateway-Setup-*-x64.exe
-            Gateway-windows-x64.zip
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.nsis.zip
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.nsis.zip.sig
+            latest-win.json
           draft: true
           fail_on_unmatched_files: true
           generate_release_notes: true
