@@ -1,0 +1,85 @@
+name: Test installer smoke (on-demand)
+
+# 已发布版本的 setup.exe 是否真能装 + 起 + 探端口的回归测试。
+# workflow_dispatch 触发,input 是 release tag(默认 latest)。
+# 用于:
+#   1. 怀疑新版本有"装机崩"这类 Mac dogfood 验不出的 Win-only bug
+#   2. 历史版本 backfill 验证(怀疑某老版本坏)
+#
+# 装机后 8s 内进程崩 → fail,不崩但端口不响应 → warn,都好 → pass。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag (e.g. v0.1.6)"
+        required: true
+        default: "v0.1.6"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download setup.exe from release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ver = "${{ inputs.version }}"
+          gh release download $ver `
+            --repo Huangleyang125207/human-ai-gateway `
+            --pattern "Gateway-Setup-*-x64.exe" `
+            --output Gateway-Setup.exe
+          Get-Item Gateway-Setup.exe | Select Name, @{N='MB';E={[math]::Round($_.Length/1MB,1)}}
+
+      - name: Silent install
+        shell: pwsh
+        run: |
+          Start-Process .\Gateway-Setup.exe -ArgumentList '/SILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+          $installed = "$env:LOCALAPPDATA\Gateway\Gateway.exe"
+          if (-not (Test-Path $installed)) {
+            Write-Error "Install path missing: $installed"
+            dir "$env:LOCALAPPDATA\Gateway" -ErrorAction SilentlyContinue
+            exit 1
+          }
+          Write-Host "OK installed at $installed"
+
+      - name: Launch + probe
+        shell: pwsh
+        run: |
+          $exe = "$env:LOCALAPPDATA\Gateway\Gateway.exe"
+          $proc = Start-Process $exe -PassThru
+          Write-Host "Launched PID=$($proc.Id)"
+          # 给 sidecar 起足 10s
+          Start-Sleep 10
+          if ($proc.HasExited) {
+            Write-Error "Process exited within 10s — startup crash. ExitCode=$($proc.ExitCode)"
+            exit 1
+          }
+          Write-Host "OK process still alive after 10s"
+
+          # 探端口 4321(默认 GATEWAY_PORT fallback)
+          # 任何 HTTP 响应都算 server 起来了(404/200/3xx 都行)
+          $up = $false
+          try {
+            $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4321/ -TimeoutSec 5
+            Write-Host "OK port 4321 responded HTTP $($r.StatusCode)"
+            $up = $true
+          } catch [System.Net.WebException] {
+            if ($_.Exception.Response) {
+              $code = [int]$_.Exception.Response.StatusCode
+              Write-Host "OK port 4321 responded HTTP $code (server up)"
+              $up = $true
+            }
+          } catch { }
+
+          if (-not $up) {
+            Write-Warning "port 4321 unreachable but process alive — GATEWAY_PORT might differ; downgrading to warn"
+          }
+
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          Write-Host "smoke pass"
