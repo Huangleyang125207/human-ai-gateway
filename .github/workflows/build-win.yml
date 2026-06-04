@@ -145,47 +145,45 @@ jobs:
           if (-not $setup) { Write-Error "NSIS setup.exe not found"; exit 1 }
           Write-Host "smoke target: $($setup.FullName)"
 
-          # NSIS silent + 显式 $INSTDIR(/D=path,NSIS 标准,必须是最后参数,不能带引号)
-          # Tauri 2 NSIS currentUser 默认 $LOCALAPPDATA\<productName>,但 silent 时
-          # 路径偶有变化,显式指定一个 C:\GatewayTest 完全可控。
+          # NSIS silent install,/D=path 显式 install dir(NSIS 标准,必须最后参数)
           $installDir = "C:\GatewayTest"
           $proc = Start-Process $setup.FullName -ArgumentList '/S',"/D=$installDir" -Wait -PassThru
           Write-Host "installer exit code: $($proc.ExitCode)"
 
-          # 先 dump 实际产物 — 不管成不成都打印,排查用
+          # 先 dump 实际产物,排查用
           Write-Host "=== $installDir tree ==="
           if (Test-Path $installDir) {
             Get-ChildItem $installDir -Recurse -ErrorAction SilentlyContinue |
               Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
           } else {
-            Write-Host "(missing)"
+            Write-Host "(installDir missing)"
           }
+          Write-Host "=== LOCALAPPDATA\\Gateway tree ==="
+          if (Test-Path "$env:LOCALAPPDATA\Gateway") {
+            Get-ChildItem "$env:LOCALAPPDATA\Gateway" -Recurse -ErrorAction SilentlyContinue |
+              Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+          } else { Write-Host "(missing)" }
 
-          # 候选位置 + 递归兜底
-          $candidates = @(
-            "$installDir\Gateway.exe",
-            "$env:LOCALAPPDATA\Gateway\Gateway.exe",
-            "$env:LOCALAPPDATA\Programs\Gateway\Gateway.exe"
-          )
-          $installed = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $installed) {
-            foreach ($root in @("$installDir", "$env:LOCALAPPDATA", "$env:ProgramFiles", "${env:ProgramFiles(x86)}")) {
-              if (-not (Test-Path $root)) { continue }
-              $found = Get-ChildItem -Path $root -Recurse -Filter Gateway.exe -ErrorAction SilentlyContinue |
-                       Where-Object { $_.FullName -notlike "*-setup*" } |
-                       Select-Object -First 1
-              if ($found) { $installed = $found.FullName; break }
-            }
+          # Cargo binary name 是 'app',Tauri 可能重命名也可能不命名;搜任意 .exe 不带 name filter
+          # 排除 setup.exe / unins 之类的 installer/uninstaller artifact
+          $installed = $null
+          foreach ($root in @("$installDir", "$env:LOCALAPPDATA\Gateway", "$env:LOCALAPPDATA\Programs\Gateway")) {
+            if (-not (Test-Path $root)) { continue }
+            $found = Get-ChildItem -Path $root -Recurse -Filter *.exe -ErrorAction SilentlyContinue |
+                     Where-Object {
+                       $_.FullName -notlike "*-setup*" -and
+                       $_.FullName -notlike "*\unins*" -and
+                       $_.FullName -notlike "*gateway-server*"  # sidecar binary 排除,要主 app exe
+                     } |
+                     Select-Object -First 1
+            if ($found) { $installed = $found.FullName; break }
           }
 
           if (-not $installed) {
             Write-Host "=== LOCALAPPDATA 浅扫 ==="
             Get-ChildItem "$env:LOCALAPPDATA" -Depth 1 -ErrorAction SilentlyContinue |
               Select-Object FullName | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
-            Write-Host "=== Program Files 浅扫 ==="
-            Get-ChildItem "$env:ProgramFiles" -Depth 1 -ErrorAction SilentlyContinue |
-              Select-Object FullName | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
-            Write-Error "Gateway.exe not found anywhere — installer exit=$($proc.ExitCode),Tauri NSIS silent install 失败"
+            Write-Error "No .exe found anywhere — installer exit=$($proc.ExitCode),Tauri NSIS silent install 没真装"
             exit 1
           }
           Write-Host "OK installed at $installed"
