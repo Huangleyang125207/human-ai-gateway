@@ -112,6 +112,49 @@ jobs:
         run: |
           "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DGatewayVersion=%GATEWAY_VERSION% installer\gateway.iss
 
+      - name: Smoke test installer (装+起+探,fail 则阻止 release publish)
+        # build 出 setup.exe 后立刻在同 runner 上 silent 装 + 双击启动 + 探端口。
+        # 0.1.6 stdout None 那种 Mac dogfood 验不出的 Win-only crash 在这步会立刻 fail,
+        # 后续 Upload + Publish 都不会跑,坏 setup.exe 永远进不了 GitHub Release。
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem -Path "installer\Output\Gateway-Setup-*-x64.exe" | Select-Object -First 1
+          if (-not $setup) { Write-Error "setup.exe not found"; exit 1 }
+          Write-Host "smoke target: $($setup.FullName)"
+
+          Start-Process $setup.FullName -ArgumentList '/SILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+          $installed = "$env:LOCALAPPDATA\Gateway\Gateway.exe"
+          if (-not (Test-Path $installed)) { Write-Error "install path missing"; exit 1 }
+          Write-Host "OK installed"
+
+          $proc = Start-Process $installed -PassThru
+          Start-Sleep 10
+          if ($proc.HasExited) {
+            Write-Error "Startup crash. ExitCode=$($proc.ExitCode)"
+            exit 1
+          }
+          Write-Host "OK process alive after 10s"
+
+          $up = $false
+          try {
+            $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4321/ -TimeoutSec 5
+            Write-Host "OK port 4321 HTTP $($r.StatusCode)"
+            $up = $true
+          } catch [System.Net.WebException] {
+            if ($_.Exception.Response) {
+              $code = [int]$_.Exception.Response.StatusCode
+              Write-Host "OK port 4321 HTTP $code"
+              $up = $true
+            }
+          } catch { }
+
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          if (-not $up) {
+            Write-Error "port 4321 unreachable but process alive — sidecar bound but listener broken"
+            exit 1
+          }
+          Write-Host "smoke pass"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
