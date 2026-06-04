@@ -36,7 +36,7 @@
 下 [latest release](https://github.com/Huangleyang125207/human-ai-gateway/releases/latest):
 
 - **macOS**(Apple Silicon):`Gateway_x.y.z_aarch64.dmg` 拖进 `/Applications` — Apple Developer 签名 + notarized,无 Gatekeeper 警告
-- **Windows**(x64):`Gateway-windows-x64.zip` 解压双击 `Gateway.exe` — **未做代码签名**(DigiCert 没买),首次运行 Windows Defender SmartScreen 会拦,点 _"更多信息 → 仍要运行"_ 即可
+- **Windows**(x64):`Gateway-Setup-x.y.z-x64.exe` 双击装,自动加开始菜单 + 卸载列表 — **未做代码签名**,首次运行 Windows Defender SmartScreen 会拦,点 _"更多信息 → 仍要运行"_ 即可。杀软误报装不上时可下 `Gateway-windows-x64.zip` 解压跑(不依赖 installer)
 
 启动后浏览器自动开,填两个 key:
 
