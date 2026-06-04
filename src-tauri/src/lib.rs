@@ -109,7 +109,14 @@ pub fn run() {
                 .expect("sidecar 'gateway-server' 没找到(跑 build-sidecar.sh)")
                 .env("GATEWAY_NO_OPEN", "1")
                 .env("GATEWAY_PORT", port.to_string());
-            let (mut _rx, child) = sidecar.spawn().expect("spawn sidecar 失败");
+            let (mut rx, child) = sidecar.spawn().expect("spawn sidecar 失败");
+            // 排空 sidecar stdout/stderr — PyInstaller Win bootstrap 写一坨 debug 到
+            // stderr,如果没人 read rx 这个 channel,pipe buffer (Win 64KB) 满了
+            // sidecar 会 block 在 write syscall → uvicorn 永远起不来。
+            // 0.1.7/0.1.8 Win Tauri 5 轮 smoke 卡这条的真因。
+            tauri::async_runtime::spawn(async move {
+                while rx.recv().await.is_some() { /* 丢掉,只为排空 buffer */ }
+            });
             // T6 存 child handle,退出时 kill
             app.manage(Mutex::new(Some(child)));
 

@@ -351,7 +351,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.8"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.9"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -7453,16 +7453,15 @@ app.mount("/", StaticFiles(directory=str(GATEWAY_DIR), html=True), name="gateway
 if __name__ == "__main__":
     import uvicorn
 
-    # sidecar 模式两层坑,无条件接 devnull 一次性根治:
-    # (1) PyInstaller --noconsole stdout/stderr 是 None → uvicorn log formatter
-    #     检 sys.stdout.isatty() 空指针炸(0.1.5 Win 双击崩那条)
-    # (2) Tauri spawn sidecar 默认 stdio=piped 但 Tauri 主进程不 drain 管道 →
-    #     PyInstaller bootstrap 写满 Win 64KB pipe buffer → sidecar 块在 write,
-    #     uvicorn 永远起不来,port-file 不写,端口不 bind(0.1.7 Win Tauri 5 轮挂这)
-    # sidecar log 反正用户机器看不到,debug 走 silent-failure 反馈通道 + 本地
-    # python server.py。失去 prod log 几乎零代价。
-    sys.stdout = open(os.devnull, "w")
-    sys.stderr = open(os.devnull, "w")
+    # PyInstaller --noconsole(Win 双击启动 standalone 路径)stdout/stderr 是 None;
+    # uvicorn default log formatter 检 sys.stdout.isatty() 直接炸(0.1.5 Win 崩那条)。
+    # 给 stdout/stderr 接 devnull,isatty() 返 False(走非彩色路径)。
+    # Tauri sidecar 模式不命中(stdout 是 pipe 不是 None),那条由 Tauri rust 侧
+    # drain rx channel 修(0.1.9 src-tauri/src/lib.rs)。
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
 
     # 默认 4321;GATEWAY_PORT env 可覆盖(测试 / 多实例)
     port = int(os.environ.get("GATEWAY_PORT", "4321"))
