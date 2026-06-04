@@ -909,13 +909,14 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "patch_journal_block",
-            "description": "**整段替换**某时间块 H1 之下的所有内容(到下一个 H1 或 ---)。**用错会丢数据** — 若块里已有 H2 entry,patch 会把它整段吃掉。想给现有块**加新 H2 entry** 用 `insert_journal_block`(会 append 不覆盖)。想给已有 entry 留评论用 `append_journal_comment`。patch 只在「明确要改写整块原内容」时用。格式: `## #tag short-title` 单行 + 散文。",
+            "description": "整段替换某时间块内容。改散文/补内容用。要加新 H2 用 insert_journal_block。要给 entry 留评论用 append_journal_comment。用户明示改标题时传 allow_h2_rename=true。",
             "parameters": {
                 "type": "object",
                 "required": ["time", "new_md"],
                 "properties": {
-                    "time": {"type": "string", "description": "block time like '18:30' (24h, leading zero if < 10). MUST come from [time-block] hint floor, not your own clock-reading."},
-                    "new_md": {"type": "string", "description": "full md content for the block AFTER the # H1 line. Format: single-line `## #tag short-title` then prose. MUST follow § H5 result + significance, NO procedure dump, NO three-layer ## tags / ## 内容 / ## 要点 structure."},
+                    "time": {"type": "string", "description": "块时间 HH:MM,从 [time-block] hint 取"},
+                    "new_md": {"type": "string", "description": "H1 之下整段:`## #tag 标题` + 散文。§ H5 result + significance,无 procedure dump"},
+                    "allow_h2_rename": {"type": "boolean", "description": "用户明示改 H2 标题时传 true,否则默认 false 防误覆盖"},
                 },
             },
         },
@@ -950,15 +951,15 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "insert_journal_block",
-            "description": "在 schedule 加新 H2 条目(AI 写的会自动 stamp @ai,不冲撞 @user 块)。tag 必填;time 不填默认当前半小时;time 已有内容会 append 新 H2。",
+            "description": "加新 H2 条目到时间块。已有内容会 append 新 H2(不覆盖)。AI 调用自动 @ai stamp。",
             "parameters": {
                 "type": "object",
                 "required": ["tag"],
                 "properties": {
-                    "tag": {"type": "string", "description": "条目 tag,不带 #。例 '饮食' '工作' '探索'"},
-                    "title": {"type": "string", "description": "可选标题(短)。例 '吃了肠粉'"},
-                    "time": {"type": "string", "description": "HH:MM。omit 默认用当前半小时(server 兜底)。可任意 0:00-23:59,不必整 30 分"},
-                    "date": {"type": "string", "description": "optional YYYY-MM-DD,omit for today"},
+                    "tag": {"type": "string", "description": "条目 tag,不带 #。例 '饮食' '探索'"},
+                    "title": {"type": "string", "description": "短标题"},
+                    "time": {"type": "string", "description": "HH:MM,omit 默认当前半小时"},
+                    "date": {"type": "string", "description": "YYYY-MM-DD,omit 默认今天"},
                 },
             },
         },
@@ -967,14 +968,14 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "append_journal_comment",
-            "description": "在已存在的时间块 body **末尾 append** 一段评论,**不修改原 H2/原内容**。撞 @user 块时 patch_journal_block 会拒,用这个留'穿线/回看/AI 注'。",
+            "description": "在时间块 body 末尾追加评论,不动原 H2/body。@user 块 patch 会拒,用这个留'AI 注'。",
             "parameters": {
                 "type": "object",
                 "required": ["time", "comment_md"],
                 "properties": {
-                    "time": {"type": "string", "description": "目标时间块 HH:MM"},
-                    "comment_md": {"type": "string", "description": "评论 markdown。建议带 *AI:* 或 callout 前缀让人区分"},
-                    "date": {"type": "string", "description": "optional YYYY-MM-DD,omit for today"},
+                    "time": {"type": "string", "description": "目标块 HH:MM"},
+                    "comment_md": {"type": "string", "description": "评论 markdown,带 *AI:* 前缀让人区分"},
+                    "date": {"type": "string", "description": "YYYY-MM-DD,omit 默认今天"},
                 },
             },
         },
@@ -997,13 +998,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "set_daily_task_image",
-            "description": "为 daily task 配自定义打卡图标(去背景后落到 task_name 的图标位)。task_name 须精确匹配 md 顶部 - [ ] 行(含括号)。",
+            "description": "为 daily task 配打卡图标(去背景)。task_name 精确匹配 md 顶部 - [ ] 行。",
             "parameters": {
                 "type": "object",
                 "required": ["task_name", "attachment_url"],
                 "properties": {
-                    "task_name": {"type": "string", "description": "daily task 名,必须精确匹配 md 顶部 - [ ] 行里的内容(含括号),例如 '鱼油（Swisse）'"},
-                    "attachment_url": {"type": "string", "description": "用户拖图后 server 返的 /attachments/YYYY-MM-DD/xxx 路径"},
+                    "task_name": {"type": "string", "description": "task 名,精确匹配 - [ ] 行(含中文括号),例 '鱼油（Swisse）'"},
+                    "attachment_url": {"type": "string", "description": "/attachments/YYYY-MM-DD/xxx 路径"},
                 },
             },
         },
@@ -1012,14 +1013,14 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "manage_daily_task",
-            "description": "Add / edit / delete a daily-task checklist item in the top section (e.g. supplement checklist). Affects template (future days) AND today's file (immediate).",
+            "description": "Add/edit/del daily-task 顶部 - [ ] 项。影响模板(后续天)+ 今天文件。",
             "parameters": {
                 "type": "object",
                 "required": ["action"],
                 "properties": {
                     "action": {"type": "string", "enum": ["add", "edit", "del"]},
-                    "text": {"type": "string", "description": "new content (for add/edit). NOT including '- [ ] ' prefix."},
-                    "old_text": {"type": "string", "description": "substring to match existing item (for edit/del)"},
+                    "text": {"type": "string", "description": "新内容,不含 '- [ ] '"},
+                    "old_text": {"type": "string", "description": "edit/del 用,substring 匹配老 item"},
                 },
             },
         },
@@ -1028,13 +1029,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "check_daily_task",
-            "description": "标记今天某个 daily task 的打卡状态。task_name 须精确匹配(空格 + 中文括号都要对)。",
+            "description": "勾打卡。task_name 精确匹配(空格 + 中文括号要对)。",
             "parameters": {
                 "type": "object",
                 "required": ["task_name", "checked"],
                 "properties": {
                     "task_name": {"type": "string", "description": "完整 task 名,例 '鱼油（Swisse）'"},
-                    "checked": {"type": "boolean", "description": "true=打卡完成,false=取消打卡"},
+                    "checked": {"type": "boolean", "description": "true=打卡,false=取消"},
                 },
             },
         },
@@ -1309,7 +1310,8 @@ def tool_patch_journal_block(args):
     f = find_today_journal(target)
     if not f:
         return {"error": f"no journal file for {target.strftime('%Y-%m-%d')}"}
-    return _patch_block(f, args["time"], args["new_md"], author="ai")
+    return _patch_block(f, args["time"], args["new_md"], author="ai",
+                        allow_h2_rename=bool(args.get("allow_h2_rename", False)))
 
 def tool_read_today_schedule(args):
     return _journal_for_date(args.get("date"))
@@ -7250,12 +7252,15 @@ async def journal_patch(req: Request):
     # HTTP endpoint = user 自己改 UI → author='user' 可改任何块(含 @ai)
     return _patch_block(f, time_label, new_block_md, author="user")
 
-def _patch_block(f: Path, time_label: str, new_md: str, author: str = "ai") -> dict:
+def _patch_block(f: Path, time_label: str, new_md: str, author: str = "ai",
+                 allow_h2_rename: bool = False) -> dict:
     """Replace the body between `# {time}` and the next `# H1` or `---` boundary.
     new_md should NOT include the H1 line itself — only what comes after it.
 
     author='ai' (默认,最严格) — 撞 @user 块拒绝。author='user' 可改任何块。
     @marker 解析:看时间块内第一个 H2 行的 @user/@ai。无 marker → @user(失败安全)。
+    allow_h2_rename=True:跳过 H2 不匹配的拒,让 AI 显式 rename H2。仅在
+    用户明示要改标题时由 tool caller 传。
     """
     text = f.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -7311,12 +7316,14 @@ def _patch_block(f: Path, time_label: str, new_md: str, author: str = "ai") -> d
 
         if (existing_first_h2 and new_first_h2
                 and existing_first_h2.strip() != "##"
-                and _strip_author(existing_first_h2) != _strip_author(new_first_h2)):
+                and _strip_author(existing_first_h2) != _strip_author(new_first_h2)
+                and not allow_h2_rename):
             return {"error":
                 f"block @ {time_label} 已有 H2:`{existing_first_h2.strip()}`。"
                 f"你的 new_md 第一个 H2 是:`{new_first_h2.strip()}` — 不一样。"
                 f"patch_journal_block 会**整段替换**,原 H2 + body 会被吃掉。"
                 f"如果想给块加新 H2 → 用 insert_journal_block(append,不覆盖)。"
+                f"如果用户明示要改这个 entry 的标题 → 重传带 allow_h2_rename=true。"
                 f"如果真要替换 = 放弃原 entry(数据丢失),先 read_today_schedule 确认要丢什么,"
                 f"再在 new_md 里同时写原 H2 段 + 新 H2 段。"
             }
