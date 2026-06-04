@@ -1,37 +1,107 @@
+<!--
+  每日打卡 widget · 默认带"喝水"作演示行,引导用户 DIY
+  设计:
+    - 喝水是普世打卡(人人都要喝),所以默认放第一行作初始状态
+    - hover "喝水" 行 → tooltip 引导:"上传水杯照片让 AI DIY 你的喝水打卡"
+    - 其他打卡通过 AI 对话添加(add_daily_task 工具会写 vault/daily-tasks.md)
+    - 真实打卡列表渲染在每天 schedule 顶部 — widget 只做 entry point + 视觉示意
+-->
 <style>
-  .widget-supplements { display:flex; align-items:baseline; gap:1.25rem; flex-wrap:wrap; font-size:0.875rem; color:var(--ink-soft); }
-  .widget-supplements .lede {
+  .widget-tasks {
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+    font-size: 0.875rem; color: var(--ink-soft);
+    padding: 0.25rem 0;
+  }
+  .widget-tasks .lede {
     font-variant: small-caps; letter-spacing: 0.32em;
     color: var(--ink-whisper); font-size: 0.7rem;
+    flex-shrink: 0;
   }
-  .widget-supplements .supp { display:inline-flex; align-items:baseline; gap:0.42rem; cursor:pointer; user-select:none; transition:color 0.18s; }
-  .widget-supplements .supp .check {
-    display:inline-block; width:0.7em; height:0.7em;
-    border:1px solid var(--ink-soft); position:relative; top:0.05em;
-    transition: background 0.15s, border-color 0.15s;
+  /* 喝水 default 行 */
+  .widget-tasks .task-water {
+    position: relative;
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    cursor: help;
+    padding: 0.2rem 0.4rem;
+    border-radius: 3px;
+    transition: background 0.15s;
   }
-  .widget-supplements .supp.on .check { background:var(--vermillion); border-color:var(--vermillion); }
-  .widget-supplements .supp.on .check::after {
-    content:""; position:absolute; inset:-1px;
-    border:1px solid var(--vermillion);
-    transform: rotate(8deg) translate(2px, -1px);
-    opacity: 0.55;
+  .widget-tasks .task-water:hover { background: rgba(0, 0, 0, 0.04); }
+  .widget-tasks .water-icon { font-size: 1em; }
+  .widget-tasks .cups { display: inline-flex; gap: 0.18rem; }
+  .widget-tasks .cup {
+    width: 8px; height: 11px;
+    border: 1px solid var(--ink-soft);
+    border-radius: 1px 1px 2px 2px;
+    position: relative;
+    background: transparent;
   }
-  .widget-supplements .supp:hover { color: var(--ink); }
-  .widget-supplements .supp input { display:none; }
-  .widget-supplements .streak {
-    margin-left:auto; font-variant:small-caps; letter-spacing:0.18em;
-    font-size:0.74rem; color:var(--ink-whisper);
+  .widget-tasks .cup.on {
+    background: var(--vermillion, #a3392b);
+    border-color: var(--vermillion, #a3392b);
   }
-  .widget-supplements .streak b { color:var(--vermillion); font-weight:600; font-size:0.95rem; margin-right:0.4em; font-variant:normal; }
-  .widget-supplements .streak .dots { display:inline-block; margin-left:0.6em; color:var(--ink-soft); font-family:'Times New Roman',serif; letter-spacing:0.1em; }
+  /* tooltip on hover */
+  .widget-tasks .task-water .tip {
+    position: absolute;
+    bottom: calc(100% + 6px); left: 0;
+    background: var(--ink, #222); color: var(--paper, #f8f4ed);
+    padding: 0.55rem 0.75rem;
+    border-radius: 3px;
+    font-size: 0.74rem; line-height: 1.5;
+    width: max-content; max-width: 280px;
+    white-space: normal;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.18s;
+    z-index: 100;
+    font-variant: normal; letter-spacing: 0;
+    text-transform: none;
+  }
+  .widget-tasks .task-water .tip code {
+    font-family: ui-monospace, Menlo, monospace;
+    background: rgba(255,255,255,0.12);
+    padding: 0.1em 0.35em;
+    border-radius: 2px;
+    color: inherit;
+  }
+  .widget-tasks .task-water:hover .tip { opacity: 1; }
+
+  /* 其他打卡引导 */
+  .widget-tasks .hint {
+    color: var(--ink-whisper);
+    font-size: 0.78rem;
+  }
+  .widget-tasks .hint code {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.92em;
+    background: rgba(0, 0, 0, 0.04);
+    padding: 0.1em 0.4em;
+    border-radius: 2px;
+    color: var(--ink-soft);
+  }
 </style>
 
-<div class="widget-supplements">
-  <span class="lede">补剂</span>
-  <label class="supp on"><input type="checkbox" checked data-name="鱼油"> 鱼油</label>
-  <label class="supp on"><input type="checkbox" checked data-name="Mg-LT"> Mg-LT</label>
-  <label class="supp on"><input type="checkbox" checked data-name="KSM-66"> KSM-66</label>
-  <label class="supp on"><input type="checkbox" checked data-name="D3+K2"> D3+K2</label>
-  <span class="streak">streak <b>10d</b><span class="dots">●●●●●●●●●●</span></span>
+<div class="widget-tasks">
+  <span class="lede">今日打卡</span>
+
+  <span class="task-water" data-tip>
+    <span class="water-icon">💧</span>
+    <span>喝水</span>
+    <span class="cups">
+      <span class="cup"></span>
+      <span class="cup"></span>
+      <span class="cup"></span>
+      <span class="cup"></span>
+      <span class="cup"></span>
+      <span class="cup"></span>
+      <span class="cup"></span>
+      <span class="cup"></span>
+    </span>
+    <span class="tip">
+      想用你自己的水杯?跟 AI 说 <code>这是我的水杯</code> 并上传照片,AI 会帮你 DIY 喝水打卡的视觉。
+    </span>
+  </span>
+
+  <span class="hint">
+    其他打卡项:跟 AI 说 <code>加个"XX"打卡</code>
+  </span>
 </div>

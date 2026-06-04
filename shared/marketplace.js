@@ -112,27 +112,11 @@
       <section class="setup-section">
         <h3>③ 云端数据收集</h3>
         <div class="setup-howto setup-howto-secondary">
-          Gateway 默认收集两类匿名诊断数据,用于改进产品质量。完整政策见 <a href="/PRIVACY.md" target="_blank" rel="noopener">PRIVACY.md</a>。
+          同意隐私协议时默认开启两类匿名诊断(错误诊断 + 每日心跳),帮我们改进软件。完整说明见 <a href="/PRIVACY.md" target="_blank" rel="noopener">PRIVACY.md</a>。
           <br><br>
-          <label class="consent-check" style="margin-bottom:8px;">
-            <input type="checkbox" id="tm-failures" ${telemetry.failures ? 'checked' : ''}>
-            <span class="consent-title">错误诊断</span>
-          </label>
-          <div class="consent-desc" style="margin-bottom:12px;">
-            <b>收集</b>:API 调用 / 识图 / 抠图 / 搜索 失败时的错误码、调用元数据(模型标识、文件尺寸、网络层标记)。
-            <br><b>不收集</b>:日记内容、对话记录、文件名、附件、密钥。
-          </div>
-
-          <label class="consent-check" style="margin-bottom:8px;">
-            <input type="checkbox" id="tm-heartbeat" ${telemetry.heartbeat ? 'checked' : ''}>
-            <span class="consent-title">使用统计(每日心跳)</span>
-          </label>
-          <div class="consent-desc" style="margin-bottom:12px;">
-            <b>收集</b>:应用版本、操作系统平台、UTC 时区偏移,每 24 小时一次。
-            <br><b>不收集</b>:任何 vault 数据或可关联到个人身份的信息。
-          </div>
 
           <div class="consent-meta" style="margin:12px 0;">
+            <div><span class="consent-meta-k">当前状态</span>${(telemetry.failures || telemetry.heartbeat) ? '已同意,正常上报' : '未同意,不上报'}</div>
             <div><span class="consent-meta-k">匿名标识</span><code id="tm-cid">${telemetry.client_id || '—'}</code>
               <button class="km-test" style="margin-left:8px;font-size:11px;" id="tm-reset">重置</button>
             </div>
@@ -140,8 +124,9 @@
             <div><span class="consent-meta-k">接收端</span>腾讯云国内服务器(自托管)</div>
           </div>
 
-          <button class="key-add-btn" id="tm-save">保存</button>
-          <span class="tm-saved-msg" id="tm-saved" style="margin-left:10px;color:var(--ink-3);font-size:12px;display:none;">已保存</span>
+          <button class="key-add-btn" id="tm-revoke">撤回隐私同意</button>
+          <button class="key-add-btn" id="tm-reagree" style="margin-left:8px;">重新同意</button>
+          <span class="tm-saved-msg" id="tm-saved" style="margin-left:10px;color:var(--ink-3);font-size:12px;display:none;">已更新</span>
         </div>
       </section>
     `;
@@ -152,17 +137,31 @@
     document.getElementById("corpusOpenConsent").addEventListener("click", () => {
       window.open("/consent.html", "_blank", "noopener");
     });
-    document.getElementById("tm-save").addEventListener("click", async () => {
-      const failures = document.getElementById("tm-failures").checked;
-      const heartbeat = document.getElementById("tm-heartbeat").checked;
+    // 撤回隐私同意 = 关掉两类上报 + 清 localStorage 同意标记 → 下次启动重弹 modal
+    document.getElementById("tm-revoke").addEventListener("click", async () => {
       await fetch("/api/telemetry/consent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ failures, heartbeat }),
+        body: JSON.stringify({ failures: false, heartbeat: false }),
       });
+      localStorage.removeItem("gateway.consent.agreed.v2");
       const msg = document.getElementById("tm-saved");
       msg.style.display = "inline";
-      setTimeout(() => { msg.style.display = "none"; }, 2000);
+      msg.textContent = "已撤回 · 下次启动会重新询问";
+      setTimeout(() => { msg.style.display = "none"; }, 2500);
+    });
+    // 重新同意 = 直接开两类(不重弹 modal,设置里一键即可)
+    document.getElementById("tm-reagree").addEventListener("click", async () => {
+      await fetch("/api/telemetry/consent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ failures: true, heartbeat: true }),
+      });
+      localStorage.setItem("gateway.consent.agreed.v2", "1");
+      const msg = document.getElementById("tm-saved");
+      msg.style.display = "inline";
+      msg.textContent = "已同意 · 两类上报开启";
+      setTimeout(() => { msg.style.display = "none"; }, 2500);
     });
     document.getElementById("tm-reset").addEventListener("click", async () => {
       if (!confirm("重置 client_id 后,云上报会把你看作新设备(对你没任何影响,只是 DAU 重算)。确定?")) return;

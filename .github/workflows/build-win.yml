@@ -145,18 +145,24 @@ jobs:
           if (-not $setup) { Write-Error "NSIS setup.exe not found"; exit 1 }
           Write-Host "smoke target: $($setup.FullName)"
 
-          # NSIS silent install:/S 标志 (Tauri 默认 NSIS 模板 mode = perMachine,但本 conf 设
-          # perUser 装到 %LOCALAPPDATA%\Programs\Gateway)
+          # NSIS silent install:/S 标志(Tauri 2 currentUser 模式装到 %LOCALAPPDATA%\<productName>)
           Start-Process $setup.FullName -ArgumentList '/S' -Wait
-          $candidates = @(
-            "$env:LOCALAPPDATA\Gateway\Gateway.exe",
-            "$env:LOCALAPPDATA\Programs\Gateway\Gateway.exe",
-            "$env:ProgramFiles\Gateway\Gateway.exe"
-          )
-          $installed = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          # Tauri NSIS 不同版本/配置装路径会变,递归搜 Gateway.exe 兜底
+          $searchRoots = @("$env:LOCALAPPDATA", "$env:ProgramFiles", "${env:ProgramFiles(x86)}")
+          $installed = $null
+          foreach ($root in $searchRoots) {
+            if (-not (Test-Path $root)) { continue }
+            $found = Get-ChildItem -Path $root -Recurse -Filter Gateway.exe -ErrorAction SilentlyContinue |
+                     Where-Object { $_.FullName -notlike "*\setup\*" -and $_.FullName -notlike "*-setup*" } |
+                     Select-Object -First 1
+            if ($found) { $installed = $found.FullName; break }
+          }
           if (-not $installed) {
-            Write-Error "install path missing — tried: $($candidates -join ', ')"
-            Get-ChildItem "$env:LOCALAPPDATA\Programs" -ErrorAction SilentlyContinue
+            Write-Error "Gateway.exe not found after silent install — /S silent flag 可能不被 Tauri NSIS 支持"
+            Write-Host "=== LOCALAPPDATA top 2 levels ==="
+            Get-ChildItem "$env:LOCALAPPDATA" -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+              Select-Object FullName | Format-Table -AutoSize -HideTableHeaders | Out-String -Width 200 | Write-Host
             exit 1
           }
           Write-Host "OK installed at $installed"

@@ -3175,6 +3175,10 @@ async def chat(req: Request):
             f"      3. **什么都不调**,等用户答\n"
             f"\n"
             f"  特殊类型分流(覆盖上面三 path):\n"
+            f"    用户消息含'水杯/我的杯/喝水图标/这是我的水杯/打卡水杯' → DIY 水杯打卡图,一步:\n"
+            f"      set_water_cup_image(attachment_url='...') — 直接调,不要先调 vision_classify。\n"
+            f"      调完一句话回:'水杯设上了,8 杯水打卡区会用你这只杯' 之类。\n"
+            f"\n"
             f"    kind=supplement → 这是补剂打卡,三步连做(别只设图不勾):\n"
             f"      ① read_today_schedule(date='{view_date}') 拿 daily task 列表,按描述/品牌匹配是哪个;\n"
             f"         匹配不出来才列出来反问用户挑哪个\n"
@@ -3853,10 +3857,35 @@ def journal_today(date: str = None):
 def journal_days():
     return {"days": _list_journal_files()}
 
-_DAY_ONE_STR = "2026-05-03"  # 5.3 = 第一天
+# "第N天" baseline:新用户用自己 vault 里最早的 schedule 日为 day-one,
+# 没有 schedule 文件就是当天 = 第一天。葱鸭自己的 vault 最早是 26.5.3,所以
+# 他的 day-one 仍是 5.3,backward compat;陌生新用户装机当天就是第一天。
+# 也可以在 .gateway-config.json 里写 "vault_day_one": "YYYY-MM-DD" 显式覆盖。
 _DAY_CN = ["零","一","二","三","四","五","六","七","八","九","十",
            "十一","十二","十三","十四","十五","十六","十七","十八","十九","二十",
            "二十一","二十二","二十三","二十四","二十五","二十六","二十七","二十八","二十九","三十"]
+
+
+def _get_day_one(today_iso: str) -> datetime:
+    """动态算 day-one。优先级:config 显式 > vault 最早 schedule > 今天。"""
+    cfg = load_config() or {}
+    explicit = cfg.get("vault_day_one")
+    if explicit:
+        try:
+            return datetime.strptime(explicit, "%Y-%m-%d")
+        except ValueError:
+            pass  # bad format → 走 fallback
+    # 扫 vault 最早 schedule 文件
+    try:
+        days = _list_journal_files()
+        if days:
+            earliest_iso = days[0].get("date", today_iso)
+            return datetime.strptime(earliest_iso, "%Y-%m-%d")
+    except Exception:
+        pass
+    # 兜底:今天就是第一天
+    return datetime.strptime(today_iso, "%Y-%m-%d")
+
 
 def _new_day_create(date_iso: str) -> dict:
     """Python 原生 new-day(替代 scripts/new-day.sh;frozen 模式下脚本不在,改这里)。
@@ -3865,7 +3894,7 @@ def _new_day_create(date_iso: str) -> dict:
         target = datetime.strptime(date_iso, "%Y-%m-%d")
     except ValueError:
         return {"ok": False, "error": f"bad date: {date_iso}"}
-    day_one = datetime.strptime(_DAY_ONE_STR, "%Y-%m-%d")
+    day_one = _get_day_one(date_iso)
     day_num = (target - day_one).days + 1
     day_cn = _DAY_CN[day_num] if 0 <= day_num <= 30 else str(day_num)
     yy = target.strftime("%y")
@@ -3889,12 +3918,10 @@ def _new_day_create(date_iso: str) -> dict:
         top_section = "\n".join(top).rstrip()
     else:
         top_section = (
-            "# 每日补剂打卡\n\n"
-            "- [ ] 喝水\n"
-            "- [ ] 鱼油（Swisse）\n"
-            "- [ ] 苏糖酸镁（Life Extension）\n"
-            "- [ ] 南非醉茄（KSM-66 / Sensoril 二选一）\n"
-            "- [ ] 维生素 D3+K2（gloryfeel）"
+            "# 每日打卡\n\n"
+            "<!-- 在 vault/daily-tasks.md 加你自己的 - [ ] 项目(喝水 / 运动 / 阅读 / 冥想 / 补剂...) -->\n"
+            "<!-- 不想要这段?设置 → 插件市场 → 关闭每日打卡 -->\n\n"
+            "- [ ] (添加你的第一个打卡项)"
         )
     # 时间格(7:30 - 23:00,半小时一块,7:00 没有)
     parts = [top_section, "\n---"]
