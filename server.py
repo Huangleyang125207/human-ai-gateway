@@ -351,7 +351,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.5"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.6"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -7418,6 +7418,17 @@ app.mount("/", StaticFiles(directory=str(GATEWAY_DIR), html=True), name="gateway
 
 if __name__ == "__main__":
     import uvicorn
+
+    # PyInstaller --noconsole(Win 双击启动)stdout/stderr 是 None;
+    # uvicorn default log formatter 检 sys.stdout.isatty() 直接炸:
+    # `AttributeError: 'NoneType' object has no attribute 'isatty'`。
+    # 给 stdout/stderr 接 devnull,isatty() 返 False(走非彩色路径)。
+    # Mac 走 Tauri 父进程喂 pipe,不命中;Win Inno Setup 装机后双击才会撞,0.1.5 修。
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
+
     # 默认 4321;GATEWAY_PORT env 可覆盖(测试 / 多实例)
     port = int(os.environ.get("GATEWAY_PORT", "4321"))
     # 写真实端口到已知文件,给外部 launchd cron 发现用(eval 21:30 / pulse-refresh 21:00)。
