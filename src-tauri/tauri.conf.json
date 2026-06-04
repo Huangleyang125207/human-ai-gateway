@@ -35,11 +35,10 @@
     },
     "windows": {
       "webviewInstallMode": {
-        "type": "downloadBootstrapper",
-        "silent": true
+        "type": "downloadBootstrapper"
       },
       "nsis": {
-        "installMode": "perUser",
+        "installMode": "currentUser",
         "languages": ["English", "SimpChinese"],
         "displayLanguageSelector": false
       }

@@ -149,8 +149,8 @@ jobs:
           # perUser 装到 %LOCALAPPDATA%\Programs\Gateway)
           Start-Process $setup.FullName -ArgumentList '/S' -Wait
           $candidates = @(
-            "$env:LOCALAPPDATA\Programs\Gateway\Gateway.exe",
             "$env:LOCALAPPDATA\Gateway\Gateway.exe",
+            "$env:LOCALAPPDATA\Programs\Gateway\Gateway.exe",
             "$env:ProgramFiles\Gateway\Gateway.exe"
           )
           $installed = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
