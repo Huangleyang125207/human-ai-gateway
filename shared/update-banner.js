@@ -99,10 +99,14 @@
           // sha256 一致 → marker only:passive 通知,内容没变
           window.gatewayToast?.(n.message);
           dismissKinds.push("vault-schema-bumped");
-        } else if (n.kind === "vault-schema-migration-proposed") {
-          // 不一致 → LLM 重写产物落 .proposed.md:提示 user review,真源未动
+        } else if (n.kind === "vault-schema-migrated") {
+          // auto-merge:LLM 重写后直接覆盖真源,5 份 bak 兜底
           window.gatewayToast?.(n.message);
-          dismissKinds.push("vault-schema-migration-proposed");
+          dismissKinds.push("vault-schema-migrated");
+        } else if (n.kind === "vault-schema-migration-skip-external-edit") {
+          // 锁内重读发现 vault 被外部编辑,跳过 merge 保留手编
+          window.gatewayToast?.(n.message);
+          dismissKinds.push("vault-schema-migration-skip-external-edit");
         } else if (n.kind === "vault-schema-migration-failed") {
           window.gatewayToast?.(n.message);
           dismissKinds.push("vault-schema-migration-failed");

@@ -351,7 +351,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.15"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.16"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -6299,27 +6299,11 @@ async def _run_schema_migration_if_needed():
                 attempts_changed = True
                 continue
 
-        # 路径 B(数据安全 #6 + R5 R6):不一致 → LLM 重写产物落 .proposed.md
-        # R5 修双 suffix:`USER_PULSE.proposed.md` 而不是 `USER_PULSE.md.proposed.md`
-        proposed_path = vault_path.with_name(vault_path.stem + ".proposed" + vault_path.suffix)
-
-        # R6 写前 guard:proposed 已存在 → 它是 user 上次未 mv 的 review 中提案,
-        # 别覆盖。改用 rotate=True + 同 schema-version 就 skip。
-        if proposed_path.exists():
-            try:
-                existing = proposed_path.read_text(encoding="utf-8")
-                existing_v = _get_schema_version(existing)
-                if existing_v == bundle_v:
-                    log.info(f"schema proposed {key}: 已存在同版本提案,跳过(防覆盖用户 review)")
-                    _push_notification(
-                        "vault-schema-migration-proposed",
-                        f"vault {cfg['bundled_name']} schema v{bundle_v} 提案已在 {proposed_path.name}",
-                        {"target": key, "old_version": vault_v, "new_version": bundle_v,
-                         "proposed_path": str(proposed_path), "kind": "reminder"},
-                    )
-                    continue
-            except Exception:
-                pass
+        # 路径 B(auto-merge):不一致 → LLM 重写直接覆盖 vault 真源
+        # user 6.5 23:00 拍 auto-merge:相信 LLM + 5 份 rotate backup + vault_git
+        # audit 可回滚。validator 长度 ≥ 70% / 必含 ts / 必含 schema-version 三条
+        # 拦住明显的 LLM 翻车。
+        # 沿用 v0.1.13 设计初心:user 0 操作,schema 升级自动跟上。
 
         # attempts gate 单独看 llm 子 key(R7)
         a_llm = attempts.get(llm_key, {})
@@ -6342,18 +6326,39 @@ async def _run_schema_migration_if_needed():
             client = get_client(profile)
             if client is None:
                 raise Exception("deepseek client 起不来")
-            # to_thread 包同步 LLM call,async startup hook 不阻塞 event loop(#7)
             new_text = await asyncio.to_thread(_migration_llm_call, client, profile, migration_prompt)
             ok_msg = _validate_migration_output(new_text, vault_text, bundle_v)
             if ok_msg:
                 raise Exception(ok_msg)
-            # rotate=True(R6):proposed 存在 → bak.1 保留上次,新写覆盖
-            _safe_write_text(proposed_path, new_text, rotate=True)
+            # 直接覆盖 vault 真源 — rotate=True 保 5 份 .bak.{1..5} 兜底
+            with _get_evolve_lock(cfg["evolve_target"]):
+                # 锁内重读 sha256,user 在 LLM 跑期间手编了就跳过(防覆盖手编)
+                current = vault_path.read_text(encoding="utf-8")
+                import hashlib as _h_in
+                if _h_in.sha256(current.encode("utf-8")).hexdigest() != vault_hash:
+                    log.warning(f"schema migration {key}: 锁内 vault 已改,跳过本次 merge")
+                    _push_notification(
+                        "vault-schema-migration-skip-external-edit",
+                        f"vault {cfg['bundled_name']} 升级期间被外部编辑,跳过 merge 保留你的手编(下次启动再试)",
+                        {"target": key, "old_version": vault_v, "new_version": bundle_v},
+                    )
+                    continue
+                _safe_write_text(vault_path, new_text, rotate=True)
+                try:
+                    if vault_path.resolve().is_relative_to(VAULT_DIR.resolve()):
+                        vault_git.commit_after_write(
+                            VAULT_DIR,
+                            f"schema migrate {cfg['bundled_name']} v{vault_v}→v{bundle_v} (LLM auto-merge)",
+                            author="ai",
+                            paths=[vault_path],
+                        )
+                except Exception:
+                    pass
             _push_notification(
-                "vault-schema-migration-proposed",
-                f"vault {cfg['bundled_name']} 有 schema v{vault_v}→v{bundle_v} 迁移提案,review {proposed_path.name} 后用",
+                "vault-schema-migrated",
+                f"vault {cfg['bundled_name']} 已自动升级到 schema v{bundle_v}(LLM 按新结构重组,5 份 bak 兜底)",
                 {"target": key, "old_version": vault_v, "new_version": bundle_v,
-                 "proposed_path": str(proposed_path)},
+                 "old_chars": len(vault_text), "new_chars": len(new_text)},
             )
             attempts.pop(llm_key, None)
             attempts_changed = True
@@ -6366,7 +6371,7 @@ async def _run_schema_migration_if_needed():
             attempts_changed = True
             _push_notification(
                 "vault-schema-migration-failed",
-                f"vault {cfg['bundled_name']} 升级提案生成失败(已重试 {a_llm['count']} 次,vault 真源未动)",
+                f"vault {cfg['bundled_name']} 自动升级失败(已重试 {a_llm['count']} 次,真源未动)",
                 {"target": key, "error": str(e), "attempts": a_llm["count"]},
             )
 
@@ -6723,6 +6728,55 @@ async def pulse_agent_context_update(req: Request):
     if not conversation:
         raise HTTPException(400, "需要 conversation")
     return await asyncio.to_thread(_self_evolve_run, "agent_context", conversation)
+
+
+# Compact 摘要 — 防 thread 清空后 AI 失忆冷启
+_COMPACT_SUMMARY_PROMPT = """这是一段刚被压进 md 的对话。
+请用 200 字以内中文写一个摘要,给后续对话延续上下文,**只写关键决策 / 待办 / 当下话题**,
+不写流程细节、不复述每句话、不带工具名。读者是这个对话的下一回合,不是外人。
+
+对话原文:
+═══════════════════════════════════════════
+{conversation}
+═══════════════════════════════════════════
+
+返一段散文,不带标题,不带 ``` 包裹。"""
+
+
+def _compact_summary_run(conversation: str) -> str:
+    """同步 LLM call,给 to_thread 包。返摘要文本。"""
+    profile = get_profile("deepseek-v4-flash") or get_profile("deepseek-v4-pro") or get_profile()
+    if not profile:
+        return ""
+    client = get_client(profile)
+    if client is None:
+        return ""
+    prompt = _COMPACT_SUMMARY_PROMPT.format(conversation=conversation)
+    try:
+        resp = client.chat.completions.create(
+            model=profile.get("model", "deepseek-v4-flash"),
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
+            temperature=0.3,
+            timeout=60,
+        )
+        return (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        log.warning(f"compact summary 失败: {e}")
+        return ""
+
+
+@app.post("/api/pulse/compact-summary")
+async def pulse_compact_summary(req: Request):
+    """前端 compact 全成功后调,产 200 字摘要塞回 thread 开头,
+    保留最后 5 轮 + 摘要 → 下一轮对话有上下文,不冷启。
+    用 flash 模型 ~10s 出。失败返空,前端忽略。"""
+    body = await req.json()
+    conversation = (body.get("conversation") or "").strip()
+    if not conversation:
+        return {"ok": True, "summary": ""}
+    summary = await asyncio.to_thread(_compact_summary_run, conversation)
+    return {"ok": True, "summary": summary}
 
 
 @app.post("/api/pulse/refresh-mirror")

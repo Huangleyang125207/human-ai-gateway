@@ -125,23 +125,52 @@
 
     const ok_count = results.filter(r => r.ok).length;
     if (ok_count === targets.length) {
-      // 全成功 — 只清 cutoff 内的旧消息(#12),保留 LLM 跑期间新进来的
+      // 全成功 — 让 server LLM 产 200 字 summary,清 thread 同时保留最后 5 轮 + summary
+      // 防 AI 突然失忆(用户视角:刚整理完发新消息,AI 还有上下文不冷启)
+      let summary = "";
+      try {
+        const r = await fetch("/api/pulse/compact-summary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversation }),
+        });
+        if (r.ok) {
+          const j = await r.json();
+          summary = (j.summary || "").trim();
+        }
+      } catch (e) {
+        console.warn("[compact-ring] summary fetch fail (skip)", e);
+      }
+
       try {
         const arrNow = JSON.parse(localStorage.getItem(THREAD_KEY) || "[]");
-        // 保留 cutoff 之后的新消息
-        const kept = arrNow.slice(cutoffIndex);
-        if (kept.length === 0) {
+        // 保留 cutoff 之后的新消息(LLM 跑期间用户发的)
+        const newAfterCutoff = arrNow.slice(cutoffIndex);
+        // 旧消息保留最后 5 条(cutoffIndex 之前的最后 5 条)
+        const lastFromOld = arrSnapshot.slice(Math.max(0, cutoffIndex - 5));
+        // 组合:[summary 占位] + 最后 5 轮旧 + 新消息
+        const composed = [];
+        if (summary) {
+          composed.push({
+            role: "assistant",
+            content: `_(整理摘要)_\n\n${summary}`,
+            ts: new Date(+new Date()).toISOString().replace("Z", "+08:00"),
+            _isCompactSummary: true,
+          });
+        }
+        composed.push(...lastFromOld);
+        composed.push(...newAfterCutoff);
+
+        if (composed.length === 0) {
           window.gateway?.thread?.clear?.();
         } else {
-          // 让 thread.js 接管:直接覆写 localStorage 然后 reload(简陋,但下次刷新就对)
-          localStorage.setItem(THREAD_KEY, JSON.stringify(kept));
-          // 触发 thread.js 重读(refresh 的 hook 在 storage event,但同窗 storage 事件不触发)
+          localStorage.setItem(THREAD_KEY, JSON.stringify(composed));
           window.dispatchEvent(new StorageEvent("storage", { key: THREAD_KEY }));
         }
       } catch {}
-      writeFailCount(0);  // 清失败计数
+      writeFailCount(0);
       update();
-      window.gatewayToast?.(`整理完成 — 3 份 md 已更新,旧对话已重置。`);
+      window.gatewayToast?.(`整理完成 — 3 份 md 已更新,旧对话压成摘要 + 保留最后 5 轮。`);
     } else if (ok_count > 0) {
       const failed = results.filter(r => !r.ok).map(r => `${r.name}(${r.status || r.error || "?"})`);
       if (opts.auto) {
