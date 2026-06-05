@@ -63,6 +63,7 @@ jobs:
         run: |
           pyinstaller ^
             --name gateway-server ^
+            --onefile ^
             --noconsole ^
             --noconfirm ^
             --distpath dist-sidecar ^
@@ -105,7 +106,11 @@ jobs:
             --hidden-import rembg ^
             server.py
           mkdir src-tauri\binaries 2>nul
-          copy dist-sidecar\gateway-server\gateway-server.exe src-tauri\binaries\gateway-server-x86_64-pc-windows-msvc.exe
+          REM --onefile 产 dist-sidecar\gateway-server.exe (单文件,自带 _internal),
+          REM 而非 dist-sidecar\gateway-server\ 文件夹 + 散文件。Tauri externalBin
+          REM 要单文件;onedir 模式 _internal/ 散文件 copy 不齐 sidecar 会静默崩
+          REM (0.1.7-0.1.9 Win Tauri 6 轮挂这,根因)。
+          copy dist-sidecar\gateway-server.exe src-tauri\binaries\gateway-server-x86_64-pc-windows-msvc.exe
           dir src-tauri\binaries
 
       - name: Tauri build (NSIS installer + updater)
