@@ -5,9 +5,19 @@
   "windows": [
     "main"
   ],
+  "remote": {
+    "urls": [
+      "http://localhost:*",
+      "http://127.0.0.1:*"
+    ]
+  },
   "permissions": [
     "core:default",
+    "core:webview:default",
+    "core:window:default",
     "updater:default",
-    "process:default"
+    "process:default",
+    "process:allow-restart",
+    "process:allow-exit"
   ]
 }

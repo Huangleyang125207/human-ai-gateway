@@ -351,7 +351,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.13"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.14"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -707,7 +707,8 @@ def load_protocol(name: str, model_id: str = None) -> str:
 import os as _os
 _USER_PULSE_PATH = Path(_os.environ.get("GATEWAY_USER_PULSE_PATH", "/Users/claudecodedezhuanshumac/agents创作平台/agents/human-ai-schedule/USER_PULSE.md"))
 _MEMORY_DIR = Path(_os.environ.get("GATEWAY_MEMORY_DIR", "/Users/claudecodedezhuanshumac/.claude/projects/-Users-claudecodedezhuanshumac-agents----/memory"))
-_PROJECT_PULSE_PATH = Path("/Users/claudecodedezhuanshumac/agents创作平台/agents/human-ai-schedule/PULSE.md")
+# 项目 PULSE 默认 vault 旁;开发者机器 env 指我个人 path(#20:陌生用户没这条 path,默认 vault 内)
+_PROJECT_PULSE_PATH = Path(_os.environ.get("GATEWAY_PROJECT_PULSE_PATH", str(VAULT_DIR / "PROJECT_PULSE.md")))
 _AGENT_CONTEXT_PATH = VAULT_DIR / "AGENT_CONTEXT.md"
 _USER_CTX_CACHE: dict = {"sig": None, "content": ""}
 
@@ -2528,6 +2529,7 @@ async def _startup_vault_reference_and_migration():
     """启动时:
     ① 确保 vault 里 reference 文件存在,缺则从 bundle 拷(byte-equal 不动已有)
     ② bundle schema-version 比 vault 高 → 后台 async LLM 重组 vault 文件
+    ③ Rust updater 上次留下的 pending 通知(sidecar 没起来时落的)→ 自补
     """
     try:
         _ensure_vault_reference_files()
@@ -2535,6 +2537,32 @@ async def _startup_vault_reference_and_migration():
         log.warning(f"_ensure_vault_reference_files: {e}")
     # 迁移走 async background,LLM call 不阻塞 startup
     asyncio.create_task(_run_schema_migration_if_needed())
+    # 接 Rust updater 落的 pending(review #18)
+    try:
+        _consume_updater_pending()
+    except Exception as e:
+        log.warning(f"_consume_updater_pending: {e}")
+
+
+def _consume_updater_pending():
+    """Rust updater 在 sidecar 没起来时落 ~/.human-ai/.updater-pending.json。
+    sidecar 启动时读它 → push notification → 消费后删文件。
+    """
+    pending = Path.home() / ".human-ai" / ".updater-pending.json"
+    if not pending.exists():
+        return
+    try:
+        data = json.loads(pending.read_text(encoding="utf-8"))
+        version = data.get("version") or "新版"
+        _push_notification(
+            "updater-installed",
+            f"Gateway {version} 已下载,重启 app 生效",
+            {"version": version, "source": "pending-file"},
+        )
+        pending.unlink()
+        log.info(f"消费 updater pending 文件 -> notification: v{version}")
+    except Exception as e:
+        log.warning(f"读 updater pending 失败: {e}")
 
 async def _auto_create_loop():
     while True:
@@ -6076,12 +6104,15 @@ def _bundled_reference_dir() -> Path:
 
 
 def _ensure_vault_reference_files() -> dict:
-    """startup 拷贝 reference 进 vault — 缺才补,已存在一字节不动(用户数据安全)。"""
+    """startup 拷贝 reference 进 vault — 缺才补,已存在一字节不动(用户数据安全)。
+    新拷的文件走 vault_git.commit_after_write(#17)留 audit chain。
+    """
     bundle_dir = _bundled_reference_dir()
     if not bundle_dir.is_dir():
         return {"skipped": "bundle reference dir 不在"}
     VAULT_DIR.mkdir(parents=True, exist_ok=True)
     result = {}
+    newly_copied: list[Path] = []
     for key, cfg in _VAULT_REFERENCE_TARGETS.items():
         dst = cfg["vault_path"]()
         if dst.exists():
@@ -6092,34 +6123,92 @@ def _ensure_vault_reference_files() -> dict:
             result[key] = "no bundled src"
             continue
         try:
-            dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+            # atomic write,防 startup 中途崩留半文件
+            _safe_write_text(dst, src.read_text(encoding="utf-8"), rotate=False)
             result[key] = f"copied to {dst}"
+            newly_copied.append(dst)
         except Exception as e:
             result[key] = f"copy fail: {e}"
+    # 批量 vault_git commit
+    if newly_copied:
+        try:
+            vault_git.commit_after_write(
+                VAULT_DIR,
+                f"reference bootstrap: {', '.join(p.name for p in newly_copied)}",
+                author="system",
+                paths=newly_copied,
+            )
+        except Exception as e:
+            log.warning(f"vault_git commit reference 失败: {e}")
+        _push_notification(
+            "vault-reference-bootstrapped",
+            f"vault 已落地 {len(newly_copied)} 份起点 reference",
+            {"files": [p.name for p in newly_copied]},
+        )
     return result
 
 
 # Pending notifications(给前端 banner 用)— 自动更新 + schema 迁移共用
 _PENDING_NOTIFICATIONS: list[dict] = []
+_NOTIF_LOCK = threading.Lock()  # async event loop ↔ threadpool 边界(#24)
 
 def _push_notification(kind: str, message: str, payload: dict | None = None):
     """前端 30s poll /api/notifications,见 kind 后自决定 dismiss。"""
     n = {"kind": kind, "message": message, "payload": payload or {}, "ts": datetime.now().isoformat()}
-    _PENDING_NOTIFICATIONS.append(n)
-    # 上限 20 条防泄漏
-    if len(_PENDING_NOTIFICATIONS) > 20:
-        del _PENDING_NOTIFICATIONS[0:len(_PENDING_NOTIFICATIONS)-20]
+    with _NOTIF_LOCK:
+        _PENDING_NOTIFICATIONS.append(n)
+        # 上限 20 条防泄漏
+        if len(_PENDING_NOTIFICATIONS) > 20:
+            del _PENDING_NOTIFICATIONS[0:len(_PENDING_NOTIFICATIONS)-20]
+
+
+# Schema migration attempts 记录(防 #19 LLM call 死循环烧 token)
+# 文件落 APP_STATE_DIR/data/.schema-migration-attempts.json
+def _migration_attempts_path() -> Path:
+    return APP_STATE_DIR / "data" / ".schema-migration-attempts.json"
+
+
+def _read_migration_attempts() -> dict:
+    p = _migration_attempts_path()
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _write_migration_attempts(data: dict):
+    p = _migration_attempts_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        _safe_write_text(p, json.dumps(data, indent=2, ensure_ascii=False))
+    except Exception as e:
+        log.warning(f"write migration attempts 失败: {e}")
 
 
 async def _run_schema_migration_if_needed():
-    """async 后台跑:bundle schema-version > vault 时,LLM 重组 vault 文件按新 reference 结构。
-    daily-tasks / 标签聚合 schema bump 只补文件(用户自己后续手改),AGENT_CONTEXT 走 LLM 迁移。"""
+    """async 后台跑:bundle schema-version > vault 时,**安全**升级 vault 文件。
+
+    重设默认行为(#2 #6 数据安全铁律):
+      ① sha256 比 bundle vs vault — 完全一致 → 只注入 schema-version marker(不调 LLM)
+      ② 不一致 → 写 LLM 迁移产物到 `vault/<name>.proposed.md` + push notification
+         **不动 vault 真源**,等用户 review 后手动 mv
+      ③ attempts 文件防狂拺 — 失败 ≥3 次 + 24h 内不再 try
+
+    daily-tasks / 标签聚合 evolve_target=None → 不走 LLM,只看 schema bump 情况手动决定
+      (写到 .proposed.md 也行,但优先级低,这里直接跳过)。
+    """
     bundle_dir = _bundled_reference_dir()
     if not bundle_dir.is_dir():
         return
+    attempts = _read_migration_attempts()
+    now_ts = datetime.now().timestamp()
+    attempts_changed = False
+
     for key, cfg in _VAULT_REFERENCE_TARGETS.items():
         if cfg["evolve_target"] is None:
-            continue  # 不走 LLM 迁移
+            continue
         bundle_path = bundle_dir / cfg["bundled_name"]
         vault_path = cfg["vault_path"]()
         if not bundle_path.exists() or not vault_path.exists():
@@ -6132,30 +6221,155 @@ async def _run_schema_migration_if_needed():
         bundle_v = _get_schema_version(bundle_text)
         vault_v = _get_schema_version(vault_text)
         if bundle_v <= vault_v:
-            continue  # schema 已最新
-        # 触发 LLM 迁移
-        migration_conversation = (
-            f"[SCHEMA MIGRATION] vault 文件 schema-version {vault_v},"
-            f"bundle reference 升级到 v{bundle_v}。\n\n"
-            f"任务:把 vault 现有内容按新 reference 模板的结构重组,保留所有 ts 标记 + "
-            f"用户有效数据(role / 角色 / 协作偏好等),加新 `<!-- schema-version: {bundle_v} -->` 标记。\n\n"
-            f"=== 新 reference 模板(目标结构)===\n{bundle_text}\n\n"
-            f"=== vault 当前内容(要迁移的)===\n{vault_text}\n"
+            continue
+
+        # attempts gate(#19):3 次失败后 24h 内不重试
+        a = attempts.get(key, {})
+        if a.get("count", 0) >= 3 and (now_ts - a.get("last_ts", 0) < 86400):
+            log.info(f"schema migration {key}: 24h 内已失败 3 次,跳过")
+            continue
+
+        # 路径 A(数据安全 #2):bundle == vault 内容 → 只注入 marker,不调 LLM
+        import hashlib
+        bundle_hash = hashlib.sha256(bundle_text.encode("utf-8")).hexdigest()
+        vault_hash = hashlib.sha256(vault_text.encode("utf-8")).hexdigest()
+        if bundle_hash == vault_hash:
+            try:
+                new_text = _ensure_schema_version_header(vault_text, bundle_v)
+                _safe_write_text(vault_path, new_text, rotate=True)
+                try:
+                    if vault_path.resolve().is_relative_to(VAULT_DIR.resolve()):
+                        vault_git.commit_after_write(
+                            VAULT_DIR,
+                            f"schema bump {cfg['bundled_name']} v{vault_v}→v{bundle_v} (marker only)",
+                            author="system",
+                            paths=[vault_path],
+                        )
+                except Exception:
+                    pass
+                _push_notification(
+                    "vault-schema-bumped",
+                    f"vault {cfg['bundled_name']} 内容跟新版完全一致,直接升级到 schema v{bundle_v}",
+                    {"target": key, "old_version": vault_v, "new_version": bundle_v, "kind": "marker-only"},
+                )
+                continue
+            except Exception as e:
+                log.warning(f"schema marker-only bump {key} 失败: {e}")
+                # 失败时落进 attempts,但允许后面 LLM path 试试
+                a["count"] = a.get("count", 0) + 1
+                a["last_ts"] = now_ts
+                a["last_err"] = f"marker-only: {type(e).__name__}: {e}"
+                attempts[key] = a
+                attempts_changed = True
+                continue
+
+        # 路径 B(数据安全 #6):不一致 → LLM 重写产物落 .proposed.md,不动 vault 真源
+        proposed_path = vault_path.with_suffix(vault_path.suffix + ".proposed.md")
+        migration_prompt = _SCHEMA_MIGRATION_PROMPT.format(
+            name=cfg["bundled_name"],
+            old_version=vault_v,
+            new_version=bundle_v,
+            bundle_reference=bundle_text,
+            vault_current=vault_text,
+            today=date.today().isoformat(),
         )
+        # 直接调 LLM,不走 _self_evolve_run(那是 chat-compact 语义,迁移有自己的 prompt)
         try:
-            res = _self_evolve_run(cfg["evolve_target"], migration_conversation)
+            profile = get_profile("deepseek-v4-pro") or get_profile()
+            if not profile:
+                raise Exception("deepseek 主模型未配置")
+            client = get_client(profile)
+            if client is None:
+                raise Exception("deepseek client 起不来")
+            # to_thread 包同步 LLM call,async startup hook 不阻塞 event loop(#7)
+            new_text = await asyncio.to_thread(_migration_llm_call, client, profile, migration_prompt)
+            # 验签:必须有 ts、schema-version、长度 ≥ vault 70%
+            ok_msg = _validate_migration_output(new_text, vault_text, bundle_v)
+            if ok_msg:
+                raise Exception(ok_msg)
+            # 写 proposed.md,不写真源
+            _safe_write_text(proposed_path, new_text, rotate=False)
             _push_notification(
-                "vault-schema-migrated",
-                f"vault {cfg['bundled_name']} 升级到 schema v{bundle_v}",
-                {"target": key, "old_version": vault_v, "new_version": bundle_v, "result": res},
+                "vault-schema-migration-proposed",
+                f"vault {cfg['bundled_name']} 有 schema v{vault_v}→v{bundle_v} 迁移提案,review {proposed_path.name} 后用",
+                {"target": key, "old_version": vault_v, "new_version": bundle_v,
+                 "proposed_path": str(proposed_path)},
             )
+            # 提案产出成功 — 清 attempts
+            attempts.pop(key, None)
+            attempts_changed = True
         except Exception as e:
             log.warning(f"schema migration {key} failed: {e}")
+            a["count"] = a.get("count", 0) + 1
+            a["last_ts"] = now_ts
+            a["last_err"] = f"{type(e).__name__}: {e}"
+            attempts[key] = a
+            attempts_changed = True
             _push_notification(
                 "vault-schema-migration-failed",
-                f"vault {cfg['bundled_name']} 升级失败,旧版仍可用",
-                {"target": key, "error": str(e)},
+                f"vault {cfg['bundled_name']} 升级提案生成失败(已重试 {a['count']} 次,vault 真源未动)",
+                {"target": key, "error": str(e), "attempts": a["count"]},
             )
+
+    if attempts_changed:
+        _write_migration_attempts(attempts)
+
+
+def _migration_llm_call(client, profile, prompt: str) -> str:
+    """同步 LLM 一次性 call,给 to_thread 包。返清洗后的 markdown 文本。"""
+    resp = client.chat.completions.create(
+        model=profile.get("model", "deepseek-v4-pro"),
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=12000,
+        temperature=0.2,
+        timeout=180,
+    )
+    text = (resp.choices[0].message.content or "").strip()
+    text = re.sub(r"^```(markdown|md)?\s*", "", text).strip()
+    text = re.sub(r"\s*```\s*$", "", text).strip()
+    return text
+
+
+def _validate_migration_output(new_text: str, old_text: str, expected_version: int) -> str:
+    """返 ""(空字符串)= OK,否则返错误描述。"""
+    if not new_text:
+        return "LLM 返空"
+    if len(new_text) < int(len(old_text) * 0.7):
+        return f"长度腰斩 {len(new_text)}/{len(old_text)}(<70%)"
+    nv = _get_schema_version(new_text)
+    if nv != expected_version:
+        return f"schema-version 标记应为 {expected_version},LLM 返 {nv}"
+    if not _TS_RE.search(new_text):
+        return "缺 ts 标记"
+    return ""
+
+
+# 独立 schema 迁移 prompt(不复用 _PULSE_UPDATE_PROMPT — 那是 chat-compact 语义)
+# 关键差别:不允许"压精简",只允许"按新结构重排同样数据"
+_SCHEMA_MIGRATION_PROMPT = """vault 文件 {name} schema 升级:v{old_version} → v{new_version}。
+
+任务:把 vault 现有内容按**新 reference 模板**的结构重组,**保留所有信息**,不要精简。
+
+机械要求(server 会校验,违反就被拒):
+- 必须保留 `<!-- schema-version: {new_version} -->` 标记
+- 必须保留所有 `<!-- ts:YYYY-MM-DD -->` 标记;新加段用今天 {today}
+- 输出长度必须 ≥ vault 当前内容的 70%(不能压精简,只能重组)
+
+内容约束:
+- **保留全部用户数据**:owner_handle / 角色 / 关心点 / 协作偏好 / 任何手写段
+- **按新模板的段落顺序重排**:user 的内容塞到新模板对应段下
+- **新模板里有但 vault 没的段**:保留空模板(给 user 后续填),用 today {today} 加 ts
+- **vault 里有但新模板不再有的段**:依然保留(扔进 "其他自定义" 之类的容器),不要删
+- **不要修改用户原话措辞**:只移动位置 + 加 ts + 加 schema-version 标记,不重新组织语言
+
+返回纯 markdown,不要解释、不要 ``` 包裹。
+
+=== 新 reference 模板(目标结构)===
+{bundle_reference}
+
+=== vault 当前内容(要迁移的)===
+{vault_current}
+"""
 
 
 # Self-evolve 三个 target 的 budget 配置(path 在文件顶部跟 _load_user_context 一起定义,因为
@@ -6187,92 +6401,183 @@ _SELF_EVOLVE_TARGETS = {
 }
 
 
+# 每个 self-evolve target 一把锁 — read→LLM→write 整段串行,防 startup migration
+# 跟用户点圆环并发同一 file 把数据搞坏(review #5 #21)。GIL 在 LLM call(120s timeout)
+# 不能 cover 长 IO,必须显式锁。
+_EVOLVE_LOCKS: dict[str, threading.Lock] = {}
+_EVOLVE_LOCKS_GUARD = threading.Lock()  # 保护 _EVOLVE_LOCKS 字典本身
+
+def _get_evolve_lock(target: str) -> threading.Lock:
+    with _EVOLVE_LOCKS_GUARD:
+        lk = _EVOLVE_LOCKS.get(target)
+        if lk is None:
+            lk = threading.Lock()
+            _EVOLVE_LOCKS[target] = lk
+        return lk
+
+
 def _self_evolve_run(target: str, conversation: str) -> dict:
-    """通用 self-evolve:LLM 重写真源 md,validate + retry + backup + write。
-    USER_PULSE / 项目 PULSE / AGENT_CONTEXT 都走这一条路,只是 path/budget/stale 不同。
-    返 result dict(给 endpoint 透传)。
+    """通用 self-evolve:LLM 重写真源 md。USER_PULSE / 项目 PULSE / AGENT_CONTEXT 都走这一条路。
+    锁保护 read→LLM→write 整段(防 #5 race);atomic write + rotate backup(#11 #13);
+    mtime guard 防用户外部编辑被覆盖(#21);schema-version 保留(#8);
+    len/H1/H2 sanity 防 LLM 大量删内容(#6);写入 VAULT_DIR 走 vault_git(#14 #17)。
     """
     cfg = _SELF_EVOLVE_TARGETS.get(target)
     if not cfg:
         raise HTTPException(400, f"未知 target: {target}")
     path = cfg["path"]()
     if not path.exists():
-        raise HTTPException(404, f"{cfg['name']} 不存在: {path}")
+        # 路径不存在(陌生用户没我个人 USER_PULSE / 项目 PULSE)= graceful skip,不算失败
+        # 让 frontend ok_count 算上,防 #20 永远 2/3 + #22 死循环
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": f"{cfg['name']} 文件不存在,跳过(路径 {path})",
+            "target": target,
+            "name": cfg["name"],
+        }
 
-    old = path.read_text(encoding="utf-8")
-    today = date.today().isoformat()
-    bootstrap = not _TS_RE.search(old)  # 全文无 ts = bootstrap 态
-    bootstrap_note = (
-        f"\n**bootstrap 注意**:当前文件还没有任何 `<!-- ts:YYYY-MM-DD -->` 标记 — "
-        f"这是首次自演化。你重写时**必须**给每段都加上 ts(初始全用今天 {today}),"
-        f"后续 cycle 才能正常演化。漏一条就被拒。\n"
-        if bootstrap else ""
-    )
-
-    prompt = _PULSE_UPDATE_PROMPT.format(
-        name=cfg["name"],
-        what=cfg["what"],
-        pulse=old,
-        conversation=conversation,
-        today=today,
-        budget=cfg["budget"],
-        stale=cfg["stale"],
-        bootstrap_note=bootstrap_note,
-    )
-
-    profile = get_profile("deepseek-v4-pro") or get_profile()
-    if not profile:
-        raise HTTPException(503, "deepseek 主模型未配置")
-    client = get_client(profile)
-    if client is None:
-        raise HTTPException(503, "deepseek client 起不来")
-
-    last_err = ""
-    new_text = ""
-    for attempt in range(2):
+    with _get_evolve_lock(target):
+        # 读快照(并记 mtime 防外部编辑窗口)
         try:
-            resp = client.chat.completions.create(
-                model=profile.get("model", "deepseek-v4-pro"),
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=8000,
-                temperature=0.3,
-                timeout=120,
-            )
+            mtime_before = path.stat().st_mtime
+            old = path.read_text(encoding="utf-8")
         except Exception as e:
-            last_err = f"LLM call 失败: {type(e).__name__}: {e}"
-            continue
-        text = (resp.choices[0].message.content or "").strip()
-        text = re.sub(r"^```(markdown|md)?\s*", "", text).strip()
-        text = re.sub(r"\s*```\s*$", "", text).strip()
-        # 用 target 自己的 budget 验,不是全局 PULSE_BUDGET_CHARS
-        ok, err = _pulse_validate(text, budget=cfg["budget"])
-        if ok:
+            raise HTTPException(500, f"读 {cfg['name']} 失败: {e}")
+
+        today = date.today().isoformat()
+        bootstrap = not _TS_RE.search(old)  # 全文无 ts = bootstrap 态
+        old_schema_version = _get_schema_version(old)
+        bootstrap_note = (
+            f"\n**bootstrap 注意**:当前文件还没有任何 `<!-- ts:YYYY-MM-DD -->` 标记 — "
+            f"这是首次自演化。你重写时**必须**给每段都加上 ts(初始全用今天 {today}),"
+            f"后续 cycle 才能正常演化。漏一条就被拒。\n"
+            if bootstrap else ""
+        )
+
+        prompt = _PULSE_UPDATE_PROMPT.format(
+            name=cfg["name"],
+            what=cfg["what"],
+            pulse=old,
+            conversation=conversation,
+            today=today,
+            budget=cfg["budget"],
+            stale=cfg["stale"],
+            bootstrap_note=bootstrap_note,
+        )
+
+        profile = get_profile("deepseek-v4-pro") or get_profile()
+        if not profile:
+            raise HTTPException(503, "deepseek 主模型未配置")
+        client = get_client(profile)
+        if client is None:
+            raise HTTPException(503, "deepseek client 起不来")
+
+        last_err = ""
+        new_text = ""
+        for attempt in range(2):
+            try:
+                resp = client.chat.completions.create(
+                    model=profile.get("model", "deepseek-v4-pro"),
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=8000,
+                    temperature=0.3,
+                    timeout=120,
+                )
+            except Exception as e:
+                last_err = f"LLM call 失败: {type(e).__name__}: {e}"
+                continue
+            text = (resp.choices[0].message.content or "").strip()
+            text = re.sub(r"^```(markdown|md)?\s*", "", text).strip()
+            text = re.sub(r"\s*```\s*$", "", text).strip()
+            ok, err = _pulse_validate(text, budget=cfg["budget"])
+            if not ok:
+                last_err = err
+                prompt = prompt + f"\n\n上次返回被校验拒了: {err}。修这条再返。"
+                continue
+            # 内容保留 sanity(#6):非 bootstrap 时,新文本不能小于旧文本 40%
+            if not bootstrap and len(text) < int(len(old) * 0.4):
+                last_err = f"重写后内容只剩 {len(text)}/{len(old)} 字符(<40%),拒;要求保留所有有效信息,只删真正过时的"
+                prompt = prompt + f"\n\n上次返回内容腰斩了({last_err})。请重新写,保留所有有效记录,只删 stale 那些。"
+                continue
+            # H2 数量不能掉超过 50%
+            old_h2 = len(re.findall(r"^##\s", old, re.MULTILINE))
+            new_h2 = len(re.findall(r"^##\s", text, re.MULTILINE))
+            if not bootstrap and old_h2 > 4 and new_h2 < int(old_h2 * 0.5):
+                last_err = f"H2 段数 {old_h2}→{new_h2}(<50%),拒;结构不能瘦身这么狠"
+                prompt = prompt + f"\n\n上次返回结构瘦了({last_err})。请保留段落结构,只压条目数。"
+                continue
+            # schema-version 保留(#8):如果旧文件有,新文件必须有同或更高
+            new_schema_version = _get_schema_version(text)
+            if old_schema_version > 0 and new_schema_version < old_schema_version:
+                # 后处理自动注入(避免一次往返 retry)
+                text = _ensure_schema_version_header(text, old_schema_version)
             new_text = text
             break
-        last_err = err
-        prompt = prompt + f"\n\n上次返回被校验拒了: {err}。修这条再返。"
 
-    if not new_text:
-        raise HTTPException(500, f"{cfg['name']} 更新失败: {last_err}")
+        if not new_text:
+            raise HTTPException(500, f"{cfg['name']} 更新失败: {last_err}")
 
-    backup = path.with_suffix(".md.bak")
-    try:
-        backup.write_text(old, encoding="utf-8")
-    except Exception:
-        pass
-    path.write_text(new_text, encoding="utf-8")
+        # mtime guard(#21):read 后用户/外部进程编辑了,不写
+        try:
+            mtime_now = path.stat().st_mtime
+            if abs(mtime_now - mtime_before) > 0.001:
+                _push_notification(
+                    "pulse-skip-external-edit",
+                    f"{cfg['name']} 在 LLM 重写期间被外部编辑,跳过写入保留你手编内容",
+                    {"target": target},
+                )
+                raise HTTPException(409, f"{cfg['name']} 在 LLM 重写期间被外部编辑,跳过")
+        except FileNotFoundError:
+            raise HTTPException(409, f"{cfg['name']} 在 LLM 重写期间被删除,跳过")
 
-    return {
-        "ok": True,
-        "target": target,
-        "name": cfg["name"],
-        "old_chars": len(old),
-        "new_chars": len(new_text),
-        "old_records": len(_TS_RE.findall(old)),
-        "new_records": len(_TS_RE.findall(new_text)),
-        "backup": str(backup),
-        "bootstrap": bootstrap,
-    }
+        # atomic write + 5 份 rotate backup(#11 #13)
+        try:
+            _safe_write_text(path, new_text, rotate=True)
+        except Exception as e:
+            raise HTTPException(500, f"{cfg['name']} 写盘失败: {e}")
+
+        # vault_git audit(#14 #17):路径在 VAULT_DIR 内才走 hook
+        try:
+            if path.resolve().is_relative_to(VAULT_DIR.resolve()):
+                vault_git.commit_after_write(
+                    VAULT_DIR,
+                    f"self-evolve {cfg['name']} ({len(old)}→{len(new_text)} chars)",
+                    author="ai",
+                    paths=[path],
+                )
+        except Exception as e:
+            log.warning(f"vault_git commit_after_write {cfg['name']} 失败: {e}")
+
+        return {
+            "ok": True,
+            "target": target,
+            "name": cfg["name"],
+            "old_chars": len(old),
+            "new_chars": len(new_text),
+            "old_records": len(_TS_RE.findall(old)),
+            "new_records": len(_TS_RE.findall(new_text)),
+            "backup": str(path) + ".bak.1",  # _safe_write_text rotate=True 写进 bak.1
+            "bootstrap": bootstrap,
+            "schema_version": _get_schema_version(new_text),
+        }
+
+
+def _ensure_schema_version_header(text: str, version: int) -> str:
+    """如果文本没 schema-version 标记,在文档前部插入一条;有则更新数字。
+    放在第一个 H1 之后(若有),否则放在最前。
+    """
+    if _SCHEMA_VERSION_RE.search(text):
+        return _SCHEMA_VERSION_RE.sub(f"<!-- schema-version: {version} -->", text, count=1)
+    marker = f"<!-- schema-version: {version} -->"
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line.startswith("# "):
+            # H1 后空行后插入
+            lines.insert(i + 1, "")
+            lines.insert(i + 2, marker)
+            return "\n".join(lines)
+    return marker + "\n\n" + text
 
 
 @app.get("/api/notifications")
@@ -6280,11 +6585,31 @@ def get_notifications(dismiss: str = ""):
     """前端 poll banner 用。
     返 pending 通知列表;调用时带 `?dismiss=kind1,kind2` 一次性清掉这些类型。
     """
-    if dismiss:
-        kinds = set(k.strip() for k in dismiss.split(",") if k.strip())
-        global _PENDING_NOTIFICATIONS
-        _PENDING_NOTIFICATIONS = [n for n in _PENDING_NOTIFICATIONS if n["kind"] not in kinds]
-    return {"notifications": list(_PENDING_NOTIFICATIONS)}
+    with _NOTIF_LOCK:
+        if dismiss:
+            kinds = set(k.strip() for k in dismiss.split(",") if k.strip())
+            # in-place 修改而不是 rebind(#24)
+            _PENDING_NOTIFICATIONS[:] = [n for n in _PENDING_NOTIFICATIONS if n["kind"] not in kinds]
+        return {"notifications": list(_PENDING_NOTIFICATIONS)}
+
+
+@app.post("/api/quit")
+async def quit_app():
+    """让 sidecar 自杀 — Tauri 单实例 plugin 检测到 sidecar 死会触发 app exit;
+    用户点 banner「立即重启」时,如果前端的 process.relaunch 路径走通了就走它,
+    否则 fallback 走这个 endpoint 让 sidecar 死,然后让用户手动重开。
+    """
+    import os as _osq
+    import signal as _signal
+    # 异步延迟 500ms 让 HTTP response 先送出去
+    async def _suicide():
+        await asyncio.sleep(0.5)
+        try:
+            _osq.kill(_osq.getpid(), _signal.SIGTERM)
+        except Exception:
+            pass
+    asyncio.create_task(_suicide())
+    return {"ok": True, "action": "quitting"}
 
 
 @app.post("/api/updater/installed")
@@ -6309,12 +6634,13 @@ async def updater_installed(req: Request):
 async def pulse_user_update(req: Request):
     """LLM 重写 USER_PULSE — compact 前置步骤。
     body: { "conversation": "对话原文 (任意格式)" }
+    LLM call 120s timeout × 同步 client,丢 threadpool 避免阻塞 event loop(#1)。
     """
     body = await req.json()
     conversation = (body.get("conversation") or "").strip()
     if not conversation:
         raise HTTPException(400, "需要 conversation")
-    return _self_evolve_run("user_pulse", conversation)
+    return await asyncio.to_thread(_self_evolve_run, "user_pulse", conversation)
 
 
 @app.post("/api/pulse/project-update")
@@ -6324,7 +6650,7 @@ async def pulse_project_update(req: Request):
     conversation = (body.get("conversation") or "").strip()
     if not conversation:
         raise HTTPException(400, "需要 conversation")
-    return _self_evolve_run("project_pulse", conversation)
+    return await asyncio.to_thread(_self_evolve_run, "project_pulse", conversation)
 
 
 @app.post("/api/pulse/agent-context-update")
@@ -6334,7 +6660,7 @@ async def pulse_agent_context_update(req: Request):
     conversation = (body.get("conversation") or "").strip()
     if not conversation:
         raise HTTPException(400, "需要 conversation")
-    return _self_evolve_run("agent_context", conversation)
+    return await asyncio.to_thread(_self_evolve_run, "agent_context", conversation)
 
 
 @app.post("/api/pulse/refresh-mirror")

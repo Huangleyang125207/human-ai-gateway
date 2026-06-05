@@ -41,21 +41,32 @@
     const restartBtn = document.createElement("button");
     restartBtn.textContent = "立即重启";
     restartBtn.style.cssText = "background:#f5efe0; color:#3b6f4a; border:0; padding:6px 14px; border-radius:4px; cursor:pointer; font-weight:600;";
-    restartBtn.addEventListener("click", () => {
+    restartBtn.addEventListener("click", async () => {
       restartBtn.disabled = true;
       restartBtn.textContent = "重启中…";
-      // Tauri 2 process plugin:relaunch
+      // 优先 Tauri 2 process plugin:withGlobalTauri=true + capabilities remote URLs 后,
+      // window.__TAURI__ 暴露在 webview。invoke('plugin:process|restart') 是 Tauri 2 调用。
+      const tauri = window.__TAURI__;
       try {
-        // 优先用 @tauri-apps/api 暴露(若有)
-        const tauriProcess = window.__TAURI__?.process;
-        if (tauriProcess?.relaunch) {
-          tauriProcess.relaunch();
+        if (tauri?.core?.invoke) {
+          await tauri.core.invoke("plugin:process|restart");
           return;
         }
-        // fallback:让 sidecar 关闭进程,Tauri 单实例会启动一次新的
-        fetch("/api/quit", { method: "POST" }).catch(() => {});
+        if (tauri?.process?.relaunch) {
+          await tauri.process.relaunch();
+          return;
+        }
       } catch (e) {
-        console.warn("[update-banner] relaunch fail", e);
+        console.warn("[update-banner] Tauri relaunch 失败,走 fallback", e);
+      }
+      // Fallback:让 sidecar 退出,Tauri 检测 sidecar 死 → 触发 app 退出 → 用户手动重开
+      try {
+        await fetch("/api/quit", { method: "POST" });
+        msg.textContent = "Gateway 已关闭,请手动重开";
+      } catch (e) {
+        msg.textContent = "请手动退出 Gateway 后重开,新版才生效";
+        restartBtn.disabled = false;
+        restartBtn.textContent = "立即重启";
       }
     });
     const laterBtn = document.createElement("button");
@@ -84,12 +95,23 @@
           const v = n.payload?.version || "新版";
           showUpdateBanner(v);
           dismissKinds.push("updater-installed");
-        } else if (n.kind === "vault-schema-migrated") {
+        } else if (n.kind === "vault-schema-bumped") {
+          // sha256 一致 → marker only:passive 通知,内容没变
           window.gatewayToast?.(n.message);
-          dismissKinds.push("vault-schema-migrated");
+          dismissKinds.push("vault-schema-bumped");
+        } else if (n.kind === "vault-schema-migration-proposed") {
+          // 不一致 → LLM 重写产物落 .proposed.md:提示 user review,真源未动
+          window.gatewayToast?.(n.message);
+          dismissKinds.push("vault-schema-migration-proposed");
         } else if (n.kind === "vault-schema-migration-failed") {
-          window.gatewayToast?.(n.message + "(看 server log)");
+          window.gatewayToast?.(n.message);
           dismissKinds.push("vault-schema-migration-failed");
+        } else if (n.kind === "vault-reference-bootstrapped") {
+          window.gatewayToast?.(n.message);
+          dismissKinds.push("vault-reference-bootstrapped");
+        } else if (n.kind === "pulse-skip-external-edit") {
+          window.gatewayToast?.(n.message);
+          dismissKinds.push("pulse-skip-external-edit");
         }
       }
       if (dismissKinds.length) {

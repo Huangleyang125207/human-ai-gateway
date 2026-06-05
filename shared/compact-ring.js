@@ -15,8 +15,11 @@
   // 自动 compact 开关 — 默认 off(用户主动开,设置面板未来可加 toggle);
   // 值在 localStorage,用户可手改 localStorage.setItem('gateway.compact.auto','on')
   const AUTO_COMPACT_KEY = "gateway.compact.auto";
+  const AUTO_FIRE_AT_KEY = "gateway.compact.lastAutoFireAt";  // persist 跨 reload(#10)
+  const AUTO_FAIL_COUNT_KEY = "gateway.compact.consecutiveFails";  // partial-fail 计数(#22)
   const AUTO_FIRE_COOLDOWN_MS = 10 * 60 * 1000;  // 一次成功后 10min 内不重复 fire
-  let lastAutoFireAt = 0;
+  const AUTO_FAIL_COOLDOWN_MS = 60 * 60 * 1000;  // 失败后 1h cooldown
+  const MAX_CONVO_CHARS = 80000;  // 发给 LLM 的 conversation 上限(#28)
 
   let ring = null;
 
@@ -68,11 +71,18 @@
       window.gatewayToast?.("对话还空,先聊点东西再整理。");
       return;
     }
-    const arr = JSON.parse(localStorage.getItem(THREAD_KEY) || "[]");
-    const conversation = arr.map(m => {
+    // 拿 history 快照 + 记 cutoff index — 30-90s LLM 跑期间用户可能继续聊新消息,
+    // clear 时只清 cutoff 内的旧消息(#12)
+    const arrSnapshot = JSON.parse(localStorage.getItem(THREAD_KEY) || "[]");
+    const cutoffIndex = arrSnapshot.length;
+    // tail-truncate conversation 80K 字符防 deepseek context 爆(#28)
+    let conversation = arrSnapshot.map(m => {
       const role = m.role === "user" ? "用户" : "AI";
       return `[${role}] ${(m.content || "").trim()}`;
     }).join("\n\n");
+    if (conversation.length > MAX_CONVO_CHARS) {
+      conversation = "[... 早期对话已省略 ...]\n\n" + conversation.slice(conversation.length - MAX_CONVO_CHARS);
+    }
 
     if (!opts.skipConfirm) {
       const kChars = (chars / 1000).toFixed(1);
@@ -115,14 +125,43 @@
 
     const ok_count = results.filter(r => r.ok).length;
     if (ok_count === targets.length) {
-      // 全成功 — 清 history + ring 自动回弹
-      try { window.gateway?.thread?.clear?.(); } catch {}
+      // 全成功 — 只清 cutoff 内的旧消息(#12),保留 LLM 跑期间新进来的
+      try {
+        const arrNow = JSON.parse(localStorage.getItem(THREAD_KEY) || "[]");
+        // 保留 cutoff 之后的新消息
+        const kept = arrNow.slice(cutoffIndex);
+        if (kept.length === 0) {
+          window.gateway?.thread?.clear?.();
+        } else {
+          // 让 thread.js 接管:直接覆写 localStorage 然后 reload(简陋,但下次刷新就对)
+          localStorage.setItem(THREAD_KEY, JSON.stringify(kept));
+          // 触发 thread.js 重读(refresh 的 hook 在 storage event,但同窗 storage 事件不触发)
+          window.dispatchEvent(new StorageEvent("storage", { key: THREAD_KEY }));
+        }
+      } catch {}
+      writeFailCount(0);  // 清失败计数
       update();
-      window.gatewayToast?.(`整理完成 — 3 份 md 已更新,对话历史重置。`);
+      window.gatewayToast?.(`整理完成 — 3 份 md 已更新,旧对话已重置。`);
     } else if (ok_count > 0) {
       const failed = results.filter(r => !r.ok).map(r => `${r.name}(${r.status || r.error || "?"})`);
-      window.gatewayToast?.(`部分完成 — ${ok_count}/3 成功。失败:${failed.join(", ")}`);
+      if (opts.auto) {
+        const fails = readFailCount() + 1;
+        writeFailCount(fails);
+        if (fails >= 2) {
+          // 失败 2+ 次自动关 auto,1h cooldown 已 wired(#22)
+          localStorage.setItem(AUTO_COMPACT_KEY, "off");
+          window.gatewayToast?.(`部分完成 — ${ok_count}/3。auto 关了(失败 ${fails} 次),下次手动点圆环再试。`);
+        } else {
+          window.gatewayToast?.(`部分完成 — ${ok_count}/3 成功。失败 ${fails} 次,1h 后再 auto。`);
+        }
+      } else {
+        window.gatewayToast?.(`部分完成 — ${ok_count}/3 成功。失败:${failed.join(", ")}`);
+      }
     } else {
+      if (opts.auto) {
+        writeFailCount(readFailCount() + 1);
+        localStorage.setItem(AUTO_COMPACT_KEY, "off");
+      }
       window.gatewayToast?.(`整理失败 — 0/3 成功,对话历史未动。看 server 日志。`);
     }
   }
@@ -151,14 +190,33 @@
     return !!document.querySelector(".msg.streaming, .thread-stream .streaming");
   }
 
+  function readLastAutoFireAt() {
+    const v = parseInt(localStorage.getItem(AUTO_FIRE_AT_KEY) || "0", 10);
+    return Number.isFinite(v) ? v : 0;
+  }
+  function writeLastAutoFireAt(t) {
+    try { localStorage.setItem(AUTO_FIRE_AT_KEY, String(t)); } catch {}
+  }
+  function readFailCount() {
+    const v = parseInt(localStorage.getItem(AUTO_FAIL_COUNT_KEY) || "0", 10);
+    return Number.isFinite(v) ? v : 0;
+  }
+  function writeFailCount(n) {
+    try { localStorage.setItem(AUTO_FAIL_COUNT_KEY, String(n)); } catch {}
+  }
+
   function tryAutoCompact() {
     if (running) return;
-    if (Date.now() - lastAutoFireAt < AUTO_FIRE_COOLDOWN_MS) return;
+    const last = readLastAutoFireAt();
+    const fails = readFailCount();
+    const now = +new Date();
+    // 失败 2+ 次,延长 cooldown 到 1h(#22)
+    const cooldown = fails >= 2 ? AUTO_FAIL_COOLDOWN_MS : AUTO_FIRE_COOLDOWN_MS;
+    if (now - last < cooldown) return;
     if (isStreaming()) return;  // 等 stream 完
-    lastAutoFireAt = Date.now();
-    // 用 toast 告知 user 自动开始(不弹 confirm — auto 模式就是 user 已授权)
+    writeLastAutoFireAt(now);
     window.gatewayToast?.("对话超阈值,自动整理中…");
-    runCompact({ skipConfirm: true });
+    runCompact({ skipConfirm: true, auto: true });
   }
 
   function boot() {

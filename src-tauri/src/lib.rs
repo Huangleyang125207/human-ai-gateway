@@ -41,8 +41,11 @@ async fn check_for_updates(app: AppHandle, sidecar_port: u16) {
     }
 }
 
-/// 把"新版本已下载,重启生效"事件推给 sidecar /api/updater/installed
-/// sidecar 内存队列存,前端 30s poll /api/notifications 拿出来挂 banner
+/// 把"新版本已下载,重启生效"事件推给 sidecar /api/updater/installed。
+/// sidecar 内存队列存,前端 30s poll /api/notifications 拿出来挂 banner。
+///
+/// 兜底:retry 10 次 × 间隔 3s(防 sidecar 冷启 / 临时抖动);全失败也落 pending 文件
+/// 让 sidecar 下次启动时自补 notification(review #18)。
 async fn notify_sidecar_updater_installed(port: u16, version: &str) {
     let url = format!("http://127.0.0.1:{port}/api/updater/installed");
     let body = serde_json::json!({ "version": version });
@@ -53,12 +56,38 @@ async fn notify_sidecar_updater_installed(port: u16, version: &str) {
         Ok(c) => c,
         Err(e) => {
             log::warn!("[updater] reqwest build fail: {e}");
+            write_updater_pending(version);
             return;
         }
     };
-    match client.post(&url).json(&body).send().await {
-        Ok(_) => log::info!("[updater] sidecar notified"),
-        Err(e) => log::warn!("[updater] sidecar notify fail: {e}"),
+    for attempt in 0..10u32 {
+        match client.post(&url).json(&body).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                log::info!("[updater] sidecar notified (try {attempt})");
+                return;
+            }
+            Ok(resp) => log::warn!("[updater] sidecar notify HTTP {} (try {attempt})", resp.status()),
+            Err(e) => log::warn!("[updater] sidecar notify fail (try {attempt}): {e}"),
+        }
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    }
+    log::warn!("[updater] sidecar 10 次 retry 全失败,落 pending 文件等 sidecar 下次启动自补");
+    write_updater_pending(version);
+}
+
+/// 失败时落 ~/.human-ai/.updater-pending.json,sidecar startup hook 读它后自动 push notification。
+/// 不引入 dirs crate;走 std::env 算 home。
+fn write_updater_pending(version: &str) {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    let Some(home) = home else { return };
+    let dir = std::path::PathBuf::from(home).join(".human-ai");
+    let path = dir.join(".updater-pending.json");
+    let _ = std::fs::create_dir_all(&dir);
+    let payload = serde_json::json!({ "version": version });
+    if let Err(e) = std::fs::write(&path, payload.to_string()) {
+        log::warn!("[updater] write pending file 失败: {e}");
+    } else {
+        log::info!("[updater] pending 文件已写: {path:?}");
     }
 }
 
