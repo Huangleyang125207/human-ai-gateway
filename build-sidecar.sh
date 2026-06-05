@@ -27,6 +27,8 @@ ADDS=(
   --add-data "history_exporter.py:." --add-data "outcome_tracker.py:."
   --add-data "cutout.py:." --add-data "cutout_local.py:."
   --add-data "ocr.py:." --add-data "ocr_local.py:." --add-data "tools:tools"
+  # reference/ 是分发给陌生用户的 vault 起点(AGENT_CONTEXT / daily-tasks / 标签聚合)
+  --add-data "reference:reference"
   # consent modal + 设置数据 tab 链 /PRIVACY.md /README.md /LICENSE,
   # 没 add-data 用户点了 404
   --add-data "PRIVACY.md:." --add-data "README.md:." --add-data "LICENSE:."

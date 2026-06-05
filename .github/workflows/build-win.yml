@@ -88,6 +88,7 @@ jobs:
             --add-data "ocr.py;." ^
             --add-data "ocr_local.py;." ^
             --add-data "tools;tools" ^
+            --add-data "reference;reference" ^
             --add-data "PRIVACY.md;." ^
             --add-data "README.md;." ^
             --add-data "LICENSE;." ^

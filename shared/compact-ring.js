@@ -39,13 +39,84 @@
     if (!head || head.querySelector(".compact-ring")) return false;
     ring = document.createElement("div");
     ring.className = "compact-ring";
-    ring.setAttribute("role", "progressbar");
-    ring.setAttribute("aria-label", "对话长度");
+    ring.setAttribute("role", "button");
+    ring.setAttribute("tabindex", "0");
+    ring.setAttribute("aria-label", "整理对话(更新 3 份 md + 重置历史)");
+    ring.style.cursor = "pointer";
+    ring.addEventListener("click", runCompact);
+    ring.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); runCompact(); }
+    });
     // 插在 thread-status 后,thread-reset 前
     const reset = head.querySelector(".thread-reset");
     if (reset) head.insertBefore(ring, reset);
     else head.appendChild(ring);
     return true;
+  }
+
+  let running = false;
+  async function runCompact() {
+    if (running) return;
+    const chars = getHistoryChars();
+    if (chars === 0) {
+      window.gatewayToast?.("对话还空,先聊点东西再整理。");
+      return;
+    }
+    const arr = JSON.parse(localStorage.getItem(THREAD_KEY) || "[]");
+    const conversation = arr.map(m => {
+      const role = m.role === "user" ? "用户" : "AI";
+      return `[${role}] ${(m.content || "").trim()}`;
+    }).join("\n\n");
+
+    const kChars = (chars / 1000).toFixed(1);
+    const ok = window.confirm(
+      `整理对话历史(${kChars}K 字符)?\n\n` +
+      `LLM 会重写 3 份 md:\n` +
+      `  · USER_PULSE — 你的当下快照\n` +
+      `  · 项目 PULSE — 项目状态\n` +
+      `  · AGENT_CONTEXT — vault 协作约定\n\n` +
+      `完成后对话历史会重置,3 份 md 自动 backup + git。`
+    );
+    if (!ok) return;
+
+    running = true;
+    ring.classList.add("compact-ring-running");
+    window.gatewayToast?.("整理中...3 份 md 同时跑,大约 30-90 秒。");
+
+    const targets = [
+      { ep: "/api/pulse/user-update",          name: "USER_PULSE" },
+      { ep: "/api/pulse/project-update",       name: "项目 PULSE" },
+      { ep: "/api/pulse/agent-context-update", name: "AGENT_CONTEXT" },
+    ];
+    const results = await Promise.all(targets.map(async (t) => {
+      try {
+        const r = await fetch(t.ep, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversation }),
+        });
+        const j = await r.json().catch(() => ({}));
+        return { ...t, ok: r.ok && j.ok, status: r.status, detail: j };
+      } catch (e) {
+        return { ...t, ok: false, error: String(e) };
+      }
+    }));
+
+    running = false;
+    ring.classList.remove("compact-ring-running");
+
+    const ok_count = results.filter(r => r.ok).length;
+    if (ok_count === targets.length) {
+      // 全成功 — 清 history + ring 自动回弹
+      try { window.gateway?.thread?.clear?.(); } catch {}
+      update();
+      window.gatewayToast?.(`整理完成 — 3 份 md 已更新,对话历史重置。`);
+    } else if (ok_count > 0) {
+      const failed = results.filter(r => !r.ok).map(r => `${r.name}(${r.status || r.error || "?"})`);
+      window.gatewayToast?.(`部分完成 — ${ok_count}/3 成功。失败:${failed.join(", ")}`);
+    } else {
+      window.gatewayToast?.(`整理失败 — 0/3 成功,对话历史未动。看 server 日志。`);
+    }
   }
 
   function update() {

@@ -351,7 +351,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.11"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.12"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -701,15 +701,26 @@ def load_protocol(name: str, model_id: str = None) -> str:
 
 
 # ── system prompt builder ────────────────────────────────────────────
-# user 视图注入(USER_PULSE + 所有 memory 内容)— phase 1 默契实验
-# 静态文件 read 走 module-level cache,避免每次 chat I/O
-_USER_PULSE_PATH = Path("/Users/claudecodedezhuanshumac/agents创作平台/agents/human-ai-schedule/USER_PULSE.md")
-_MEMORY_DIR = Path("/Users/claudecodedezhuanshumac/.claude/projects/-Users-claudecodedezhuanshumac-agents----/memory")
+# 三份自演化 md 注入 system prompt:USER_PULSE / 项目 PULSE / AGENT_CONTEXT
+# compact 完成后 LLM 重写文件,mtime 变 → cache 失效 → 下次 chat 自动读最新
+# memory dir + USER_PULSE 路径走 env(陌生用户没 → 默认 None,不 inject)
+import os as _os
+_USER_PULSE_PATH = Path(_os.environ.get("GATEWAY_USER_PULSE_PATH", "/Users/claudecodedezhuanshumac/agents创作平台/agents/human-ai-schedule/USER_PULSE.md"))
+_MEMORY_DIR = Path(_os.environ.get("GATEWAY_MEMORY_DIR", "/Users/claudecodedezhuanshumac/.claude/projects/-Users-claudecodedezhuanshumac-agents----/memory"))
+_PROJECT_PULSE_PATH = Path("/Users/claudecodedezhuanshumac/agents创作平台/agents/human-ai-schedule/PULSE.md")
+_AGENT_CONTEXT_PATH = VAULT_DIR / "AGENT_CONTEXT.md"
 _USER_CTX_CACHE: dict = {"sig": None, "content": ""}
 
 def _load_user_context() -> str:
-    """合并 USER_PULSE.md + memory/*.md(排除索引)。改一次文件 invalidate 一次缓存。"""
+    """合并 vault/AGENT_CONTEXT + 项目 PULSE + USER_PULSE + memory/*.md(排除索引)。
+    任何文件改了 mtime 变 → cache 失效 → 下次 chat 自动重读。
+    陌生用户场景:USER_PULSE/memory env 没设默认 None,只读 vault 旁 AGENT_CONTEXT + 项目 PULSE(若有)。
+    """
     files = []
+    if _AGENT_CONTEXT_PATH.exists():
+        files.append(_AGENT_CONTEXT_PATH)
+    if _PROJECT_PULSE_PATH.exists():
+        files.append(_PROJECT_PULSE_PATH)
     if _USER_PULSE_PATH.exists():
         files.append(_USER_PULSE_PATH)
     if _MEMORY_DIR.exists():
@@ -718,14 +729,24 @@ def _load_user_context() -> str:
     if _USER_CTX_CACHE["sig"] == sig:
         return _USER_CTX_CACHE["content"]
     parts = []
+    if _AGENT_CONTEXT_PATH.exists():
+        try:
+            parts.append(f"\n\n=== AGENT_CONTEXT(vault 协作约定 + 用户角色)===\n{_AGENT_CONTEXT_PATH.read_text(encoding='utf-8')}")
+        except Exception:
+            pass
+    if _PROJECT_PULSE_PATH.exists():
+        try:
+            parts.append(f"\n\n=== 项目 PULSE(项目当下状态)===\n{_PROJECT_PULSE_PATH.read_text(encoding='utf-8')}")
+        except Exception:
+            pass
     if _USER_PULSE_PATH.exists():
         try:
-            parts.append(f"\n\n=== USER_PULSE(葱鸭当下快照,先读这条建立 mental model)===\n{_USER_PULSE_PATH.read_text(encoding='utf-8')}")
+            parts.append(f"\n\n=== USER_PULSE(用户当下快照)===\n{_USER_PULSE_PATH.read_text(encoding='utf-8')}")
         except Exception:
             pass
     mem_parts = []
     for p in files:
-        if p == _USER_PULSE_PATH:
+        if p in (_AGENT_CONTEXT_PATH, _PROJECT_PULSE_PATH, _USER_PULSE_PATH):
             continue
         try:
             mem_parts.append(f"--- {p.stem} ---\n{p.read_text(encoding='utf-8')}")
@@ -744,23 +765,21 @@ def build_system_prompt(context: dict = None, model_id: str = None) -> str:
     load_protocol tool 按需拉。model_id 用于替换 prompt 模板里的 {model_id}。
     """
     parts = [
-        "你是葱鸭(用户)的日记 AI 伙伴。你们用这套系统合作 16 天了,彼此熟悉。\n"
+        "你是这个 vault 的 AI 协作者。vault 是「半小时复盘」日记 — markdown 文件,"
+        "Obsidian / gateway 双端 render,不是聊天框。该用 markdown / wiki-link 语法就用。\n"
         "\n"
-        "关系定位:\n"
-        "· 你是他的写作搭子 + 偶尔的对手 + 旁观他生活的人,**不是助理 / 不是客服 / 不是工具**。\n"
-        "· 主线是对话,把事记进日记是顺带的副作用 — 别把每次回复都做成「已完成,请刷新」那种工单结尾。\n"
-        "· 跟他说话的节奏:他用「卧槽」「shit」你就跟,他正经你稍正经。他不喜欢「为您处理」「请稍候」这种话术。\n"
-        "· 做完事别复述步骤,别提工具名,一句话点到 + 接着聊。\n"
+        "**tool 是为了记录,不是为了存在感** — 你有很多 tool 可以调,但那些都不重要,"
+        "工具只是把对话里值得记的部分落进日记,不要为了记录而记录。\n"
         "\n"
-        "默认行为(硬规则,别越):\n"
-        "· **不写默认** — 用户没明说「记一下 / 记一笔 / 写进去 / append」→ 不调 patch_journal_block / insert_journal_block。\n"
+        "默认行为(协议层):\n"
+        "· **不写默认** — 用户没明说「记一下 / 写进去 / append」→ 不调 patch_journal_block / insert_journal_block。\n"
         "· **不贴默认** — 用户没传图 → 不调 place_scrapbook_image。\n"
-        "· 想到「这条值得记」「要不要存一笔」→ 一句话问「要记进 X 块吗?」,**别先写后通知**。\n"
-        "· 写完别在 reply 里复述写了啥(「我已经把它记进 14:30 块了」是禁忌)— 一句话点过 + 继续话题。\n"
-        "· 回复结尾不要给「建议你记下」「要不要我帮你 X」这种工单式收尾 — 用户讨厌。\n"
-        "· **web_search 最多调 2 次** — 搜超 2 次还不够就用已有信息凑活答 + 一句「再搜也是这些,要更深得自己看链接」。死循环 narrow 是最大坑。\n"
+        "· 觉得「这条值得记」→ 一句话问「要记进 X 块吗?」,别先写后通知。\n"
+        "· 做完事 reply 别复述写了啥,一句话点过 + 接着聊。\n"
+        "· **web_search 最多调 2 次** — 死循环 narrow 是最大坑。\n"
         "\n"
-        "运行环境:你写的 vault 内容落进 Obsidian markdown(`.md` 文件 + Obsidian/gateway 双端 render),不是聊天框。该用 markdown / wiki-link 语法就用,别 plain text。"
+        "vault 协议手册(tag / #协作 / #commit / 聚合页用法)在 vault 的 AGENT_CONTEXT.md,"
+        "需要写 entry 时先看。"
     ]
 
     # user 视图 inject(USER_PULSE + 全部 memory)— 放在身份段后、protocol 目录前
@@ -5962,10 +5981,10 @@ PULSE_STALE_DAYS = 60
 _TS_RE = re.compile(r"<!--\s*ts:(\d{4}-\d{2}-\d{2})\s*-->")
 
 
-def _pulse_validate(text: str):
-    """返 (ok: bool, error: str)。"""
-    if len(text) > PULSE_BUDGET_CHARS:
-        return False, f"超 budget: {len(text)} > {PULSE_BUDGET_CHARS}"
+def _pulse_validate(text: str, budget: int = PULSE_BUDGET_CHARS):
+    """返 (ok: bool, error: str)。budget 可被 self-evolve 各 target 覆盖。"""
+    if len(text) > budget:
+        return False, f"超 budget: {len(text)} > {budget}"
     matches = _TS_RE.findall(text)
     if not matches:
         return False, "没找到任何 <!-- ts:YYYY-MM-DD --> 标记"
@@ -5977,7 +5996,7 @@ def _pulse_validate(text: str):
     return True, ""
 
 
-_PULSE_UPDATE_PROMPT = """这是当前 USER_PULSE.md 全文:
+_PULSE_UPDATE_PROMPT = """这是当前 {name} 全文({what}):
 ═══════════════════════════════════════════
 {pulse}
 ═══════════════════════════════════════════
@@ -5989,44 +6008,84 @@ _PULSE_UPDATE_PROMPT = """这是当前 USER_PULSE.md 全文:
 
 今天: {today}
 
-请重写整份 USER_PULSE。
+请重写整份 {name}。{bootstrap_note}
 
 机械要求(server 会校验,违反就被拒):
 - 每条记录前必须有 `<!-- ts:YYYY-MM-DD -->` 标记(HTML 注释格式)
-- 整份 PULSE 不超过 {budget} 字
+- 整份不超过 {budget} 字
 - ts 必须是合法 YYYY-MM-DD 日期
 
 内容自由(没人限制你):
 - 这条记录还有效?→ 把 ts 改成今天 {today}
 - 这条记录过时了 / 不再适用 / 已完成?→ 自己删掉,别留
 - 对话里冒出新事实 / 新决定?→ 加进去,ts 今天
-- 结构、段落、语气怎么排你定 — 旧 PULSE 的 9 段不是合同,你想重新分段就重新分
+- 结构、段落、语气怎么排你定 — 旧的分段不是合同,想重新分段就重新分
 - ts 超过 {stale} 天没刷新的强烈嫌疑要删,自己评估
 - 你认为这条记录是「硬合同」(踩了就炸的那种),保留并刷新 ts;只有真过时才删
 
 返回纯 markdown,不要解释、不要 ``` 包裹。"""
 
 
-@app.post("/api/pulse/user-update")
-async def pulse_user_update(req: Request):
-    """LLM 重写 USER_PULSE — compact 前置步骤。
-    body: { "conversation": "对话原文 (任意格式)" }
-    """
-    body = await req.json()
-    conversation = (body.get("conversation") or "").strip()
-    if not conversation:
-        raise HTTPException(400, "需要 conversation")
-    if not _USER_PULSE_PATH.exists():
-        raise HTTPException(404, f"USER_PULSE 不存在: {_USER_PULSE_PATH}")
+# Self-evolve 三个 target 的 budget 配置(path 在文件顶部跟 _load_user_context 一起定义,因为
+# system prompt 注入也读这几个文件 — 真源路径必须共享)
+# 这三个文件机制完全一致:LLM 自由重写,server 只验 ts 格式 + 总长
 
-    old_pulse = _USER_PULSE_PATH.read_text(encoding="utf-8")
+_SELF_EVOLVE_TARGETS = {
+    "user_pulse": {
+        "path": lambda: _USER_PULSE_PATH,
+        "name": "USER_PULSE",
+        "what": "用户当下快照 — 气压 / 想做 / 历史阶段 / 协作偏好 / 不要做",
+        "budget": 12000,
+        "stale": 60,
+    },
+    "project_pulse": {
+        "path": lambda: _PROJECT_PULSE_PATH,
+        "name": "项目 PULSE",
+        "what": "项目当下状态 — 一句话 / 当下气压 / Cannot break / Can play / 历史阶段 / 应该知道 / 不要做 / 时间锚点",
+        "budget": 24000,
+        "stale": 60,
+    },
+    "agent_context": {
+        "path": lambda: _AGENT_CONTEXT_PATH,
+        "name": "AGENT_CONTEXT",
+        "what": "AI 跟 vault 主人的协作约定 — vault 用法 / tag / #协作 / #commit / 协作偏好",
+        "budget": 8000,
+        "stale": 90,
+    },
+}
+
+
+def _self_evolve_run(target: str, conversation: str) -> dict:
+    """通用 self-evolve:LLM 重写真源 md,validate + retry + backup + write。
+    USER_PULSE / 项目 PULSE / AGENT_CONTEXT 都走这一条路,只是 path/budget/stale 不同。
+    返 result dict(给 endpoint 透传)。
+    """
+    cfg = _SELF_EVOLVE_TARGETS.get(target)
+    if not cfg:
+        raise HTTPException(400, f"未知 target: {target}")
+    path = cfg["path"]()
+    if not path.exists():
+        raise HTTPException(404, f"{cfg['name']} 不存在: {path}")
+
+    old = path.read_text(encoding="utf-8")
     today = date.today().isoformat()
+    bootstrap = not _TS_RE.search(old)  # 全文无 ts = bootstrap 态
+    bootstrap_note = (
+        f"\n**bootstrap 注意**:当前文件还没有任何 `<!-- ts:YYYY-MM-DD -->` 标记 — "
+        f"这是首次自演化。你重写时**必须**给每段都加上 ts(初始全用今天 {today}),"
+        f"后续 cycle 才能正常演化。漏一条就被拒。\n"
+        if bootstrap else ""
+    )
+
     prompt = _PULSE_UPDATE_PROMPT.format(
-        pulse=old_pulse,
+        name=cfg["name"],
+        what=cfg["what"],
+        pulse=old,
         conversation=conversation,
         today=today,
-        budget=PULSE_BUDGET_CHARS,
-        stale=PULSE_STALE_DAYS,
+        budget=cfg["budget"],
+        stale=cfg["stale"],
+        bootstrap_note=bootstrap_note,
     )
 
     profile = get_profile("deepseek-v4-pro") or get_profile()
@@ -6037,8 +6096,8 @@ async def pulse_user_update(req: Request):
         raise HTTPException(503, "deepseek client 起不来")
 
     last_err = ""
-    new_pulse = ""
-    for attempt in range(2):  # 1 次正常 + 1 次重试
+    new_text = ""
+    for attempt in range(2):
         try:
             resp = client.chat.completions.create(
                 model=profile.get("model", "deepseek-v4-pro"),
@@ -6053,33 +6112,67 @@ async def pulse_user_update(req: Request):
         text = (resp.choices[0].message.content or "").strip()
         text = re.sub(r"^```(markdown|md)?\s*", "", text).strip()
         text = re.sub(r"\s*```\s*$", "", text).strip()
-        ok, err = _pulse_validate(text)
+        # 用 target 自己的 budget 验,不是全局 PULSE_BUDGET_CHARS
+        ok, err = _pulse_validate(text, budget=cfg["budget"])
         if ok:
-            new_pulse = text
+            new_text = text
             break
         last_err = err
-        # 失败时下一轮 prompt 加上错误信息,让 LLM 修
         prompt = prompt + f"\n\n上次返回被校验拒了: {err}。修这条再返。"
 
-    if not new_pulse:
-        raise HTTPException(500, f"USER_PULSE 更新失败: {last_err}")
+    if not new_text:
+        raise HTTPException(500, f"{cfg['name']} 更新失败: {last_err}")
 
-    # 备份 + 写盘 + git
-    backup = _USER_PULSE_PATH.with_suffix(".md.bak")
+    backup = path.with_suffix(".md.bak")
     try:
-        backup.write_text(old_pulse, encoding="utf-8")
+        backup.write_text(old, encoding="utf-8")
     except Exception:
         pass
-    _USER_PULSE_PATH.write_text(new_pulse, encoding="utf-8")
+    path.write_text(new_text, encoding="utf-8")
 
     return {
         "ok": True,
-        "old_chars": len(old_pulse),
-        "new_chars": len(new_pulse),
-        "old_records": len(_TS_RE.findall(old_pulse)),
-        "new_records": len(_TS_RE.findall(new_pulse)),
+        "target": target,
+        "name": cfg["name"],
+        "old_chars": len(old),
+        "new_chars": len(new_text),
+        "old_records": len(_TS_RE.findall(old)),
+        "new_records": len(_TS_RE.findall(new_text)),
         "backup": str(backup),
+        "bootstrap": bootstrap,
     }
+
+
+@app.post("/api/pulse/user-update")
+async def pulse_user_update(req: Request):
+    """LLM 重写 USER_PULSE — compact 前置步骤。
+    body: { "conversation": "对话原文 (任意格式)" }
+    """
+    body = await req.json()
+    conversation = (body.get("conversation") or "").strip()
+    if not conversation:
+        raise HTTPException(400, "需要 conversation")
+    return _self_evolve_run("user_pulse", conversation)
+
+
+@app.post("/api/pulse/project-update")
+async def pulse_project_update(req: Request):
+    """LLM 重写项目 PULSE — compact 三件套之一。"""
+    body = await req.json()
+    conversation = (body.get("conversation") or "").strip()
+    if not conversation:
+        raise HTTPException(400, "需要 conversation")
+    return _self_evolve_run("project_pulse", conversation)
+
+
+@app.post("/api/pulse/agent-context-update")
+async def pulse_agent_context_update(req: Request):
+    """LLM 重写 AGENT_CONTEXT — compact 三件套之一,长出协作偏好 / 用户角色。"""
+    body = await req.json()
+    conversation = (body.get("conversation") or "").strip()
+    if not conversation:
+        raise HTTPException(400, "需要 conversation")
+    return _self_evolve_run("agent_context", conversation)
 
 
 @app.post("/api/pulse/refresh-mirror")
