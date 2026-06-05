@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_shell::process::CommandChild;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
 
@@ -168,12 +168,23 @@ pub fn run() {
                 .env("GATEWAY_NO_OPEN", "1")
                 .env("GATEWAY_PORT", port.to_string());
             let (mut rx, child) = sidecar.spawn().expect("spawn sidecar 失败");
-            // 排空 sidecar stdout/stderr — PyInstaller Win bootstrap 写一坨 debug 到
-            // stderr,如果没人 read rx 这个 channel,pipe buffer (Win 64KB) 满了
-            // sidecar 会 block 在 write syscall → uvicorn 永远起不来。
-            // 0.1.7/0.1.8 Win Tauri 5 轮 smoke 卡这条的真因。
+            // ① 排空 sidecar stdout/stderr — PyInstaller Win bootstrap 写一坨 debug 到
+            //    stderr,如果没人 read rx 这个 channel,pipe buffer (Win 64KB) 满了
+            //    sidecar 会 block 在 write syscall → uvicorn 永远起不来。
+            //    0.1.7/0.1.8 Win Tauri 5 轮 smoke 卡这条的真因。
+            // ② sidecar 死了 (auto-update / 用户 /api/quit / crash) → Tauri 主进程
+            //    跟着退出,防"banner 立即重启 → /api/quit → sidecar 死 → Tauri 还在,
+            //    用户看到 ERR_CONNECTION_REFUSED 卡屏"那条断链(self-review R3)。
+            let app_handle_for_sidecar = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                while rx.recv().await.is_some() { /* 丢掉,只为排空 buffer */ }
+                while let Some(event) = rx.recv().await {
+                    if let CommandEvent::Terminated(_) = event {
+                        log::info!("[sidecar] terminated → exit Tauri");
+                        app_handle_for_sidecar.exit(0);
+                        break;
+                    }
+                    // 其他事件(Stdout/Stderr)只为排空 buffer,不处理
+                }
             });
             // T6 存 child handle,退出时 kill
             app.manage(Mutex::new(Some(child)));
