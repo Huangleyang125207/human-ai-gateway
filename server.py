@@ -351,7 +351,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.12"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.13"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -2521,6 +2521,20 @@ async def _startup_auto_create():
     if now.hour >= AUTO_CREATE_AFTER_HOUR and _today_journal_missing():
         _silent_run_new_day()
     asyncio.create_task(_auto_create_loop())
+
+
+@app.on_event("startup")
+async def _startup_vault_reference_and_migration():
+    """启动时:
+    ① 确保 vault 里 reference 文件存在,缺则从 bundle 拷(byte-equal 不动已有)
+    ② bundle schema-version 比 vault 高 → 后台 async LLM 重组 vault 文件
+    """
+    try:
+        _ensure_vault_reference_files()
+    except Exception as e:
+        log.warning(f"_ensure_vault_reference_files: {e}")
+    # 迁移走 async background,LLM call 不阻塞 startup
+    asyncio.create_task(_run_schema_migration_if_needed())
 
 async def _auto_create_loop():
     while True:
@@ -6026,6 +6040,124 @@ _PULSE_UPDATE_PROMPT = """这是当前 {name} 全文({what}):
 返回纯 markdown,不要解释、不要 ``` 包裹。"""
 
 
+# ── vault reference 落地 + schema 升级 ──────────────────────────────
+# 分发模板源在 `gateway/reference/`,PyInstaller bundle 进 .app
+# startup 时:① 缺的 reference 拷进 vault(byte-equal 不动已有)
+#            ② bundle schema-version 比 vault 高 → 后台 LLM 重组 vault 文件
+_SCHEMA_VERSION_RE = re.compile(r"<!--\s*schema-version:\s*(\d+)\s*-->")
+
+def _get_schema_version(text: str) -> int:
+    """文件头部 `<!-- schema-version: N -->` 标记。无标记 = 0(bootstrap 态)"""
+    m = _SCHEMA_VERSION_RE.search(text)
+    return int(m.group(1)) if m else 0
+
+_VAULT_REFERENCE_TARGETS = {
+    "agent_context": {
+        "bundled_name": "AGENT_CONTEXT.md",
+        "vault_path": lambda: _AGENT_CONTEXT_PATH,
+        "evolve_target": "agent_context",  # schema bump 走 _self_evolve_run
+    },
+    "daily_tasks": {
+        "bundled_name": "daily-tasks.md",
+        "vault_path": lambda: VAULT_DIR / "daily-tasks.md",
+        "evolve_target": None,  # 用户编辑,不走 LLM
+    },
+    "tag_aggregation": {
+        "bundled_name": "标签聚合.md",
+        "vault_path": lambda: VAULT_DIR / "标签聚合.md",
+        "evolve_target": None,
+    },
+}
+
+
+def _bundled_reference_dir() -> Path:
+    """bundle 内 reference 目录;PyInstaller --add-data 进 GATEWAY_DIR/reference。"""
+    return GATEWAY_DIR / "reference"
+
+
+def _ensure_vault_reference_files() -> dict:
+    """startup 拷贝 reference 进 vault — 缺才补,已存在一字节不动(用户数据安全)。"""
+    bundle_dir = _bundled_reference_dir()
+    if not bundle_dir.is_dir():
+        return {"skipped": "bundle reference dir 不在"}
+    VAULT_DIR.mkdir(parents=True, exist_ok=True)
+    result = {}
+    for key, cfg in _VAULT_REFERENCE_TARGETS.items():
+        dst = cfg["vault_path"]()
+        if dst.exists():
+            result[key] = "exists"
+            continue
+        src = bundle_dir / cfg["bundled_name"]
+        if not src.exists():
+            result[key] = "no bundled src"
+            continue
+        try:
+            dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+            result[key] = f"copied to {dst}"
+        except Exception as e:
+            result[key] = f"copy fail: {e}"
+    return result
+
+
+# Pending notifications(给前端 banner 用)— 自动更新 + schema 迁移共用
+_PENDING_NOTIFICATIONS: list[dict] = []
+
+def _push_notification(kind: str, message: str, payload: dict | None = None):
+    """前端 30s poll /api/notifications,见 kind 后自决定 dismiss。"""
+    n = {"kind": kind, "message": message, "payload": payload or {}, "ts": datetime.now().isoformat()}
+    _PENDING_NOTIFICATIONS.append(n)
+    # 上限 20 条防泄漏
+    if len(_PENDING_NOTIFICATIONS) > 20:
+        del _PENDING_NOTIFICATIONS[0:len(_PENDING_NOTIFICATIONS)-20]
+
+
+async def _run_schema_migration_if_needed():
+    """async 后台跑:bundle schema-version > vault 时,LLM 重组 vault 文件按新 reference 结构。
+    daily-tasks / 标签聚合 schema bump 只补文件(用户自己后续手改),AGENT_CONTEXT 走 LLM 迁移。"""
+    bundle_dir = _bundled_reference_dir()
+    if not bundle_dir.is_dir():
+        return
+    for key, cfg in _VAULT_REFERENCE_TARGETS.items():
+        if cfg["evolve_target"] is None:
+            continue  # 不走 LLM 迁移
+        bundle_path = bundle_dir / cfg["bundled_name"]
+        vault_path = cfg["vault_path"]()
+        if not bundle_path.exists() or not vault_path.exists():
+            continue
+        try:
+            bundle_text = bundle_path.read_text(encoding="utf-8")
+            vault_text = vault_path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        bundle_v = _get_schema_version(bundle_text)
+        vault_v = _get_schema_version(vault_text)
+        if bundle_v <= vault_v:
+            continue  # schema 已最新
+        # 触发 LLM 迁移
+        migration_conversation = (
+            f"[SCHEMA MIGRATION] vault 文件 schema-version {vault_v},"
+            f"bundle reference 升级到 v{bundle_v}。\n\n"
+            f"任务:把 vault 现有内容按新 reference 模板的结构重组,保留所有 ts 标记 + "
+            f"用户有效数据(role / 角色 / 协作偏好等),加新 `<!-- schema-version: {bundle_v} -->` 标记。\n\n"
+            f"=== 新 reference 模板(目标结构)===\n{bundle_text}\n\n"
+            f"=== vault 当前内容(要迁移的)===\n{vault_text}\n"
+        )
+        try:
+            res = _self_evolve_run(cfg["evolve_target"], migration_conversation)
+            _push_notification(
+                "vault-schema-migrated",
+                f"vault {cfg['bundled_name']} 升级到 schema v{bundle_v}",
+                {"target": key, "old_version": vault_v, "new_version": bundle_v, "result": res},
+            )
+        except Exception as e:
+            log.warning(f"schema migration {key} failed: {e}")
+            _push_notification(
+                "vault-schema-migration-failed",
+                f"vault {cfg['bundled_name']} 升级失败,旧版仍可用",
+                {"target": key, "error": str(e)},
+            )
+
+
 # Self-evolve 三个 target 的 budget 配置(path 在文件顶部跟 _load_user_context 一起定义,因为
 # system prompt 注入也读这几个文件 — 真源路径必须共享)
 # 这三个文件机制完全一致:LLM 自由重写,server 只验 ts 格式 + 总长
@@ -6141,6 +6273,36 @@ def _self_evolve_run(target: str, conversation: str) -> dict:
         "backup": str(backup),
         "bootstrap": bootstrap,
     }
+
+
+@app.get("/api/notifications")
+def get_notifications(dismiss: str = ""):
+    """前端 poll banner 用。
+    返 pending 通知列表;调用时带 `?dismiss=kind1,kind2` 一次性清掉这些类型。
+    """
+    if dismiss:
+        kinds = set(k.strip() for k in dismiss.split(",") if k.strip())
+        global _PENDING_NOTIFICATIONS
+        _PENDING_NOTIFICATIONS = [n for n in _PENDING_NOTIFICATIONS if n["kind"] not in kinds]
+    return {"notifications": list(_PENDING_NOTIFICATIONS)}
+
+
+@app.post("/api/updater/installed")
+async def updater_installed(req: Request):
+    """Tauri 自动更新完下载 + install 后(.app 二进制已替换,但当前 process 还跑旧版),
+    Rust 端 POST 这里通知 sidecar,sidecar 推 banner 给前端 "重启生效"。"""
+    body = {}
+    try:
+        body = await req.json()
+    except Exception:
+        pass
+    version = (body.get("version") or "").strip() or "新版"
+    _push_notification(
+        "updater-installed",
+        f"Gateway {version} 已下载,重启 app 生效",
+        {"version": version},
+    )
+    return {"ok": True}
 
 
 @app.post("/api/pulse/user-update")

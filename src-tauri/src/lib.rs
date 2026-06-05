@@ -11,7 +11,7 @@ use tauri_plugin_updater::UpdaterExt;
 /// 启动时后台 check 是否有新版本。失败 silent — 不阻塞主流程。
 /// 走 yanpai feedback-sink /updates/latest.json,minisign 验签,有新版本下载到临时位置后
 /// 触发应用重启(用户确认 dialog 在前端做,这里只做检测+下载机制)
-async fn check_for_updates(app: AppHandle) {
+async fn check_for_updates(app: AppHandle, sidecar_port: u16) {
     let updater = match app.updater() {
         Ok(u) => u,
         Err(e) => {
@@ -21,17 +21,44 @@ async fn check_for_updates(app: AppHandle) {
     };
     match updater.check().await {
         Ok(Some(update)) => {
-            log::info!("[updater] new version available: {}", update.version);
+            let new_ver = update.version.clone();
+            log::info!("[updater] new version available: {}", new_ver);
             // 下载 + 安装 — 用户重启时生效;失败 silent
-            if let Err(e) = update
+            match update
                 .download_and_install(|_chunk, _total| {}, || {})
                 .await
             {
-                log::warn!("[updater] download/install failed: {e}");
+                Ok(()) => {
+                    log::info!("[updater] download+install done, notifying sidecar");
+                    // POST sidecar 让它推 banner 给前端 "重启生效"
+                    notify_sidecar_updater_installed(sidecar_port, &new_ver).await;
+                }
+                Err(e) => log::warn!("[updater] download/install failed: {e}"),
             }
         }
         Ok(None) => log::info!("[updater] no new version"),
         Err(e) => log::warn!("[updater] check failed: {e}"),
+    }
+}
+
+/// 把"新版本已下载,重启生效"事件推给 sidecar /api/updater/installed
+/// sidecar 内存队列存,前端 30s poll /api/notifications 拿出来挂 banner
+async fn notify_sidecar_updater_installed(port: u16, version: &str) {
+    let url = format!("http://127.0.0.1:{port}/api/updater/installed");
+    let body = serde_json::json!({ "version": version });
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("[updater] reqwest build fail: {e}");
+            return;
+        }
+    };
+    match client.post(&url).json(&body).send().await {
+        Ok(_) => log::info!("[updater] sidecar notified"),
+        Err(e) => log::warn!("[updater] sidecar notify fail: {e}"),
     }
 }
 
@@ -93,16 +120,18 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            // 启动 5s 后后台 check 更新(不阻塞窗口建,失败 silent)
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                check_for_updates(handle).await;
-            });
             // T4 自启 sidecar:动态空闲端口 + headless(GATEWAY_NO_OPEN=1)。
             // 用动态端口后,上次崩溃的孤儿占着旧口也不影响 —— 不在启动时杀(那会跟新 spawn 抢资源),
             // 退出时才清(见下 ExitRequested)。
             let port = pick_free_port();
+            // 启动 5s 后后台 check 更新(不阻塞窗口建,失败 silent)
+            // 传 port 进去,download 完了好 POST sidecar /api/updater/installed
+            let handle = app.handle().clone();
+            let updater_port = port;
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                check_for_updates(handle, updater_port).await;
+            });
             let sidecar = app
                 .shell()
                 .sidecar("gateway-server")

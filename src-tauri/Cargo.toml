@@ -31,3 +31,5 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 # 只为 updater startup delay,不引入运行时
 tokio = { version = "1", features = ["time"] }
+# POST sidecar 通知 update 完成(rustls 避免 native-tls 拉 OpenSSL)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }

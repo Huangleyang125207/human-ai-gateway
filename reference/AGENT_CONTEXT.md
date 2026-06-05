@@ -1,9 +1,13 @@
 # 这个 vault 怎么用
 
+<!-- schema-version: 1 -->
+
 > Length budget: 8000 字 · Stale threshold: 90 天未刷新 → LLM 应评估删除
 > 演化方式:LLM 自由重写,server 只验时间戳格式 + 总长。
 > 给 AI 看的 README。用户和 AI 共同维护;compact 时跟着对话长出新内容。
-> (vault first-time 落地时这文件无 `<!-- ts:YYYY-MM-DD -->` 标记 — 第一次 compact LLM 会给每段加上,之后每次刷新 ts。)
+> Schema 升级(reference 改大结构 → schema-version bump)时,server 启动后台
+> 让 LLM 把现有内容按新 reference 结构重组 + 保留 ts,user 0 操作。
+> (vault first-time 落地时无 `<!-- ts:YYYY-MM-DD -->` 标记 — 第一次 compact LLM 会给每段加上。)
 
 ---
 

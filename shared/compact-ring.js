@@ -12,6 +12,11 @@
   const THREAD_KEY = "gateway.thread.history.v1";
   const THRESHOLD_CHARS = 150000;  // ~75K tokens; 跟 chat 端 _trim_history_tool_volume + tool history 修后 5-10 轮深度大致对应
   const POLL_MS = 3000;
+  // 自动 compact 开关 — 默认 off(用户主动开,设置面板未来可加 toggle);
+  // 值在 localStorage,用户可手改 localStorage.setItem('gateway.compact.auto','on')
+  const AUTO_COMPACT_KEY = "gateway.compact.auto";
+  const AUTO_FIRE_COOLDOWN_MS = 10 * 60 * 1000;  // 一次成功后 10min 内不重复 fire
+  let lastAutoFireAt = 0;
 
   let ring = null;
 
@@ -55,7 +60,8 @@
   }
 
   let running = false;
-  async function runCompact() {
+  async function runCompact(opts) {
+    opts = opts || {};
     if (running) return;
     const chars = getHistoryChars();
     if (chars === 0) {
@@ -68,16 +74,18 @@
       return `[${role}] ${(m.content || "").trim()}`;
     }).join("\n\n");
 
-    const kChars = (chars / 1000).toFixed(1);
-    const ok = window.confirm(
-      `整理对话历史(${kChars}K 字符)?\n\n` +
-      `LLM 会重写 3 份 md:\n` +
-      `  · USER_PULSE — 你的当下快照\n` +
-      `  · 项目 PULSE — 项目状态\n` +
-      `  · AGENT_CONTEXT — vault 协作约定\n\n` +
-      `完成后对话历史会重置,3 份 md 自动 backup + git。`
-    );
-    if (!ok) return;
+    if (!opts.skipConfirm) {
+      const kChars = (chars / 1000).toFixed(1);
+      const ok = window.confirm(
+        `整理对话历史(${kChars}K 字符)?\n\n` +
+        `LLM 会重写 3 份 md:\n` +
+        `  · USER_PULSE — 你的当下快照\n` +
+        `  · 项目 PULSE — 项目状态\n` +
+        `  · AGENT_CONTEXT — vault 协作约定\n\n` +
+        `完成后对话历史会重置,3 份 md 自动 backup + git。`
+      );
+      if (!ok) return;
+    }
 
     running = true;
     ring.classList.add("compact-ring-running");
@@ -130,9 +138,27 @@
     ring.style.setProperty("--ring-color", color);
     const kChars = (chars / 1000).toFixed(1);
     const remaining = Math.max(0, 100 - pct);
-    ring.title = `对话 ${kChars}K / 150K · ${pct}% · 距离整理 ${remaining}%`;
+    const autoOn = localStorage.getItem(AUTO_COMPACT_KEY) === "on";
+    ring.title = `对话 ${kChars}K / 150K · ${pct}% · 距离整理 ${remaining}%${autoOn ? " · 自动整理: 开" : ""}`;
     // 超过 100% 加 pulse 微动画 (CSS)
     ring.classList.toggle("compact-ring-over", pct >= 100);
+    // 自动 compact:阈 ≥ 100% + 当前没在 streaming + cooldown 过 + 开关 on
+    if (autoOn && pct >= 100) tryAutoCompact();
+  }
+
+  function isStreaming() {
+    // 检测当前 thread 有没有 streaming 中的 message(thread.js 给元素加 .streaming 类)
+    return !!document.querySelector(".msg.streaming, .thread-stream .streaming");
+  }
+
+  function tryAutoCompact() {
+    if (running) return;
+    if (Date.now() - lastAutoFireAt < AUTO_FIRE_COOLDOWN_MS) return;
+    if (isStreaming()) return;  // 等 stream 完
+    lastAutoFireAt = Date.now();
+    // 用 toast 告知 user 自动开始(不弹 confirm — auto 模式就是 user 已授权)
+    window.gatewayToast?.("对话超阈值,自动整理中…");
+    runCompact({ skipConfirm: true });
   }
 
   function boot() {
