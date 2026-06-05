@@ -114,7 +114,7 @@ jobs:
           dir src-tauri\binaries
 
       - name: Tauri build (NSIS installer + updater)
-        # Tauri 2 自带 NSIS 模板出 Gateway_X.Y.Z_x64-setup.exe + Gateway_X.Y.Z_x64-setup.nsis.zip(updater)
+        # Tauri 2 自带 NSIS 模板出 Gateway_X.Y.Z_x64-setup.exe + 同名 .exe.sig(updater 签名挂在 .exe 上,不是单独 .nsis.zip)
         # Win 暂无 DigiCert 代码签名,SmartScreen 会拦,跟 0.1.5/0.1.6 setup.exe 一样
         # 用户体感:"更多信息→仍要运行"
         shell: cmd
@@ -130,7 +130,7 @@ jobs:
         run: |
           $ver = (Get-Content src-tauri\tauri.conf.json | ConvertFrom-Json).version
           "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          $sig_path = Get-ChildItem -Path "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.nsis.zip.sig" | Select-Object -First 1
+          $sig_path = Get-ChildItem -Path "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*-setup.exe.sig" | Select-Object -First 1
           if ($sig_path) {
             $sig = Get-Content $sig_path.FullName -Raw
             "sig<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -257,7 +257,7 @@ jobs:
             platforms = @{
               "windows-x86_64" = @{
                 signature = $sig.Trim()
-                url = "https://gateway.yanpaidb.cn/dl/Gateway_${ver}_x64-setup.nsis.zip"
+                url = "https://gateway.yanpaidb.cn/dl/Gateway_${ver}_x64-setup.exe"
               }
             }
           } | ConvertTo-Json -Depth 4
@@ -270,21 +270,19 @@ jobs:
           name: Gateway-windows-x64-${{ steps.meta.outputs.version }}
           path: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.nsis.zip
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.nsis.zip.sig
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe.sig
             latest-win.json
           retention-days: 30
 
       - name: Publish to GitHub Release (tag push 时)
-        # tag v* push 触发,Tauri NSIS 安装包 + updater zip+sig 挂 release。
+        # tag v* push 触发,Tauri 2 NSIS 安装包 + updater 签名挂 release。
         # 跟 Mac workflow 推到同一 release,softprops 幂等 append。
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.nsis.zip
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.nsis.zip.sig
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe.sig
             latest-win.json
           draft: true
           fail_on_unmatched_files: true
