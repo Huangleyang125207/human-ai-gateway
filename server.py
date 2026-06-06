@@ -270,14 +270,65 @@ def _env_overlay() -> dict:
 
 
 # ── config ───────────────────────────────────────────────────────────
+def _save_config(cfg: dict) -> None:
+    """CONFIG_PATH 写盘统一入口:atomic + 5-rotate bak + chmod 0600。
+    持有 API key,中途崩 = 用户秘钥不可恢复;明文权限松 = 拷 .app 漏 key。
+    """
+    content = json.dumps(cfg, ensure_ascii=False, indent=2)
+    _safe_write_text(CONFIG_PATH, content, rotate=True)
+    try:
+        os.chmod(CONFIG_PATH, 0o600)
+        for i in range(1, 6):
+            bak = Path(f"{CONFIG_PATH}.bak.{i}")
+            if bak.exists():
+                os.chmod(bak, 0o600)
+    except Exception:
+        pass  # 非 POSIX 或 perm 错 — 最大努力
+
+
 def load_config():
     """读 gateway-config.json,然后用 env 覆盖 secret 字段。
     返合并后的 dict。env 不存在的字段沿用 config.json。
+    主文件损坏 → 尝试 bak.1 回滚;再不行返空 dict 让 setup wizard 接管。
     """
+    cfg = {}
     if CONFIG_PATH.exists():
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    else:
-        cfg = {}
+        try:
+            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            log.error(f"CONFIG_PATH 损坏 ({type(e).__name__}: {e}),尝试 bak.1 回滚")
+            bak1 = Path(f"{CONFIG_PATH}.bak.1")
+            if bak1.exists():
+                try:
+                    cfg = json.loads(bak1.read_text(encoding="utf-8"))
+                    log.warning(f"CONFIG_PATH 已从 bak.1 回滚")
+                    try:
+                        _report_silent_failure(
+                            "config_restored_from_bak1",
+                            f"主 config 损坏,bak.1 回滚成功",
+                            context={"err": str(e)[:120]},
+                        )
+                    except Exception:
+                        pass
+                except Exception as e2:
+                    log.error(f"CONFIG_PATH bak.1 也无法解析: {e2}")
+                    try:
+                        _report_silent_failure(
+                            "config_corrupt_no_recovery",
+                            f"主+bak.1 双损,fallback 空 dict",
+                            context={"err": str(e)[:120], "bak_err": str(e2)[:120]},
+                        )
+                    except Exception:
+                        pass
+            else:
+                try:
+                    _report_silent_failure(
+                        "config_corrupt_no_bak",
+                        f"主 config 损坏且无 bak.1",
+                        context={"err": str(e)[:120]},
+                    )
+                except Exception:
+                    pass
     env = _env_overlay()
     # 顶层 chat 主 key
     if env.get("DEEPSEEK_API_KEY"):
@@ -351,7 +402,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.18"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.19"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -407,8 +458,43 @@ def _telemetry_save(failures: bool, heartbeat: bool):
         "heartbeat": bool(heartbeat),
         "consented_at": datetime.now().isoformat(),
     }
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    _save_config(cfg)
+
+
+# consent.js 明文承诺只收"错误码、调用元数据(模型标识、文件尺寸、网络层标记)"。
+# 任何 caller 误塞用户原文(task name / curator query / patch preview / LLM eval 输出)
+# 必须在入口被 drop,避免逐处审。 _dropped_keys 留作 drift 信号。
+_SF_CONTEXT_ALLOWLIST = frozenset({
+    "model", "model_id", "fallback_to", "fallback_from",
+    "network_marker", "status_code", "http_status",
+    "file_size_kb", "text_len", "cleaned_len", "lines",
+    "attempt", "retry_count", "dropped_count",
+    "err", "bak_err", "err_class",
+    "op", "phase",
+})
+_SF_CONTEXT_VALUE_MAX_LEN = 120
+
+
+def _sanitize_sf_context(ctx) -> dict:
+    """白名单过滤 + 标量类型限制 + 字符串截断。dict/list/object 一律 drop(可能嵌套用户内容)。"""
+    if not ctx or not isinstance(ctx, dict):
+        return {}
+    out = {}
+    dropped = []
+    for k, v in ctx.items():
+        if not isinstance(k, str) or k not in _SF_CONTEXT_ALLOWLIST:
+            dropped.append(str(k)[:40])
+            continue
+        if isinstance(v, bool) or isinstance(v, (int, float)) or v is None:
+            out[k] = v
+        elif isinstance(v, (str, bytes)):
+            s = v.decode("utf-8", errors="replace") if isinstance(v, bytes) else v
+            out[k] = s[:_SF_CONTEXT_VALUE_MAX_LEN]
+        else:
+            dropped.append(k)
+    if dropped:
+        out["_dropped_keys"] = ",".join(sorted(set(dropped)))[:_SF_CONTEXT_VALUE_MAX_LEN]
+    return out
 
 
 def _report_silent_failure(error_type: str, message: str = "", context: dict = None):
@@ -417,7 +503,8 @@ def _report_silent_failure(error_type: str, message: str = "", context: dict = N
     error_type: 枚举 snake_case,server 侧分类用
                 例: vision_classify_auth / cutout_all_failed / web_search_degraded
     message:    最长 200 字截断,不放用户内容
-    context:    可选 dict (model_id / file_size_kb / fallback_to / network 标记等)
+    context:    可选 dict,入口走 _sanitize_sf_context 白名单过滤,
+                consent.js 承诺范围外的 key 直接 drop(记 _dropped_keys 作 drift 信号)
 
     consent: 用户未同意"错误上报"时只写本地 jsonl,不进 cursor 队列(sender 也读 consent)。
     本地兜底始终在,这样 toggle 开了之后历史失败仍能回灌。
@@ -428,7 +515,7 @@ def _report_silent_failure(error_type: str, message: str = "", context: dict = N
             "client_id": get_client_id(),
             "error_type": error_type,
             "message": (message or "")[:200],
-            "context": context or {},
+            "context": _sanitize_sf_context(context),
             "app_version": APP_VERSION,
             "platform": f"{sys.platform}-{_platform.machine()}",
         }
@@ -1465,7 +1552,7 @@ def tool_check_daily_task(args):
         if m and m.group(4).strip() == full:
             lines[i] = f"{m.group(1)}{box}{m.group(3)}{m.group(4)}"
             new_text = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
-            f.write_text(new_text, encoding="utf-8")
+            _safe_write_text(f, new_text, rotate=True)
             return {"ok": True, "task_name": full, "checked": checked,
                     **({"resolved_from": args.get("task_name")} if args.get("task_name") != full else {})}
     return {"error": f"task '{full}' 解析后仍未找到对应行(罕见,可能 md 顶部刚改动)"}
@@ -4462,9 +4549,10 @@ def _ensure_md_progress_children(name: str, daily_dose: int, today_intake: int,
             + desired_children
             + lines[child_end:]
         )
-        f.write_text(
+        _safe_write_text(
+            f,
             "\n".join(new_lines) + ("\n" if text.endswith("\n") else ""),
-            encoding="utf-8",
+            rotate=True,
         )
         changed = True
     return changed
@@ -4490,7 +4578,7 @@ def _set_md_checkbox(name: str, checked: bool, target_date=None) -> bool:
                 return True  # 已经是这个状态,no-op
             lines[i] = f"{m.group(1)}{box}{m.group(3)}{m.group(4)}"
             new_text = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
-            f.write_text(new_text, encoding="utf-8")
+            _safe_write_text(f, new_text, rotate=True)
             return True
     return False
 
@@ -5849,9 +5937,13 @@ async def eval_test(req: Request):
             return text, json.loads(cleaned)
         except Exception as e:
             # 留言板会落 _(empty)_ 卡 — 用户次晨看 AI"啥都没说"。最高 UX 影响。
+            # 不送 text 原文 — 它是 LLM 对 user 日记的评议,属 consent.js 承诺
+            # "不收集对话记录"范围。只送长度元数据够定位"空/短/长非 JSON"。
             _report_silent_failure("eval_json_parse_failed",
                 f"{type(e).__name__}: {str(e)[:80]}",
-                context={"model": active_model, "raw_preview": text[:120]})
+                context={"model": active_model,
+                         "text_len": len(text or ""),
+                         "cleaned_len": len(cleaned or "")})
             return text, None
 
     # call 1: 主 eval
@@ -5916,7 +6008,7 @@ def _eval_persist(target: datetime, parsed: dict) -> Path:
             "",
             fi.get('why_now', ''),
         ]
-    f.write_text("\n".join(lines), encoding="utf-8")
+    _safe_write_text(f, "\n".join(lines), rotate=True)
     return f
 
 
@@ -6026,9 +6118,13 @@ async def eval_run(req: Request):
         try:
             return text, json.loads(cleaned)
         except Exception as e:
+            # 不送 text 原文 — 它是 LLM 对 user 日记的评议,属 consent.js 承诺
+            # "不收集对话记录"范围。只送长度元数据够定位"空/短/长非 JSON"。
             _report_silent_failure("eval_json_parse_failed",
                 f"{type(e).__name__}: {str(e)[:80]}",
-                context={"model": active_model, "raw_preview": text[:120]})
+                context={"model": active_model,
+                         "text_len": len(text or ""),
+                         "cleaned_len": len(cleaned or "")})
             return text, None
 
     eval_raw, eval_parsed = await _call_json(_eval_build_messages(target, model_id=active_model))
@@ -6724,6 +6820,27 @@ def _get_evolve_lock(target: str) -> threading.Lock:
         return lk
 
 
+# vault md (schedule + tag-aggregate) write 路径用,防 Obsidian 并发编辑被静默覆盖
+# 跟 _EVOLVE_LOCKS 分开:一个保护 schema migration(LLM 重写真源),
+# 一个保护 patch/insert/comment(块级编辑)。
+_VAULT_MD_LOCKS: dict[str, threading.Lock] = {}
+_VAULT_MD_LOCKS_GUARD = threading.Lock()
+
+
+def _get_vault_md_lock(path_str: str) -> threading.Lock:
+    with _VAULT_MD_LOCKS_GUARD:
+        lk = _VAULT_MD_LOCKS.get(path_str)
+        if lk is None:
+            lk = threading.Lock()
+            _VAULT_MD_LOCKS[path_str] = lk
+        return lk
+
+
+def _sha256_text(s: str) -> str:
+    import hashlib as _hl
+    return _hl.sha256(s.encode("utf-8")).hexdigest()
+
+
 def _self_evolve_run(target: str, conversation: str) -> dict:
     """通用 self-evolve:LLM 重写真源 md。USER_PULSE / 项目 PULSE / AGENT_CONTEXT 都走这一条路。
     锁保护 read→LLM→write 整段(防 #5 race);atomic write + rotate backup(#11 #13);
@@ -7390,8 +7507,7 @@ async def setup_save_partial(req: Request):
                 cfg.pop(k, None)
             else:
                 cfg[k] = v
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    _save_config(cfg)
     return {"ok": True}
 
 
@@ -7404,8 +7520,7 @@ async def setup_save_gemini(req: Request):
         raise HTTPException(400, "key 为空或占位符")
     cfg = load_config() or {}
     cfg["gemini_api_key"] = key
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    _save_config(cfg)
     return {"ok": True}
 
 
@@ -7492,8 +7607,7 @@ async def setup_save(req: Request):
     if gk and not gk.startswith("YOUR_"):
         cfg_out["gemini_api_key"] = gk
 
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(cfg_out, ensure_ascii=False, indent=2), encoding="utf-8")
+    _save_config(cfg_out)
     return {"ok": True, "saved_to": str(CONFIG_PATH)}
 
 
@@ -7619,7 +7733,7 @@ def _refresh_tag_aggregate() -> dict:
     # 把新行 append 进对应 section。策略:找 `## #tag` 下的最后一个 table 行,
     # 在它之后插入新行(无表则不动 — 这种情况不常见)。
     new_text = _append_rows_to_aggregate(text, new_rows)
-    TAG_AGGREGATE_PATH.write_text(new_text, encoding="utf-8")
+    _safe_write_text(TAG_AGGREGATE_PATH, new_text, rotate=True)
     per_tag_summary = "+".join(f"#{t}" for t, rs in new_rows.items() if rs) or "none"
     vault_git.commit_after_write(VAULT_DIR, f"aggregate refresh +{total_added} rows {per_tag_summary}",
                                  author="system", paths=[TAG_AGGREGATE_PATH])
@@ -7751,7 +7865,7 @@ async def tag_aggregate_register(req: Request):
     else:
         sep += "\n"
     new_text = text + sep + section
-    TAG_AGGREGATE_PATH.write_text(new_text, encoding="utf-8")
+    _safe_write_text(TAG_AGGREGATE_PATH, new_text, rotate=True)
     vault_git.commit_after_write(VAULT_DIR, f"aggregate register #{tag}",
                                  author="system", paths=[TAG_AGGREGATE_PATH])
 
@@ -7980,6 +8094,7 @@ def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "", author
     new_min = hh * 60 + mm
 
     text = f.read_text(encoding="utf-8")
+    baseline_sha = _sha256_text(text)
     lines = text.splitlines()
 
     # 拼新 H2: tag 优先,兜底 #新;末尾 stamp @author 给 authorship boundary 用
@@ -8026,7 +8141,12 @@ def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "", author
             lines = lines[:body_end] + ["", h2_line, ""] + lines[body_end:]
 
         new_text = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
-        f.write_text(new_text, encoding="utf-8")
+        with _get_vault_md_lock(str(f)):
+            actual = f.read_text(encoding="utf-8")
+            if _sha256_text(actual) != baseline_sha:
+                return {"error": f"vault md `{f.name}` 在 insert 期间被外部修改,拒绝覆盖。",
+                        "conflict": True, "file": _pretty_rel(f)}
+            _safe_write_text(f, new_text, rotate=True)
         vault_git.commit_after_write(VAULT_DIR, f"insert {f.stem} {hh}:{mm:02d} #{tag_clean}", author=author, paths=[f])
         return {"ok": True, "appended_to_existing": True, "h2": h2_line,
                 "file": _pretty_rel(f)}
@@ -8039,7 +8159,12 @@ def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "", author
         new_lines = lines + ["", "---", "", new_h1, "", h2_line]
 
     new_text = "\n".join(new_lines) + ("\n" if text.endswith("\n") else "")
-    f.write_text(new_text, encoding="utf-8")
+    with _get_vault_md_lock(str(f)):
+        actual = f.read_text(encoding="utf-8")
+        if _sha256_text(actual) != baseline_sha:
+            return {"error": f"vault md `{f.name}` 在 insert 期间被外部修改,拒绝覆盖。",
+                    "conflict": True, "file": _pretty_rel(f)}
+        _safe_write_text(f, new_text, rotate=True)
     vault_git.commit_after_write(VAULT_DIR, f"insert {f.stem} {hh}:{mm:02d} #{tag_clean}", author=author, paths=[f])
     return {"ok": True, "inserted": new_h1, "file": _pretty_rel(f)}
 
@@ -8145,7 +8270,7 @@ def _apply_task_op(f: Path, action: str, text: str, old_text: str) -> dict:
         new_lines = lines[:target_idx] + lines[end_idx:]
 
     new_text = "\n".join(new_lines) + ("\n" if raw.endswith("\n") else "")
-    f.write_text(new_text, encoding="utf-8")
+    _safe_write_text(f, new_text, rotate=True)
     try:
         rel = _pretty_rel(f)
     except Exception:
@@ -8192,7 +8317,7 @@ async def journal_delete_block(req: Request):
             break
     # 替换为占位 `##` + 一个空行
     new_lines = lines[:start + 1] + ["", "##", ""] + lines[end:]
-    f.write_text("\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
+    _safe_write_text(f, "\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), rotate=True)
     return {"ok": True, "cleared": time_label, "file": _pretty_rel(f)}
 
 
@@ -8230,6 +8355,7 @@ def _patch_block(f: Path, time_label: str, new_md: str, author: str = "ai",
     用户明示要改标题时由 tool caller 传。
     """
     text = f.read_text(encoding="utf-8")
+    baseline_sha = _sha256_text(text)
     lines = text.splitlines()
     h, m = time_label.split(":")
     # match either "# 18：30" (full-width) or "# 18:30" (half-width)
@@ -8296,7 +8422,15 @@ def _patch_block(f: Path, time_label: str, new_md: str, author: str = "ai",
             }
 
     new_lines = lines[:start + 1] + [""] + new_md.rstrip().splitlines() + [""] + lines[end:]
-    f.write_text("\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
+    new_content = "\n".join(new_lines) + ("\n" if text.endswith("\n") else "")
+    # 锁内重读 + sha256 比对,防 Obsidian 并发编辑被静默覆盖(C5)
+    with _get_vault_md_lock(str(f)):
+        actual = f.read_text(encoding="utf-8")
+        if _sha256_text(actual) != baseline_sha:
+            return {"error": f"vault md `{f.name}` 在 patch 期间被外部修改(Obsidian?),"
+                             f"拒绝覆盖。请前端 force-reload 后让用户重提交。",
+                    "conflict": True, "file": _pretty_rel(f)}
+        _safe_write_text(f, new_content, rotate=True)
     vault_git.commit_after_write(VAULT_DIR, f"patch {f.stem} {time_label}", author=author, paths=[f])
     return {"patched": time_label, "file": _pretty_rel(f)}
 
@@ -8309,6 +8443,7 @@ def _append_comment_to_block(f: Path, time_label: str, comment_md: str) -> dict:
     给 @user 块写"穿线 / 回看 / AI 注"用 — _patch_block 拒绝 @user 时的合法替代路径。
     """
     text = f.read_text(encoding="utf-8")
+    baseline_sha = _sha256_text(text)
     lines = text.splitlines()
     h, m = time_label.split(":")
     re_h1 = re.compile(rf'^# {int(h)}[：:]{m}\s*$')
@@ -8331,7 +8466,15 @@ def _append_comment_to_block(f: Path, time_label: str, comment_md: str) -> dict:
     # 在 end 之前插入 comment(保留原 body)。前留个空行让 markdown 段落分开。
     comment_lines = comment_md.rstrip().splitlines()
     new_lines = lines[:end] + [""] + comment_lines + [""] + lines[end:]
-    f.write_text("\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
+    new_content = "\n".join(new_lines) + ("\n" if text.endswith("\n") else "")
+    # 锁内重读 + sha256 比对,防 Obsidian 并发编辑被静默覆盖(C5)
+    with _get_vault_md_lock(str(f)):
+        actual = f.read_text(encoding="utf-8")
+        if _sha256_text(actual) != baseline_sha:
+            return {"error": f"vault md `{f.name}` 在 append-comment 期间被外部修改,"
+                             f"拒绝覆盖。请刷新后重试。",
+                    "conflict": True, "file": _pretty_rel(f)}
+        _safe_write_text(f, new_content, rotate=True)
     vault_git.commit_after_write(VAULT_DIR, f"append-comment {f.stem} {time_label}", author="ai", paths=[f])
     return {"appended": time_label, "file": _pretty_rel(f)}
 

@@ -56,19 +56,36 @@ def config_path() -> Path:
 
 
 def load() -> dict:
+    """读 vault config。
+    主文件不存在 → 返空 dict(走 setup wizard)。
+    主文件损坏 → 重命名为 .corrupted.<ts>(保留诊断) + 返空 dict 走 setup wizard
+                 (而非 silent return {} 导致用户以为 vault 切到默认 ~/.human-ai)。
+    """
     p = config_path()
     if not p.exists():
         return {}
     try:
         return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        try:
+            import time as _time
+            ts = int(_time.time())
+            corrupted = p.with_name(f"{p.name}.corrupted.{ts}")
+            p.rename(corrupted)
+        except Exception:
+            pass  # 重命名失败也只能继续
         return {}
 
 
 def save(cfg: dict) -> None:
+    """atomic tmp+replace,中途崩 = 主文件保持上一致状态,不会 0 字节化。
+    (不复用 server.py:_safe_write_text,避免 vault_config → server.py 循环依赖。)
+    """
     p = config_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(str(tmp), str(p))
 
 
 def resolve_vault_root() -> Path:
