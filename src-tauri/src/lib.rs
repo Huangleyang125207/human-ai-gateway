@@ -77,7 +77,14 @@ async fn notify_sidecar_updater_installed(port: u16, version: &str) {
 
 /// 失败时落 ~/.human-ai/.updater-pending.json,sidecar startup hook 读它后自动 push notification。
 /// 不引入 dirs crate;走 std::env 算 home。
+///
+/// workflow #11 闭合:Win 优先 USERPROFILE(Python sidecar 用 Path.home() 也走 USERPROFILE),
+/// 否则 Git for Windows 用户的 HOME=/c/Users/x(POSIX 风)跟 sidecar 的 C:\Users\x 算到两份
+/// 不同路径,sidecar 永远读不到 pending file → updater banner 永远不出。
 fn write_updater_pending(version: &str) {
+    #[cfg(windows)]
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
+    #[cfg(not(windows))]
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
     let Some(home) = home else { return };
     let dir = std::path::PathBuf::from(home).join(".human-ai");
@@ -107,9 +114,10 @@ fn pick_free_port() -> u16 {
 fn kill_stale_sidecars() {
     #[cfg(unix)]
     {
-        // -9 SIGKILL:孤儿不需要优雅 shutdown(那会拖着端口不放,新 sidecar 抢不到),瞬死立刻释放端口
+        // workflow #7 闭合:pkill -f 是 substring 匹配 → 会误杀任意 argv 含 "gateway-server"
+        // 的进程(包括用户在 IDE/shell 里编辑的同名文件 / 编译命令)。改 -x 精确进程名匹配。
         let _ = std::process::Command::new("pkill")
-            .args(["-9", "-f", "gateway-server"])
+            .args(["-9", "-x", "gateway-server"])
             .status();
     }
     #[cfg(windows)]

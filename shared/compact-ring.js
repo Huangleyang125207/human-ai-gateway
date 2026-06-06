@@ -66,6 +66,13 @@
   async function runCompact(opts) {
     opts = opts || {};
     if (running) return;
+    // workflow #14 #15 闭合:streaming 中按 ring 会撕掉正在写的 AI 回复,
+    // streamMsgEl detached → 后续 delta 写到空指针,用户看到回复消失。
+    // auto 模式之前已经在 tryAutoCompact 拦 isStreaming,手动 click 漏了一致 guard。
+    if (isStreaming()) {
+      window.gatewayToast?.("AI 还在回复,等它完了再整理。");
+      return;
+    }
     const chars = getHistoryChars();
     if (chars === 0) {
       window.gatewayToast?.("对话还空,先聊点东西再整理。");
@@ -161,9 +168,14 @@
         composed.push(...lastFromOld);
         composed.push(...newAfterCutoff);
 
+        // workflow #13 闭合:走 replaceHistory 单一 API(内部 saveHistory CAS),
+        // 不再直写 localStorage 绕过 thread.js 的 base_mtime 防护。
         if (composed.length === 0) {
           window.gateway?.thread?.clear?.();
+        } else if (window.gateway?.thread?.replaceHistory) {
+          window.gateway.thread.replaceHistory(composed);
         } else {
+          // 极端 fallback(thread.js 没 expose replaceHistory)— 不发生,但兜底
           localStorage.setItem(THREAD_KEY, JSON.stringify(composed));
           window.dispatchEvent(new StorageEvent("storage", { key: THREAD_KEY }));
         }

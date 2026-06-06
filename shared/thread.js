@@ -854,6 +854,16 @@
       saveHistory();
       stream.innerHTML = "";
     },
+    // workflow #13 闭合:compact 后用 replaceHistory 收口,内部走 saveHistory CAS
+    // 防 5.26 那种事故(localStorage 直写 → 跨 tab initSync 用 server 全量覆盖本地 compact)。
+    // 任何外部模块改 thread.history 都走这一个 API,localStorage.setItem(THREAD_KEY) 旁路被废
+    replaceHistory: (newHistory) => {
+      state.history = Array.isArray(newHistory) ? newHistory.slice() : [];
+      // 重渲染 DOM
+      stream.innerHTML = "";
+      for (const m of state.history) appendMsg(m);
+      saveHistory();  // 走 CAS,base_mtime 不变就 ok,变了 forceReloadFromServer 救
+    },
   };
   window.gateway.whisper = whisper;
   window.gatewayToast = whisper; // back-compat shim for old code

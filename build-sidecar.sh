@@ -41,6 +41,8 @@ HIDDEN=(
   --hidden-import uvicorn.lifespan.on --hidden-import uvicorn.lifespan.off
   --hidden-import multipart --hidden-import email_validator
   --hidden-import lxml._elementpath --hidden-import lxml.etree
+  # workflow #18 闭合:Win YAML 有这两条,Mac 漏 → Subject Lift fallback 时静默断 cutout
+  --hidden-import rapidocr_onnxruntime --hidden-import rembg
 )
 
 rm -rf "$GATEWAY_DIR/build-sidecar" "$GATEWAY_DIR/gateway-server.spec"

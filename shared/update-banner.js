@@ -44,15 +44,23 @@
     restartBtn.addEventListener("click", async () => {
       restartBtn.disabled = true;
       restartBtn.textContent = "重启中…";
-      // 优先 Tauri 2 process plugin:withGlobalTauri=true + capabilities remote URLs 后,
-      // window.__TAURI__ 暴露在 webview。invoke('plugin:process|restart') 是 Tauri 2 调用。
+      // workflow #16 闭合:浏览器侧直连点(非 Tauri webview)就走 /api/quit 会误杀
+      // sidecar 给同时打开的 Tauri 壳也断;先 detect Tauri 缺席就不杀 sidecar。
       const tauri = window.__TAURI__;
+      const inTauri = !!(tauri && (tauri.core?.invoke || tauri.process?.relaunch));
+      if (!inTauri) {
+        msg.textContent = "请在 Gateway 桌面壳里点重启(浏览器侧无法控制壳)";
+        restartBtn.disabled = false;
+        restartBtn.textContent = "知道了";
+        restartBtn.addEventListener("click", () => { el.style.display = "none"; }, { once: true });
+        return;
+      }
       try {
-        if (tauri?.core?.invoke) {
+        if (tauri.core?.invoke) {
           await tauri.core.invoke("plugin:process|restart");
           return;
         }
-        if (tauri?.process?.relaunch) {
+        if (tauri.process?.relaunch) {
           await tauri.process.relaunch();
           return;
         }

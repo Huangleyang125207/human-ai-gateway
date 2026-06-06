@@ -351,7 +351,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.16"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.17"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -706,13 +706,17 @@ def load_protocol(name: str, model_id: str = None) -> str:
 # memory dir + USER_PULSE 路径走 env(陌生用户没 → 默认 None,不 inject)
 import os as _os
 # 三个 self-evolve target 真源路径 — 默认 vault 旁(陌生用户拿到桌面壳即可用);
-# 开发者机器走 env override 指个人扩展位置(USER_PULSE / 项目 PULSE 在我自己仓库里)。
-# 默认指向不存在的 vault 文件没事 — _self_evolve_run 检测到 not-exist 走 graceful
-# skip 返 {ok:true, skipped:true},前端 compact-ring ok_count 算上不计 fail。
+# 开发者机器走 env override 指个人扩展位置。
+# 默认指向不存在的 vault 文件没事 — _self_evolve_run 检测到 not-exist 走 graceful skip。
 _USER_PULSE_PATH = Path(_os.environ.get("GATEWAY_USER_PULSE_PATH", str(VAULT_DIR / "USER_PULSE.md")))
-_MEMORY_DIR = Path(_os.environ.get("GATEWAY_MEMORY_DIR", "/Users/claudecodedezhuanshumac/.claude/projects/-Users-claudecodedezhuanshumac-agents----/memory"))
+# workflow #8 PII 防护:_MEMORY_DIR 默认 None,绝不再硬编开发者绝对路径。
+# 我自己机器走 env GATEWAY_MEMORY_DIR 指向私人 memory dir;陌生用户 / VM 镜像 / username
+# 撞名一律读不到 — 防 PII 灌进陌生用户 system prompt。
+_GATEWAY_MEMORY_DIR_ENV = _os.environ.get("GATEWAY_MEMORY_DIR", "").strip()
+_MEMORY_DIR = Path(_GATEWAY_MEMORY_DIR_ENV) if _GATEWAY_MEMORY_DIR_ENV else None
 _PROJECT_PULSE_PATH = Path(_os.environ.get("GATEWAY_PROJECT_PULSE_PATH", str(VAULT_DIR / "PROJECT_PULSE.md")))
-_AGENT_CONTEXT_PATH = VAULT_DIR / "AGENT_CONTEXT.md"
+# workflow #24 闭合:AGENT_CONTEXT 也加 env override(测试隔离需要)
+_AGENT_CONTEXT_PATH = Path(_os.environ.get("GATEWAY_AGENT_CONTEXT_PATH", str(VAULT_DIR / "AGENT_CONTEXT.md")))
 _USER_CTX_CACHE: dict = {"sig": None, "content": ""}
 
 def _load_user_context() -> str:
@@ -727,7 +731,7 @@ def _load_user_context() -> str:
         files.append(_PROJECT_PULSE_PATH)
     if _USER_PULSE_PATH.exists():
         files.append(_USER_PULSE_PATH)
-    if _MEMORY_DIR.exists():
+    if _MEMORY_DIR is not None and _MEMORY_DIR.exists():
         files.extend(sorted(p for p in _MEMORY_DIR.glob("*.md") if p.name != "MEMORY.md"))
     sig = tuple((str(p), p.stat().st_mtime) for p in files)
     if _USER_CTX_CACHE["sig"] == sig:
@@ -735,7 +739,16 @@ def _load_user_context() -> str:
     parts = []
     if _AGENT_CONTEXT_PATH.exists():
         try:
-            parts.append(f"\n\n=== AGENT_CONTEXT(vault 协作约定 + 用户角色)===\n{_AGENT_CONTEXT_PATH.read_text(encoding='utf-8')}")
+            ac_text = _AGENT_CONTEXT_PATH.read_text(encoding='utf-8')
+            # workflow #4 闭合:placeholder 字段是空槽,严禁 LLM 从对话反推填进
+            # 提示词层加硬约束。frozen 段是协议手册,user-region 是用户区。
+            parts.append(
+                "\n\n=== AGENT_CONTEXT(vault 协作约定 + 用户角色)===\n"
+                "**注意**:文件里 `<!-- placeholder: XXX -->` 注释下方的空字段(冒号后空白)"
+                "是用户**未填**的槽。严禁从对话反推内容填进去,也不要假设这条已知。"
+                "用户主动告诉你他的角色 / 关心点 时才用,否则一律视为未知。\n\n"
+                + ac_text
+            )
         except Exception:
             pass
     if _PROJECT_PULSE_PATH.exists():
@@ -2545,6 +2558,11 @@ async def _startup_vault_reference_and_migration():
         _consume_updater_pending()
     except Exception as e:
         log.warning(f"_consume_updater_pending: {e}")
+    # 接上轮没消费的持久化 notification(workflow #17)
+    try:
+        _consume_pending_notifications()
+    except Exception as e:
+        log.warning(f"_consume_pending_notifications: {e}")
 
 
 def _consume_updater_pending():
@@ -6026,8 +6044,27 @@ PULSE_STALE_DAYS = 60
 _TS_RE = re.compile(r"<!--\s*ts:(\d{4}-\d{2}-\d{2})\s*-->")
 
 
-def _pulse_validate(text: str, budget: int = PULSE_BUDGET_CHARS):
-    """返 (ok: bool, error: str)。budget 可被 self-evolve 各 target 覆盖。"""
+_FROZEN_RE = re.compile(r"<!--\s*frozen-start\s*-->(.*?)<!--\s*frozen-end\s*-->", re.DOTALL)
+_PLACEHOLDER_RE = re.compile(r"<!--\s*placeholder:\s*([^>\-]+?)\s*-->")
+
+def _extract_frozen(text: str) -> str:
+    """抓 frozen-start..frozen-end 段(协议手册区,LLM 不许动)。无 marker 返空。"""
+    m = _FROZEN_RE.search(text)
+    return m.group(1) if m else ""
+
+def _count_placeholders(text: str) -> int:
+    return len(_PLACEHOLDER_RE.findall(text))
+
+
+def _pulse_validate(text: str, budget: int = PULSE_BUDGET_CHARS,
+                    old_text: str = "", strict: bool = False):
+    """返 (ok: bool, error: str)。
+    根因 A 闭合(workflow #3 #19):
+      - 长度 + ts 格式(原有)
+      - strict 模式 ts count ratio ≥ 0.5、H2 ratio ≥ 0.7(防 LLM 大量删段绕过 length guard)
+      - 有 frozen marker 时,frozen 段 sha256 必须 byte-equal(协议手册不许动)
+      - 有 placeholder marker 时,数量必须 ≥ 原 placeholder 数(防 LLM 当用户数据吃掉)
+    """
     if len(text) > budget:
         return False, f"超 budget: {len(text)} > {budget}"
     matches = _TS_RE.findall(text)
@@ -6038,6 +6075,31 @@ def _pulse_validate(text: str, budget: int = PULSE_BUDGET_CHARS):
             datetime.strptime(m, "%Y-%m-%d")
         except Exception:
             return False, f"ts 不是合法日期: {m}"
+    if not old_text:
+        return True, ""
+    # Strict invariant checks 跟 old 对比
+    if strict:
+        old_ts = len(_TS_RE.findall(old_text))
+        new_ts = len(matches)
+        if old_ts > 0 and new_ts < int(old_ts * 0.5):
+            return False, f"ts 标记腰斩 {old_ts}→{new_ts}(<50%)"
+        old_h2 = len(re.findall(r"^##\s", old_text, re.MULTILINE))
+        new_h2 = len(re.findall(r"^##\s", text, re.MULTILINE))
+        if old_h2 > 4 and new_h2 < int(old_h2 * 0.7):
+            return False, f"H2 段数腰斩 {old_h2}→{new_h2}(<70%)"
+    # Frozen 段 byte-equal(协议手册区不许动)
+    old_frozen = _extract_frozen(old_text)
+    if old_frozen:
+        new_frozen = _extract_frozen(text)
+        import hashlib as _h_fro
+        if _h_fro.sha256(old_frozen.encode("utf-8")).hexdigest() != \
+           _h_fro.sha256(new_frozen.encode("utf-8")).hexdigest():
+            return False, "frozen 段(协议手册)被修改,不允许"
+    # Placeholder 完整性
+    old_ph = _count_placeholders(old_text)
+    new_ph = _count_placeholders(text)
+    if old_ph > 0 and new_ph < old_ph:
+        return False, f"placeholder 标记被吃掉 {old_ph}→{new_ph}(LLM 误把空槽当用户数据保留)"
     return True, ""
 
 
@@ -6067,6 +6129,51 @@ _PULSE_UPDATE_PROMPT = """这是当前 {name} 全文({what}):
 - 结构、段落、语气怎么排你定 — 旧的分段不是合同,想重新分段就重新分
 - ts 超过 {stale} 天没刷新的强烈嫌疑要删,自己评估
 - 你认为这条记录是「硬合同」(踩了就炸的那种),保留并刷新 ts;只有真过时才删
+
+返回纯 markdown,不要解释、不要 ``` 包裹。"""
+
+
+# AGENT_CONTEXT 独立 evolve prompt(workflow #1 critical 修):
+# 跟 USER_PULSE / PROJECT_PULSE 不同 — 这是「协议手册 + 用户区」混合体,frozen 段绝对不能动
+_AGENT_CONTEXT_EVOLVE_PROMPT = """这是当前 AGENT_CONTEXT.md 全文(vault 协议手册 + 用户区):
+═══════════════════════════════════════════
+{pulse}
+═══════════════════════════════════════════
+
+这是刚才那段对话(用户和 AI 协作记录):
+═══════════════════════════════════════════
+{conversation}
+═══════════════════════════════════════════
+
+今天: {today}
+
+**重要**:这文件分两段,处理方式不一样:
+
+### frozen 段(`<!-- frozen-start -->` 到 `<!-- frozen-end -->` 之间)
+
+vault 协议手册 — vault 怎么用 / tag 怎么打 / #协作 #commit 是什么 / 聚合页规则。
+**这段一字节都不能改**。server 会 byte-equal 比对,改了就被拒。
+你只能给段头 `<!-- ts:YYYY-MM-DD -->` 标记不变继续传递(标记本身在 frozen 段内,
+你连这都不要动,原样输出)。
+
+### user-region 段(`<!-- user-region-start -->` 到 `<!-- user-region-end -->` 之间)
+
+用户的协作 context 在这写。这段你可以根据对话长内容,但:
+- 看到 `<!-- placeholder: XXX -->` 注释,**保留这条注释**(server 会校验,丢了就拒)。
+  注释下面是这个 placeholder 对应的字段:用户填了就用用户填的,**用户没填(空冒号 / 留空)
+  你绝对不要替他脑补内容** — 留空原样,等用户自己填。
+- 用户在对话里**主动提到**自己的角色 / 关心点 / 协作偏好,可以填进对应字段。
+- 用户**没主动提**的字段保留空 + 保留 placeholder 注释。
+
+### 机械要求(server 会校验,违反就被拒)
+
+- frozen 段 byte-equal,不准改
+- 每个 `<!-- placeholder: ... -->` 注释必须保留(数量不能少)
+- 每条 ts 标记保留并按需刷新到今天 {today}
+- ts 总数不能比原文少一半(防你大量删段)
+- 整份不超过 {budget} 字
+
+{bootstrap_note}
 
 返回纯 markdown,不要解释、不要 ``` 包裹。"""
 
@@ -6163,6 +6270,65 @@ def _push_notification(kind: str, message: str, payload: dict | None = None):
         # 上限 20 条防泄漏
         if len(_PENDING_NOTIFICATIONS) > 20:
             del _PENDING_NOTIFICATIONS[0:len(_PENDING_NOTIFICATIONS)-20]
+    # workflow #17 闭合:重要 kind 持久化到磁盘,防 sidecar 重启 / process 死掉 notification 永久丢
+    # vault 被 LLM 自动改了 / reference bootstrap / schema 升级 — 用户必须知道
+    _PERSIST_NOTIF_KINDS = {
+        "vault-schema-migrated", "vault-schema-bumped",
+        "vault-schema-migration-failed", "vault-schema-migration-skip-external-edit",
+        "vault-reference-bootstrapped",
+    }
+    if kind in _PERSIST_NOTIF_KINDS:
+        _persist_pending_notification(n)
+
+
+def _pending_notif_path() -> Path:
+    return APP_STATE_DIR / "data" / ".pending-notifications.jsonl"
+
+
+def _persist_pending_notification(n: dict):
+    """append 到 ~/.../data/.pending-notifications.jsonl,sidecar 启动时读 + push + truncate。"""
+    try:
+        p = _pending_notif_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(n, ensure_ascii=False) + "\n")
+    except Exception as e:
+        log.warning(f"persist pending notification 失败: {e}")
+
+
+def _consume_pending_notifications():
+    """sidecar 启动时把上次没消费的持久化通知补 push。读完 truncate 文件。
+    损坏行 skip 不阻塞(workflow #12 同根因)。"""
+    p = _pending_notif_path()
+    if not p.exists():
+        return
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines()
+    except Exception as e:
+        log.warning(f"读 pending notifications 失败: {e}")
+        try: p.unlink()
+        except Exception: pass
+        return
+    count = 0
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            n = json.loads(line)
+        except Exception:
+            continue  # 损坏行 skip,不阻塞其他
+        with _NOTIF_LOCK:
+            _PENDING_NOTIFICATIONS.append(n)
+            if len(_PENDING_NOTIFICATIONS) > 20:
+                del _PENDING_NOTIFICATIONS[0:len(_PENDING_NOTIFICATIONS)-20]
+        count += 1
+    try:
+        p.unlink()  # 读完 truncate 防重复 push
+    except Exception:
+        pass
+    if count:
+        log.info(f"补 push {count} 条 pending notification")
 
 
 # Schema migration attempts 记录(防 #19 LLM call 死循环烧 token)
@@ -6447,6 +6613,7 @@ _SELF_EVOLVE_TARGETS = {
         "what": "用户当下快照 — 气压 / 想做 / 历史阶段 / 协作偏好 / 不要做",
         "budget": 12000,
         "stale": 60,
+        "prompt_template": "default",  # 用 _PULSE_UPDATE_PROMPT
     },
     "project_pulse": {
         "path": lambda: _PROJECT_PULSE_PATH,
@@ -6454,6 +6621,7 @@ _SELF_EVOLVE_TARGETS = {
         "what": "项目当下状态 — 一句话 / 当下气压 / Cannot break / Can play / 历史阶段 / 应该知道 / 不要做 / 时间锚点",
         "budget": 24000,
         "stale": 60,
+        "prompt_template": "default",
     },
     "agent_context": {
         "path": lambda: _AGENT_CONTEXT_PATH,
@@ -6461,6 +6629,7 @@ _SELF_EVOLVE_TARGETS = {
         "what": "AI 跟 vault 主人的协作约定 — vault 用法 / tag / #协作 / #commit / 协作偏好",
         "budget": 8000,
         "stale": 90,
+        "prompt_template": "agent_context",  # 走 _AGENT_CONTEXT_EVOLVE_PROMPT,frozen 段保护
     },
 }
 
@@ -6521,16 +6690,22 @@ def _self_evolve_run(target: str, conversation: str) -> dict:
             if bootstrap else ""
         )
 
-        prompt = _PULSE_UPDATE_PROMPT.format(
-            name=cfg["name"],
-            what=cfg["what"],
-            pulse=old,
-            conversation=conversation,
-            today=today,
-            budget=cfg["budget"],
-            stale=cfg["stale"],
-            bootstrap_note=bootstrap_note,
-        )
+        # Per-target prompt template(workflow #5 root cause B 闭合):
+        # AGENT_CONTEXT 走独立 _AGENT_CONTEXT_EVOLVE_PROMPT 保护协议手册 frozen 段;
+        # USER_PULSE / PROJECT_PULSE 走 default(快照型记录,允许压精简)
+        tmpl_key = cfg.get("prompt_template", "default")
+        if tmpl_key == "agent_context":
+            prompt = _AGENT_CONTEXT_EVOLVE_PROMPT.format(
+                pulse=old, conversation=conversation, today=today,
+                budget=cfg["budget"], bootstrap_note=bootstrap_note,
+            )
+        else:
+            prompt = _PULSE_UPDATE_PROMPT.format(
+                name=cfg["name"], what=cfg["what"],
+                pulse=old, conversation=conversation, today=today,
+                budget=cfg["budget"], stale=cfg["stale"],
+                bootstrap_note=bootstrap_note,
+            )
 
         profile = get_profile("deepseek-v4-pro") or get_profile()
         if not profile:
@@ -6556,27 +6731,25 @@ def _self_evolve_run(target: str, conversation: str) -> dict:
             text = (resp.choices[0].message.content or "").strip()
             text = re.sub(r"^```(markdown|md)?\s*", "", text).strip()
             text = re.sub(r"\s*```\s*$", "", text).strip()
-            ok, err = _pulse_validate(text, budget=cfg["budget"])
+            # 升级 validator:non-bootstrap 时 strict + 传 old_text(workflow #3 #19 闭合)
+            # strict 同时查 ts ratio ≥ 0.5、H2 ratio ≥ 0.7、frozen 段 byte-equal、placeholder 完整
+            ok, err = _pulse_validate(
+                text, budget=cfg["budget"],
+                old_text=("" if bootstrap else old),
+                strict=not bootstrap,
+            )
             if not ok:
                 last_err = err
                 prompt = prompt + f"\n\n上次返回被校验拒了: {err}。修这条再返。"
                 continue
-            # 内容保留 sanity(#6):非 bootstrap 时,新文本不能小于旧文本 40%
+            # 内容长度兜底(non-strict 模式即 bootstrap 也不能写空)
             if not bootstrap and len(text) < int(len(old) * 0.4):
-                last_err = f"重写后内容只剩 {len(text)}/{len(old)} 字符(<40%),拒;要求保留所有有效信息,只删真正过时的"
+                last_err = f"重写后内容只剩 {len(text)}/{len(old)} 字符(<40%),拒"
                 prompt = prompt + f"\n\n上次返回内容腰斩了({last_err})。请重新写,保留所有有效记录,只删 stale 那些。"
                 continue
-            # H2 数量不能掉超过 50%
-            old_h2 = len(re.findall(r"^##\s", old, re.MULTILINE))
-            new_h2 = len(re.findall(r"^##\s", text, re.MULTILINE))
-            if not bootstrap and old_h2 > 4 and new_h2 < int(old_h2 * 0.5):
-                last_err = f"H2 段数 {old_h2}→{new_h2}(<50%),拒;结构不能瘦身这么狠"
-                prompt = prompt + f"\n\n上次返回结构瘦了({last_err})。请保留段落结构,只压条目数。"
-                continue
-            # schema-version 保留(#8):如果旧文件有,新文件必须有同或更高
+            # schema-version 保留(workflow #8):旧有新没有 → 后处理注入(避免 retry 浪费 token)
             new_schema_version = _get_schema_version(text)
             if old_schema_version > 0 and new_schema_version < old_schema_version:
-                # 后处理自动注入(避免一次往返 retry)
                 text = _ensure_schema_version_header(text, old_schema_version)
             new_text = text
             break
@@ -6744,12 +6917,18 @@ _COMPACT_SUMMARY_PROMPT = """这是一段刚被压进 md 的对话。
 
 
 def _compact_summary_run(conversation: str) -> str:
-    """同步 LLM call,给 to_thread 包。返摘要文本。"""
+    """同步 LLM call,给 to_thread 包。返摘要文本。
+    workflow #23 闭合:失败接 silent-failure 通道,不再裸 except 让前端误以为 ok。
+    """
     profile = get_profile("deepseek-v4-flash") or get_profile("deepseek-v4-pro") or get_profile()
     if not profile:
+        _report_silent_failure("compact_summary_no_profile",
+                               "deepseek 模型未配置,summary 跳过")
         return ""
     client = get_client(profile)
     if client is None:
+        _report_silent_failure("compact_summary_no_client",
+                               "deepseek client 起不来,summary 跳过")
         return ""
     prompt = _COMPACT_SUMMARY_PROMPT.format(conversation=conversation)
     try:
@@ -6763,6 +6942,9 @@ def _compact_summary_run(conversation: str) -> str:
         return (resp.choices[0].message.content or "").strip()
     except Exception as e:
         log.warning(f"compact summary 失败: {e}")
+        _report_silent_failure("compact_summary_llm_call_failed",
+                               f"{type(e).__name__}: {e}",
+                               {"conversation_chars": len(conversation)})
         return ""
 
 
