@@ -351,7 +351,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.17"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.18"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -3607,25 +3607,37 @@ def _stream_final_reply(client, active_model, messages, loaded_groups, quota_use
         buffer = ""
         yielded_len = 0
         suppress = False
-        for chunk in stream_resp:
-            if not chunk.choices: continue
-            delta = chunk.choices[0].delta
-            if not delta: continue
-            rc = getattr(delta, "reasoning_content", None)
-            if rc:
-                reasoning_buf += rc
-            if not delta.content: continue
-            buffer += delta.content
-            if suppress: continue
-            if "｜｜DSML" in buffer or "<function_calls" in buffer:
-                suppress = True
-                continue
-            safe_end = max(yielded_len, len(buffer) - LOOKAHEAD)
-            if safe_end > yielded_len:
-                text = buffer[yielded_len:safe_end]
-                yielded_len = safe_end
-                emitted = True
-                yield _sse({"type": "delta", "text": text})
+        # workflow B #1 闭合:chunk 迭代裸奔会被 httpx 层的 ReadTimeout / RemoteProtocolError /
+        # ChunkedEncodingError 撕断 generator,FastAPI 把 SSE 流关闭但不发 error 事件,前端干等到
+        # 90s timer 才 abort。包 try/except → 发 error 事件 + 报 silent-failure 分桶。
+        try:
+            for chunk in stream_resp:
+                if not chunk.choices: continue
+                delta = chunk.choices[0].delta
+                if not delta: continue
+                rc = getattr(delta, "reasoning_content", None)
+                if rc:
+                    reasoning_buf += rc
+                if not delta.content: continue
+                buffer += delta.content
+                if suppress: continue
+                if "｜｜DSML" in buffer or "<function_calls" in buffer:
+                    suppress = True
+                    continue
+                safe_end = max(yielded_len, len(buffer) - LOOKAHEAD)
+                if safe_end > yielded_len:
+                    text = buffer[yielded_len:safe_end]
+                    yielded_len = safe_end
+                    emitted = True
+                    yield _sse({"type": "delta", "text": text})
+        except Exception as e:
+            err_msg = f"stream torn: {type(e).__name__}: {str(e)[:200]}"
+            yield _sse({"type": "error", "text": err_msg})
+            _report_silent_failure("chat_stream_torn_down",
+                str(e)[:150],
+                context={"model": active_model, "emitted_chars": yielded_len,
+                         "buffer_chars": len(buffer)})
+            return
         last_buffer = buffer
 
         if not suppress:
@@ -5536,6 +5548,23 @@ _FEATURE_INTRO_OPTIONS = """
 """
 
 
+# workflow B #2 闭合 helper:把 eval LLM 调用异常按子类型分桶,silent-failure 仪表盘可聚类。
+# 不再把 "401 鉴权 / 429 quota / 网络 timeout / response_format 不支持" 一锅煮成
+# `eval_response_format_unsupported` 让运维误以为是模型不支持 JSON mode。
+def _classify_eval_err(e: Exception) -> str:
+    s = str(e).lower()
+    cls = type(e).__name__.lower()
+    if "401" in s or "403" in s or "auth" in s or "unauthor" in cls:
+        return "eval_call_auth"
+    if "429" in s or "quota" in s or "rate" in s or "limit" in s:
+        return "eval_call_quota"
+    if "timeout" in s or "timeout" in cls or "timed out" in s:
+        return "eval_call_timeout"
+    if "response_format" in s or "json_object" in s or "json mode" in s:
+        return "eval_response_format_unsupported"
+    return "eval_call_failed"
+
+
 _EVAL_INJECTION = """
 
 ═══════════════════════════════════════════════════════════════════════════
@@ -5785,19 +5814,31 @@ async def eval_test(req: Request):
 
     async def _call_json(messages):
         """同款 try/fallback 包装。返 (raw_text, parsed_or_none)。
-        sync OpenAI 调用丢 threadpool 防阻塞 event loop(详 /api/eval/run 处注释)。"""
+        sync OpenAI 调用丢 threadpool 防阻塞 event loop(详 /api/eval/run 处注释)。
+        workflow B #2 闭合:第一次异常按子类型分桶(auth/quota/timeout/format),
+        不再无差别打成 `eval_response_format_unsupported` 让运维误判。第二次 fallback
+        也包 try/except,失败时返 (None, None) 让上层 graceful。"""
         def _blocking():
             try:
                 return client.chat.completions.create(
                     model=active_model, messages=messages,
                     response_format={"type": "json_object"},
+                    timeout=90,
                 )
             except Exception as e:
-                log.info(f"eval json_object 失败 ({e}), 重试无 response_format")
-                _report_silent_failure("eval_response_format_unsupported",
+                err_type = _classify_eval_err(e)
+                log.info(f"eval call_1 失败 ({err_type}: {e}), 重试 fallback")
+                _report_silent_failure(err_type,
                     f"{type(e).__name__}: {str(e)[:120]}",
-                    context={"model": active_model})
-                return client.chat.completions.create(model=active_model, messages=messages)
+                    context={"model": active_model, "phase": "test_call_1"})
+                try:
+                    return client.chat.completions.create(
+                        model=active_model, messages=messages, timeout=90)
+                except Exception as e2:
+                    _report_silent_failure("eval_fallback_call_failed",
+                        f"{type(e2).__name__}: {str(e2)[:120]}",
+                        context={"model": active_model, "phase": "test_call_2"})
+                    raise
         r = await asyncio.to_thread(_blocking)
         text = (r.choices[0].message.content or "").strip()
         # 容忍 <think>...</think> 和 ```json fence
@@ -5956,17 +5997,27 @@ async def eval_run(req: Request):
     async def _call_json(messages):
         # OpenAI SDK 是 sync 的,直接调会阻塞 event loop —— 21:30 eval 跑的时候
         # 整个 server 60-120s 失联(包括 chat endpoint),就是这个锅。丢 threadpool。
+        # workflow B #2 闭合:同上 — 异常分桶 + fallback 也包 try。
         def _blocking():
             try:
                 return client.chat.completions.create(
                     model=active_model, messages=messages,
-                    response_format={"type": "json_object"})
+                    response_format={"type": "json_object"},
+                    timeout=90)
             except Exception as e:
-                log.info(f"json_object failed ({e}), fallback")
-                _report_silent_failure("eval_response_format_unsupported",
+                err_type = _classify_eval_err(e)
+                log.info(f"eval call_1 失败 ({err_type}: {e}), 重试 fallback")
+                _report_silent_failure(err_type,
                     f"{type(e).__name__}: {str(e)[:120]}",
-                    context={"model": active_model})
-                return client.chat.completions.create(model=active_model, messages=messages)
+                    context={"model": active_model, "phase": "run_call_1"})
+                try:
+                    return client.chat.completions.create(
+                        model=active_model, messages=messages, timeout=90)
+                except Exception as e2:
+                    _report_silent_failure("eval_fallback_call_failed",
+                        f"{type(e2).__name__}: {str(e2)[:120]}",
+                        context={"model": active_model, "phase": "run_call_2"})
+                    raise
         r = await asyncio.to_thread(_blocking)
         text = (r.choices[0].message.content or "").strip()
         cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
@@ -6779,6 +6830,19 @@ def _self_evolve_run(target: str, conversation: str) -> dict:
             break
 
         if not new_text:
+            # workflow B #3 闭合:self-evolve LLM 失败接 silent-failure 通道。
+            # 按 401/403/quota/timeout 子类型分桶,跟 vision_classify / curator 同款规则
+            errlow = last_err.lower()
+            if "401" in last_err or "403" in last_err or "auth" in errlow:
+                err_type = "self_evolve_call_auth"
+            elif "429" in last_err or "quota" in errlow or "rate" in errlow:
+                err_type = "self_evolve_call_quota"
+            elif "timeout" in errlow:
+                err_type = "self_evolve_call_timeout"
+            else:
+                err_type = "self_evolve_llm_call_failed"
+            _report_silent_failure(err_type, last_err[:150],
+                context={"target": target, "model": profile.get("model"), "attempts": 2})
             raise HTTPException(500, f"{cfg['name']} 更新失败: {last_err}")
 
         # 内容指纹 guard(R10 + R11):read 后用户/外部进程改了 → 跳过写,但返
