@@ -97,17 +97,43 @@
 
 ---
 
-## P3 · B 网络 8 待补(synth 已 truncate,需翻 transcript 还原)
+## P3 · B 网络补录 (从 v0.1.18 round transcript 还原 by Workflow wbm3z8wbk · 2026-06-07)
 
-v0.1.18 收了 B 的 3 high(stream tear-down / eval _call_json 分桶 / self_evolve_run 上报),剩 8 med/low 没详细记录。下次开新 session 时:
+> v0.1.18 收口的是 3 high(stream tear-down / eval `_call_json` 分桶 / `self_evolve_run` 上报);v0.1.18-20 顺手又收口了 silent-failure ring-buffer 两条(见末尾)。下面 6 条是 transcript 还原后**仍 open** 的,内测期前修不完也要全列出来 — silent-failure 通道的盲点全在这。
 
-- 翻 transcript 找 workflow B(已完成于 v0.1.18 round)的完整 finding 列表
-- 补录到本文件
-- 候选方向:
-  - DeepSeek / 阿里云百炼 quota 失败 fallback chain 是否串联
-  - vision_classify / OCR / web_search / curator / cutout 哪些 silent fail 路径没接通道
-  - HTTP 重试 backoff 是否一致
-  - SSE 客户端断连 server 端释放是否干净
+### Silent-failure 通道盲点(高优先)
+
+- [x] **B-#1** `_run_schema_migration_if_needed` 失败只走 `_push_notification`,没接 silent-failure 通道 — schema migration 是后台 startup hook,用户既不主动触发也不可见;3 次失败 + 24h cooldown 后 LLM migration channel 彻底停摆,根因丢失 — **v0.1.21**
+  - 修:except block 加 `_report_silent_failure` 走 `_classify_eval_err` 分桶 → `schema_migration_auth/quota/timeout/format/failed`;`_migration_llm_call` 异常自然向外传由外层分桶
+
+- [ ] **B-#2** `baidu_ocr_image` 拿到 `error_code` (110/111/17/18/19) 时静默返 `""`,主调点 `baidu_ocr_image(...) or ''` 检测不到 — quota / token / QPS 全绕过 `ocr_baidu_failed` 上报;AI 视角下"图里没字"就开始凭空猜内容(同 5.20 长鑫存储 → 港币事件根因) — [high]
+  - cite: `ocr.py:142-147` (error_code 分支 return "") + `server.py:3057-3063` (`_ocr_text` 调用点 try/except 只捕异常);同 pattern `cutout.py:186-188`
+  - 修法:定义 `BaiduOCRError(code, msg)`,error_code 分支 raise 而非 return "";调用侧 `_ocr_text` except 捕到后 `_report_silent_failure('ocr_baidu_quota'/'ocr_baidu_token'/'ocr_baidu_qps', code=...)`;PULSE 内测期已点名 OCR quota 是典型案例
+  - 估时:2-3h(同改 cutout 模块)
+
+- [x] **B-#3** 百度 OAuth `_TOKEN_CACHE` invalidation 写错 key — token 过期后 `_TOKEN_CACHE['token'] = None` 给字典加了一个野 key,真 cache_key (`f"{api_key}:{secret_key}"`) 下的 stale token 原封不动;下次 `_get_access_token` 仍命中 stale → baidu 持续 110/111 → OCR 整进程都返 "",只能重启 .app 才修 — **v0.1.21**
+  - 修:ocr.py L146 改 `_TOKEN_CACHE.pop(cache_key, None)`
+
+- [ ] **B-#4** Cloud sink 4xx 一律推进 cursor — sink endpoint 写错 / deploy key 轮换 / client_id 格式漂移 → 所有 pending silent-failure 一桶倒进 /dev/null;只 `log.warning` 到 stderr,.app 用户根本看不见,反转了反馈通道的契约 — [high]
+  - cite: `server.py:791-809` (`_sf_drain_once` L802-806 4xx 分支无差别 cursor += len(pending))
+  - 修法:401/403/404 → 不 advance cursor + 累计 `_sf_sink_4xx_streak` (持久化 DATA_DIR),阈值 (如 3) → `_push_notification('sink-broken', kind='auth_or_url')`;400/422 (schema/payload 不对) → 单条 advance 不整批;consent dashboard 加 sink 状态 pill
+  - 估时:2-3h
+
+- [x] **B-#5** `_qwen_classify_image` 检测到 `dashscope_api_key` 缺 + `base_url` 不是 dashscope 时 `_report_silent_failure('vision_key_config_inconsistent')` 后 **未 return**,落到 OpenAI client 调用 → 用错家 key 打错家 endpoint,每张图必 401(5.29 prod outage 同款) — **v0.1.21**
+  - 修:`_report_silent_failure` 后直接 return 带 `error: "vision_key_config_inconsistent"` 的 dict;context 改用 `network_marker: "non_dashscope_base_url"` (在 `_sanitize_sf_context` 白名单内,不被 drop)
+  - 留续:`_push_notification` debounce 留 v0.1.22 (避免每次 chat 都弹)
+
+### 中优先(网络降级期 silent 退化)
+
+- [ ] **B-#6** 百度 OAuth POST 自身网络异常(DNS / TLS / Clash blip)时 `_get_access_token` log + return None,**stale cache 不清**;下个 caller 看 token 过期再走一次同样的网络洞,走完仍 None;`baidu_ocr_image` 返 "" 不 raise → `_ocr_text` 的 `except Exception` 永不触发,整条 OAuth-network-fail 路径 0 observability — 5.29 加的 37 hooks 全在 server.py,没覆盖 `ocr.py` / `cutout.py` 这俩 library 模块 — [medium]
+  - cite: `ocr.py:80-113` (OAuth POST except L111-113 仅 log + None) + `ocr.py:145-146` (stale 清错 key,同 B-#3 根因);`server.py:3025-3063` `_ocr_text` 只捕 exception
+  - 修法:ocr.py / cutout.py 加薄壳上报 helper(避免 lazy import 循环) — 例如 `_emit_ocr_failure(kind, **ctx)` 通过 import-time 注入的 callable(server.py 启动时 `ocr.set_failure_sink(_report_silent_failure)`);OAuth POST except 内 `_TOKEN_CACHE.pop(cache_key, None)` + emit `baidu_oauth_network_failed`;baidu_ocr_image 顶层包一层捕获 + emit 后 raise(同时改 B-#2 的 BaiduOCRError)
+  - 估时:3-4h(架构性 — 给 library 模块装"上报针脚",别再独立漂移)
+
+### 已被 v0.1.18-20 收口
+
+- [x] **B-#7** silent-failure sender cursor 没在 `_trim_silent_failures` 截断后回拨,cloud sink 永久哑火 — **v0.1.18-20**: trim 计 `drop_count` + `_sf_cursor_write(max(0, old_cursor - drop_count))` 全包在 `_SF_FILE_LOCK` 内
+- [x] **B-#8** `silent-failures.jsonl` trim 与 append 并发吞行 — **v0.1.18-20**: 引入 `_SF_FILE_LOCK` + trim 走 `_safe_write_text` (atomic tmp+rename+fsync) + cursor 调整折入同一锁内
 
 ---
 

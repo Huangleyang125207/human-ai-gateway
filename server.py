@@ -467,7 +467,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.20"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.21"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -1968,10 +1968,14 @@ def _qwen_classify_image(file_path: Path, extra_q: str = "") -> dict:
                 "no dashscope_api_key + fallback api_key 也空")
             return {"error": "no_dashscope_key",
                     "hint": "请去 setup 面板填 Dashscope API key (Qwen-VL),才能用 vision 路由"}
-        # key 存在但 base_url 不是 dashscope — 5.29 那次 401 的真因(prod .env 漏 key)
+        # key 存在但 base_url 不是 dashscope — 5.29 prod 401 的真因(prod .env 漏 key)
+        # B-#5: 上报 + 直接返,**别**继续走 OpenAI client 用错家 key 打错家 endpoint
+        # (每张图 401 + 烧 latency + silent-failure 2 条/张)
         _report_silent_failure("vision_key_config_inconsistent",
             "dashscope_api_key 空,fallback 顶层 api_key 但 base_url 不是 dashscope endpoint",
-            context={"base_url": base_for_check})
+            context={"network_marker": "non_dashscope_base_url"})
+        return {"error": "vision_key_config_inconsistent",
+                "hint": "顶层 api_key 跟 base_url 不是 dashscope endpoint;请在 setup 填 dashscope_api_key 或把 base_url 改成 dashscope"}
     if not file_path.exists():
         _report_silent_failure("vision_file_missing",
             f"attachment 文件不存在: {file_path.name}")
@@ -6914,13 +6918,32 @@ async def _run_schema_migration_if_needed():
                 f"vault {cfg['bundled_name']} 自动升级失败(已重试 {a_llm['count']} 次,真源未动)",
                 {"target": key, "error": str(e), "attempts": a_llm["count"]},
             )
+            # B-#1: schema migration 是 startup hook,用户不可见;3 次失败 + 24h cooldown
+            # 后 LLM migration channel 彻底停摆。失败必须进 silent-failure 通道,否则
+            # 内测期 deepseek quota / 401 / timeout 这种根因丢失。
+            err_class = _classify_eval_err(e) if "_classify_eval_err" in globals() else "eval_call_failed"
+            err_type = err_class.replace("eval_call_", "schema_migration_").replace(
+                "eval_response_format_unsupported", "schema_migration_format_invalid"
+            )
+            try:
+                _report_silent_failure(
+                    err_type,
+                    f"{type(e).__name__}: {str(e)[:120]}",
+                    context={"attempt": a_llm["count"], "err_class": err_class,
+                             "model_id": (profile or {}).get("model", "unknown")
+                             if isinstance(profile, dict) else "unknown"},
+                )
+            except Exception:
+                pass
 
     if attempts_changed:
         _write_migration_attempts(attempts)
 
 
 def _migration_llm_call(client, profile, prompt: str) -> str:
-    """同步 LLM 一次性 call,给 to_thread 包。返清洗后的 markdown 文本。"""
+    """同步 LLM 一次性 call,给 to_thread 包。返清洗后的 markdown 文本。
+    B-#1: 异常自然向外传,外层 except 走 `_classify_eval_err` 分桶 + silent-failure 上报。
+    """
     resp = client.chat.completions.create(
         model=profile.get("model", "deepseek-v4-pro"),
         messages=[{"role": "user", "content": prompt}],

@@ -141,9 +141,12 @@ def baidu_ocr_image(file_path: Path | str, api_key: str, secret_key: str) -> str
         data = r.json()
         if "error_code" in data:
             log.warning(f"baidu ocr error {data.get('error_code')}: {data.get('error_msg')}")
-            # token 失效 → 清 cache 让下次重新换
+            # B-#3: token 失效 → 清 cache 让下次重新换
+            # 老版 `_TOKEN_CACHE["token"] = None` 写错 key(真 key 是 f"{api_key}:{secret}"),
+            # stale token 原封不动 → OCR 整进程返 "",只能重启 .app 才修
             if data.get("error_code") in (110, 111):
-                _TOKEN_CACHE["token"] = None
+                cache_key = f"{api_key}:{secret_key}"
+                _TOKEN_CACHE.pop(cache_key, None)
             return ""
         words = [w.get("words", "") for w in data.get("words_result", [])]
         return "\n".join(words).strip()
