@@ -120,8 +120,12 @@ USER_WIDGETS_PATH = DATA_DIR / "user-widgets.json"
 _LEGACY_USER_WIDGETS = Path(__file__).parent / ".user-widgets.json"
 if _LEGACY_USER_WIDGETS.exists() and not USER_WIDGETS_PATH.exists():
     try:
+        # 模块加载期(line 121),_safe_write_text 还没定义,内联 tmp+replace
         USER_WIDGETS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        USER_WIDGETS_PATH.write_text(_LEGACY_USER_WIDGETS.read_text(encoding="utf-8"), encoding="utf-8")
+        _legacy_text = _LEGACY_USER_WIDGETS.read_text(encoding="utf-8")
+        _tmp_widgets = USER_WIDGETS_PATH.with_suffix(USER_WIDGETS_PATH.suffix + ".tmp")
+        _tmp_widgets.write_text(_legacy_text, encoding="utf-8")
+        _tmp_widgets.replace(USER_WIDGETS_PATH)
     except Exception:
         pass
 CONFIG_PATH = CONFIG_DIR / "gateway-config.json"
@@ -170,6 +174,36 @@ def _migrate_old_state():
 
 
 # ── 安全写(原子 tmpfile+rename + 可选 5-rotate 备份)──
+# A-H3: tmp 文件名固定 .tmp → 同 path 并发写者撞;模块级 path-keyed lock + uuid tmp 名
+# A-M5: tmp fd fsync + parent dir fsync → 断电后 atomic rename 才真到盘
+# A-H2/H12: _rotate_backup bak.1 走 tmp+replace;catch-all 改 silent-failure 上报
+import threading as _threading_wg
+_WRITE_GUARD_LOCKS: dict[str, "_threading_wg.Lock"] = {}
+_WRITE_GUARD_LOCKS_GUARD = _threading_wg.Lock()
+
+
+def _get_write_guard_lock(path_str: str) -> "_threading_wg.Lock":
+    with _WRITE_GUARD_LOCKS_GUARD:
+        lk = _WRITE_GUARD_LOCKS.get(path_str)
+        if lk is None:
+            lk = _threading_wg.Lock()
+            _WRITE_GUARD_LOCKS[path_str] = lk
+        return lk
+
+
+def _fsync_parent(path: Path) -> None:
+    """fsync 父目录:保证 atomic rename 在断电后真持久(POSIX 必需,Win 无效)。"""
+    try:
+        dfd = os.open(str(path.parent), os.O_DIRECTORY) if hasattr(os, "O_DIRECTORY") else None
+        if dfd is not None:
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+    except Exception:
+        pass  # Win 没 O_DIRECTORY,或权限不够 — 跳过(rename 自身仍 atomic)
+
+
 def _rotate_backup(path: Path, keep: int = 5):
     """把 path 旋转出去:bak.{N-1} → bak.N(老的先掉),原 path 内容写进 bak.1。
     用于写之前调一次,即使下次写出错或被错数据覆盖,bak.1..bak.5 还能 rollback。
@@ -186,10 +220,21 @@ def _rotate_backup(path: Path, keep: int = 5):
             src = Path(f"{path}.bak.{i-1}")
             if src.exists():
                 src.rename(Path(f"{path}.bak.{i}"))
-        # 当前文件 → bak.1
-        Path(f"{path}.bak.1").write_bytes(path.read_bytes())
-    except Exception:
-        pass  # 备份失败不阻塞主流程
+        # 当前文件 → bak.1 走 atomic tmp+replace(A-H2)
+        bak1 = Path(f"{path}.bak.1")
+        bak1_tmp = Path(f"{path}.bak.1.{os.getpid()}.tmp")
+        bak1_tmp.write_bytes(path.read_bytes())
+        bak1_tmp.replace(bak1)
+    except Exception as e:
+        # A-H2: catch-all 改可观测;rotate 自身崩了应当报出来
+        try:
+            _report_silent_failure(
+                "rotate_backup_failed",
+                f"{type(e).__name__}: {str(e)[:120]}",
+                context={"op": "rotate_backup"},
+            )
+        except Exception:
+            pass
 
 
 def _pretty_rel(p: Path) -> str:
@@ -209,14 +254,34 @@ def _pretty_rel(p: Path) -> str:
 def _safe_write_text(path: Path, content: str, rotate: bool = False, encoding: str = "utf-8"):
     """原子写文本。rotate=True 先把旧的旋转成 bak.1..bak.5 再写。
     用 tmpfile + rename 实现原子(POSIX:os.rename 是 atomic;Windows 用 os.replace)。
+    A-H3:tmp 文件名 uuid + path-keyed lock 防同 path 并发写者撞 tmp。
+    A-M5:tmp fd fsync + parent dir fsync 保证断电场景内容到盘。
     """
+    import uuid as _uuid
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if rotate:
-        _rotate_backup(path)
-    tmp = Path(f"{path}.tmp")
-    tmp.write_text(content, encoding=encoding)
-    tmp.replace(path)
+    path_str = str(path)
+    with _get_write_guard_lock(path_str):
+        if rotate:
+            _rotate_backup(path)
+        tmp = Path(f"{path}.{os.getpid()}.{_uuid.uuid4().hex[:8]}.tmp")
+        try:
+            with tmp.open("w", encoding=encoding) as fh:
+                fh.write(content)
+                fh.flush()
+                try:
+                    os.fsync(fh.fileno())  # A-M5: 内容真落盘
+                except Exception:
+                    pass
+            tmp.replace(path)
+            _fsync_parent(path)  # A-M5: rename 的方向真持久
+        finally:
+            # 异常退出时残留 tmp 清掉
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except Exception:
+                pass
 
 ALLOWED_IMAGE_EXT = {"jpg", "jpeg", "png", "gif", "webp", "heic"}
 MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -402,7 +467,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.19"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.20"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -423,8 +488,8 @@ def _load_or_create_client_id() -> str:
         pass
     new_id = str(uuid.uuid4())
     try:
-        CLIENT_ID_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CLIENT_ID_PATH.write_text(new_id, encoding="utf-8")
+        # A-M2: PULSE "client_id 文件不能动" 硬合同 — atomic + rotate=True 兜底
+        _safe_write_text(CLIENT_ID_PATH, new_id, rotate=True)
     except Exception as e:
         log.warning(f"client_id 持久化失败,本次启动用内存版: {e}")
     return new_id
@@ -497,6 +562,11 @@ def _sanitize_sf_context(ctx) -> dict:
     return out
 
 
+# A-H6+H11: silent-failures.jsonl 3 写者(append / trim / cursor)+ sender drain
+# 同进程互不撞;append+trim 用同一个 lock,cursor 独立 lock(cursor 是 byte-size 不会撞 line)。
+_SF_FILE_LOCK = threading.Lock()
+
+
 def _report_silent_failure(error_type: str, message: str = "", context: dict = None):
     """记一条 silent failure 进本地 ring buffer。fire-and-forget,自身永不 raise。
 
@@ -506,10 +576,20 @@ def _report_silent_failure(error_type: str, message: str = "", context: dict = N
     context:    可选 dict,入口走 _sanitize_sf_context 白名单过滤,
                 consent.js 承诺范围外的 key 直接 drop(记 _dropped_keys 作 drift 信号)
 
-    consent: 用户未同意"错误上报"时只写本地 jsonl,不进 cursor 队列(sender 也读 consent)。
-    本地兜底始终在,这样 toggle 开了之后历史失败仍能回灌。
+    consent: 用户未同意"错误上报"时**连本地 jsonl 都不写**(C-#4 收口)。
+    原设计是"撤回期本地仍写,sender 读 consent 暂停上送,再开同意时回灌历史"——
+    这违反"用户主动撤回过"的承诺(撤回期间数据再开同意时被回灌上送)。
+    现在:撤回期间通道完全静音,本地不增长,云端不回灌。
     """
     try:
+        # consent gate(C-#4):撤回期间连本地都不写。
+        # try/except 兜:_telemetry_consent → load_config → 损坏路径理论上会回拨
+        # _report_silent_failure;若 config + bak.1 双损则递归。挂了直接静音。
+        try:
+            if not _telemetry_consent().get("failures", False):
+                return
+        except Exception:
+            return
         entry = {
             "ts": datetime.now().isoformat(),
             "client_id": get_client_id(),
@@ -520,8 +600,16 @@ def _report_silent_failure(error_type: str, message: str = "", context: dict = N
             "platform": f"{sys.platform}-{_platform.machine()}",
         }
         SILENT_FAILURES_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with SILENT_FAILURES_LOG.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        # A-H6+H11: append 走 lock + flush + fsync,堵 trim/drain 同进程并发
+        line = json.dumps(entry, ensure_ascii=False) + "\n"
+        with _SF_FILE_LOCK:
+            with SILENT_FAILURES_LOG.open("a", encoding="utf-8") as f:
+                f.write(line)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())  # 反馈通道本身崩了最不该悄无声息
+                except Exception:
+                    pass
         # 偶尔 trim(每 100 条采样一次,均摊 IO)
         if random.random() < 0.01:
             _trim_silent_failures()
@@ -534,14 +622,26 @@ def _report_silent_failure(error_type: str, message: str = "", context: dict = N
 
 
 def _trim_silent_failures():
-    """保留最近 _SILENT_FAILURES_RING_MAX 条。"""
+    """保留最近 _SILENT_FAILURES_RING_MAX 条。
+    A-H6+H11: lock + atomic write;trim 时通过 cursor 调整(drop_count)避免漏发。
+    """
     try:
-        if not SILENT_FAILURES_LOG.exists():
-            return
-        lines = SILENT_FAILURES_LOG.read_text(encoding="utf-8").splitlines()
-        if len(lines) > _SILENT_FAILURES_RING_MAX:
+        with _SF_FILE_LOCK:
+            if not SILENT_FAILURES_LOG.exists():
+                return
+            lines = SILENT_FAILURES_LOG.read_text(encoding="utf-8").splitlines()
+            if len(lines) <= _SILENT_FAILURES_RING_MAX:
+                return
+            drop_count = len(lines) - _SILENT_FAILURES_RING_MAX
             kept = lines[-_SILENT_FAILURES_RING_MAX:]
-            SILENT_FAILURES_LOG.write_text("\n".join(kept) + "\n", encoding="utf-8")
+            _safe_write_text(SILENT_FAILURES_LOG, "\n".join(kept) + "\n", rotate=False)
+            # 同步调整 cursor 避免漏发(drain 是按行号续上的,trim 后行号往左挪)
+            try:
+                old_cursor = _sf_cursor_read()
+                new_cursor = max(0, old_cursor - drop_count)
+                _sf_cursor_write(new_cursor)
+            except Exception:
+                pass
     except Exception as e:
         try:
             log.warning(f"silent_failures trim 失败: {e}")
@@ -569,8 +669,8 @@ def _sf_cursor_read() -> int:
 
 def _sf_cursor_write(line_no: int):
     try:
-        _SF_CURSOR_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _SF_CURSOR_PATH.write_text(str(line_no), encoding="utf-8")
+        # A-M3: atomic;cursor 损坏 → 整 ring buffer 重发(空 cursor = 从 0 开始)
+        _safe_write_text(_SF_CURSOR_PATH, str(line_no), rotate=False)
     except Exception:
         pass  # cursor 丢失最坏后果:下次重发已发条目(server 不去重也无伤大雅)
 
@@ -617,8 +717,8 @@ def _hb_last_sent_day() -> str:
 
 def _hb_mark_sent(day: str):
     try:
-        _HB_LAST_SENT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _HB_LAST_SENT_PATH.write_text(day, encoding="utf-8")
+        # A-M3: atomic;heartbeat 戳子损坏 → 当日 DAU 多算一次,小代价
+        _safe_write_text(_HB_LAST_SENT_PATH, day, rotate=False)
     except Exception:
         pass
 
@@ -1390,10 +1490,19 @@ def tool_add_widget(args):
     (folder / "widget.html").write_text(args["widget_html"], encoding="utf-8")
     (folder / "widget.js").write_text(args["widget_js"], encoding="utf-8")
 
-    cfg = json.loads(USER_WIDGETS_PATH.read_text(encoding="utf-8")) if USER_WIDGETS_PATH.exists() else {"active": []}
-    if name not in cfg["active"]:
+    # A-H9: read 端加 try 防 json.loads 跑挂 endpoint;write 走 atomic + rotate
+    cfg = {"active": []}
+    if USER_WIDGETS_PATH.exists():
+        try:
+            cfg = json.loads(USER_WIDGETS_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            _report_silent_failure("user_widgets_parse_failed",
+                f"{type(e).__name__}: {str(e)[:120]}")
+            cfg = {"active": []}
+    if name not in cfg.setdefault("active", []):
         cfg["active"].append(name)
-    USER_WIDGETS_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    _safe_write_text(USER_WIDGETS_PATH,
+        json.dumps(cfg, indent=2, ensure_ascii=False), rotate=True)
     return {"created": name, "active": cfg["active"]}
 
 def tool_patch_widget(args):
@@ -2655,10 +2764,12 @@ async def _startup_vault_reference_and_migration():
 def _consume_updater_pending():
     """Rust updater 在 sidecar 没起来时落 ~/.human-ai/.updater-pending.json。
     sidecar 启动时读它 → push notification → 消费后删文件。
+    A-H4: unlink 挪出 try — 损坏的 pending 也得删掉,否则永远卡 banner。
     """
     pending = Path.home() / ".human-ai" / ".updater-pending.json"
     if not pending.exists():
         return
+    pushed = False
     try:
         data = json.loads(pending.read_text(encoding="utf-8"))
         version = data.get("version") or "新版"
@@ -2667,10 +2778,22 @@ def _consume_updater_pending():
             f"Gateway {version} 已下载,重启 app 生效",
             {"version": version, "source": "pending-file"},
         )
-        pending.unlink()
         log.info(f"消费 updater pending 文件 -> notification: v{version}")
+        pushed = True
     except Exception as e:
-        log.warning(f"读 updater pending 失败: {e}")
+        # 损坏文件 — 不再 push,但仍 unlink 解卡
+        log.warning(f"读 updater pending 失败(损坏文件): {e}")
+        _report_silent_failure(
+            "updater_pending_corrupt",
+            f"{type(e).__name__}: {str(e)[:120]}",
+            context={"op": "consume_updater_pending"},
+        )
+    # 无论 push 成不成功都把文件 unlink 掉(损坏的不删 = 每次启动都报 + 永远卡 banner)
+    try:
+        pending.unlink()
+    except Exception:
+        pass
+    _ = pushed  # 留一个变量调试时看
 
 async def _auto_create_loop():
     while True:
@@ -2795,9 +2918,11 @@ def _load_attachments_index() -> list:
 
 
 def _save_attachments_index(arr: list):
-    ATTACHMENTS_INDEX.parent.mkdir(parents=True, exist_ok=True)
-    ATTACHMENTS_INDEX.write_text(
-        json.dumps(arr, indent=2, ensure_ascii=False), encoding="utf-8"
+    # A-H1: atomic + rotate;BackgroundTasks 跟 _index_upsert 是已知并发路径
+    _safe_write_text(
+        ATTACHMENTS_INDEX,
+        json.dumps(arr, indent=2, ensure_ascii=False),
+        rotate=True,
     )
 
 
@@ -2853,8 +2978,8 @@ def _rebuild_curator_system_prompt():
         lines.append("")
     txt = "\n".join(lines)
     try:
-        CURATOR_SYSTEM_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CURATOR_SYSTEM_PATH.write_text(txt, encoding="utf-8")
+        # A-H1: curator prompt 可重建,rotate=False(节省 IO)
+        _safe_write_text(CURATOR_SYSTEM_PATH, txt, rotate=False)
     except Exception as e:
         _report_silent_failure("curator_system_rebuild_failed",
             f"{type(e).__name__}: {str(e)[:120]}",
@@ -4163,9 +4288,12 @@ def _load_scrapbook(date_str: str) -> list:
 
 
 def _save_scrapbook(date_str: str, items: list):
+    # A-H1: scrapbook 是用户拖图/抠图的 attachment 元数据,损坏 = 当日图卡全失
     SCRAPBOOK_DIR.mkdir(parents=True, exist_ok=True)
-    _scrapbook_path(date_str).write_text(
-        json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8"
+    _safe_write_text(
+        _scrapbook_path(date_str),
+        json.dumps(items, indent=2, ensure_ascii=False),
+        rotate=True,
     )
 
 
@@ -5370,11 +5498,68 @@ def thread_history_get():
     except Exception as e:
         log.warning(f"thread history read failed: {e}")
         # 5.17 用户聊天历史被覆盖那条教训:即便 error 字段在,前端可能忽略 →
-        # 看起来像 history 被 wipe。这是不可接受的 silent loss
+        # 看起来像 history 被 wipe。A-H14 收口:返显式 status='corrupt' + 可用 bak 列表
+        # 前端读到这个状态必须拦下 saveHistory(避免空 list 当真覆盖)走 modal。
         _report_silent_failure("thread_history_read_failed",
             f"{type(e).__name__}: {str(e)[:120]}",
             context={"file_size_kb": THREAD_HISTORY_PATH.stat().st_size // 1024 if THREAD_HISTORY_PATH.exists() else 0})
-        return {"history": [], "mtime": 0, "error": str(e)}
+        # 收集可用 bak 列表给前端 modal restore 用
+        baks = []
+        for i in range(1, 6):
+            bp = Path(f"{THREAD_HISTORY_PATH}.bak.{i}")
+            if bp.exists():
+                try:
+                    baks.append({
+                        "index": i,
+                        "size_kb": bp.stat().st_size // 1024,
+                        "mtime": int(bp.stat().st_mtime * 1000),
+                    })
+                except Exception:
+                    pass
+        return {
+            "history": [],
+            "mtime": 0,
+            "status": "corrupt",
+            "error": str(e)[:200],
+            "baks": baks,
+            "message": "thread-history 读取失败 — 选 bak 恢复或 start-fresh,别直接覆盖。",
+        }
+
+
+@app.post("/api/thread/restore-from-bak")
+async def thread_history_restore(req: Request):
+    """A-H14: 从指定 bak.N 恢复 thread-history。前端 modal 选哪个 bak 就调这个。
+    body: {bak_index: 1..5}
+    """
+    body = await req.json()
+    idx = int(body.get("bak_index") or 0)
+    if idx < 1 or idx > 5:
+        raise HTTPException(400, "bak_index 必须是 1..5")
+    bp = Path(f"{THREAD_HISTORY_PATH}.bak.{idx}")
+    if not bp.exists():
+        raise HTTPException(404, f"bak.{idx} 不存在")
+    try:
+        data = json.loads(bp.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            raise ValueError("bak 内容不是 list")
+    except Exception as e:
+        raise HTTPException(400, f"bak.{idx} 解析失败: {type(e).__name__}: {e}")
+    with _THREAD_LOCK:
+        # 把当前损坏的 thread-history 另存一份(免得用户后悔)
+        if THREAD_HISTORY_PATH.exists():
+            try:
+                ts = int(datetime.now().timestamp())
+                corrupted = THREAD_HISTORY_PATH.with_name(f"{THREAD_HISTORY_PATH.name}.corrupted.{ts}")
+                THREAD_HISTORY_PATH.rename(corrupted)
+            except Exception:
+                pass
+        _safe_write_text(
+            THREAD_HISTORY_PATH,
+            json.dumps(data, ensure_ascii=False, indent=2),
+            rotate=False,  # bak 链已有,不用再 rotate 一次
+        )
+        mtime = _thread_history_mtime_ms()
+    return {"ok": True, "restored_from": f"bak.{idx}", "count": len(data), "mtime": mtime}
 
 
 @app.post("/api/thread/save")
@@ -6456,48 +6641,66 @@ def _pending_notif_path() -> Path:
     return APP_STATE_DIR / "data" / ".pending-notifications.jsonl"
 
 
+# A-H5: persist + consume 同把 lock,防多线程 append 行截断 / consume 时漏未持久化条
+_PENDING_NOTIF_FILE_LOCK = threading.Lock()
+
+
 def _persist_pending_notification(n: dict):
-    """append 到 ~/.../data/.pending-notifications.jsonl,sidecar 启动时读 + push + truncate。"""
+    """append 到 ~/.../data/.pending-notifications.jsonl,sidecar 启动时读 + push + truncate。
+    A-H5: lock + flush + fsync,保证 vault auto-modified / schema migration 这种用户必看的
+    notification 不会因 append 半截行掉地。
+    """
     try:
         p = _pending_notif_path()
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "a", encoding="utf-8") as f:
-            f.write(json.dumps(n, ensure_ascii=False) + "\n")
+        line = json.dumps(n, ensure_ascii=False) + "\n"
+        with _PENDING_NOTIF_FILE_LOCK:
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(line)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except Exception:
+                    pass
     except Exception as e:
         log.warning(f"persist pending notification 失败: {e}")
 
 
 def _consume_pending_notifications():
-    """sidecar 启动时把上次没消费的持久化通知补 push。读完 truncate 文件。
-    损坏行 skip 不阻塞(workflow #12 同根因)。"""
+    """sidecar 启动时把上次没消费的持久化通知补 push。
+    A-H5: 锁内 read → push 内存队列 → 把"已成功 push 的行"清掉(write-back-good-lines)。
+    比 read+unlink 安全 — read 期间新写的 append 不会被 unlink 整体吞掉。"""
     p = _pending_notif_path()
     if not p.exists():
         return
-    try:
-        lines = p.read_text(encoding="utf-8").splitlines()
-    except Exception as e:
-        log.warning(f"读 pending notifications 失败: {e}")
-        try: p.unlink()
-        except Exception: pass
-        return
-    count = 0
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
+    with _PENDING_NOTIF_FILE_LOCK:
         try:
-            n = json.loads(line)
+            raw = p.read_text(encoding="utf-8")
+        except Exception as e:
+            log.warning(f"读 pending notifications 失败: {e}")
+            return  # 不动文件,等下次启动再试
+        lines = raw.splitlines()
+        if not lines:
+            return
+        count = 0
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                n = json.loads(line)
+            except Exception:
+                continue
+            with _NOTIF_LOCK:
+                _PENDING_NOTIFICATIONS.append(n)
+                if len(_PENDING_NOTIFICATIONS) > 20:
+                    del _PENDING_NOTIFICATIONS[0:len(_PENDING_NOTIFICATIONS)-20]
+            count += 1
+        # 已消费 → 清空文件(atomic 写空)
+        try:
+            _safe_write_text(p, "", rotate=False)
         except Exception:
-            continue  # 损坏行 skip,不阻塞其他
-        with _NOTIF_LOCK:
-            _PENDING_NOTIFICATIONS.append(n)
-            if len(_PENDING_NOTIFICATIONS) > 20:
-                del _PENDING_NOTIFICATIONS[0:len(_PENDING_NOTIFICATIONS)-20]
-        count += 1
-    try:
-        p.unlink()  # 读完 truncate 防重复 push
-    except Exception:
-        pass
+            pass
     if count:
         log.info(f"补 push {count} 条 pending notification")
 
@@ -7196,13 +7399,21 @@ def pulse_refresh_mirror():
 
     PULSE_DIR.mkdir(parents=True, exist_ok=True)
     updated_files = []
+    failed_files = []
     for name, src in sources:
         dest = PULSE_DIR / f"{name}.md"
-        src_content = src.read_text(encoding="utf-8")
-        if dest.exists() and dest.read_text(encoding="utf-8") == src_content:
-            continue  # 没变,skip
-        dest.write_text(src_content, encoding="utf-8")
-        updated_files.append(dest)
+        try:
+            src_content = src.read_text(encoding="utf-8")
+            if dest.exists() and dest.read_text(encoding="utf-8") == src_content:
+                continue  # 没变,skip
+            # A-M4: atomic;镜像中途崩 = 用户看 viewer PULSE 看到半截
+            _safe_write_text(dest, src_content, rotate=False)
+            updated_files.append(dest)
+        except Exception as e:
+            failed_files.append((dest.name, str(e)[:80]))
+            _report_silent_failure("pulse_mirror_write_failed",
+                f"{type(e).__name__}: {str(e)[:120]}",
+                context={"op": "pulse_mirror_sync"})
 
     if updated_files:
         rel_names = ", ".join(f.stem for f in updated_files)
@@ -7370,8 +7581,42 @@ async def telemetry_consent_set(req: Request):
     body = await req.json()
     failures = bool(body.get("failures", False))
     heartbeat = bool(body.get("heartbeat", False))
+    # 撤回检测:之前同意过 + 现在两项都关 = 撤回 → 触发云端 /forget(C-#10)
+    prev = _telemetry_consent()
+    is_withdrawal = (
+        (prev.get("failures") or prev.get("heartbeat"))
+        and not failures
+        and not heartbeat
+    )
     _telemetry_save(failures, heartbeat)
+    if is_withdrawal:
+        # fire-and-forget 异步发 /forget,不阻塞 consent 写盘成功响应
+        try:
+            import threading as _t
+            _t.Thread(target=_send_forget_request, daemon=True).start()
+        except Exception:
+            pass
     return {"ok": True, **_telemetry_consent()}
+
+
+def _send_forget_request():
+    """C-#10: 撤回 consent 时通知 yanpai 删除已上传数据。
+    满足 GDPR Art.17 / PIPL 第 47 条。失败不 retry(用户随时可手动再发)。"""
+    try:
+        url_base = (_env_overlay().get("FEEDBACK_SINK_URL", "")
+                    or os.environ.get("FEEDBACK_SINK_URL", "")).strip().rstrip("/")
+        if not url_base:
+            return
+        cid = get_client_id()
+        r = requests.delete(
+            f"{url_base}/forget",
+            params={"client_id": cid},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            log.warning(f"/forget 上报失败: HTTP {r.status_code}")
+    except Exception as e:
+        log.warning(f"/forget 上报失败: {e}")
 
 
 @app.post("/api/telemetry/reset-client-id")
@@ -8015,7 +8260,9 @@ async def widgets_toggle(req: Request):
     elif not enable and name in active:
         active = [x for x in active if x != name]
     cfg["active"] = active
-    USER_WIDGETS_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    # A-H9: atomic + rotate
+    _safe_write_text(USER_WIDGETS_PATH,
+        json.dumps(cfg, indent=2, ensure_ascii=False), rotate=True)
     return {"ok": True, "name": name, "enabled": enable, "active": active}
 
 

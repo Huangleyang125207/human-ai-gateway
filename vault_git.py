@@ -116,6 +116,63 @@ def _report_silent(error_type: str, message: str = "", context: dict = None):
         pass  # 反馈通道自己挂了不报错(避免递归)
 
 
+def _push_broken_notification(detail: str):
+    """A-H13: vault_git 连续失败到达阈值,弹用户必看的通知。
+    audit chain 静默断 = 训练语料 + 日记追溯都没了,用户不知是大事。"""
+    try:
+        from server import _push_notification
+        _push_notification(
+            "vault-git-broken",
+            f"vault 自动 commit 连续失败 — audit chain 暂停。检查 git 状态或重启 gateway。详: {detail[:120]}",
+            {"detail": detail[:300]},
+        )
+    except Exception:
+        pass
+
+
+_INDEX_LOCK_NAME = "index.lock"
+_INDEX_LOCK_MAX_AGE_SEC = 600  # 10 min — 比这老一定是孤儿
+
+
+def _clear_stale_index_lock(vault_dir: Path) -> bool:
+    """A-H13: .git/index.lock 老于 10min 的卡死锁(上次 commit 崩没清)。
+    返 True 表示清掉了,caller 可以重试。
+    """
+    lock = vault_dir / ".git" / _INDEX_LOCK_NAME
+    if not lock.exists():
+        return False
+    try:
+        import time as _time
+        age = _time.time() - lock.stat().st_mtime
+        if age < _INDEX_LOCK_MAX_AGE_SEC:
+            return False
+        lock.unlink()
+        log.warning(f"[vault_git] 清掉孤儿 index.lock(age={int(age)}s)")
+        return True
+    except Exception as e:
+        log.warning(f"[vault_git] 清 index.lock 失败: {e}")
+        return False
+
+
+# 连续失败计数:线程间共享,简单整数 + Lock
+_CONSECUTIVE_FAILURES = 0
+_CONSECUTIVE_FAILURES_LOCK = threading.Lock()
+_CONSECUTIVE_FAILURES_THRESHOLD = 5  # 连续 5 次失败 → 弹通知
+
+
+def _bump_failure() -> int:
+    global _CONSECUTIVE_FAILURES
+    with _CONSECUTIVE_FAILURES_LOCK:
+        _CONSECUTIVE_FAILURES += 1
+        return _CONSECUTIVE_FAILURES
+
+
+def _reset_failure() -> None:
+    global _CONSECUTIVE_FAILURES
+    with _CONSECUTIVE_FAILURES_LOCK:
+        _CONSECUTIVE_FAILURES = 0
+
+
 def commit_after_write(vault_dir: Path, summary: str, author: str = "ai",
                        paths: list[Path] | None = None) -> None:
     """非阻塞:后台 thread 跑 git add + commit。
@@ -135,42 +192,68 @@ def commit_after_write(vault_dir: Path, summary: str, author: str = "ai",
 
 def _commit_sync(vault_dir: Path, summary: str, author: str,
                  paths: list[Path] | None) -> None:
-    """实际跑 git 的同步函数。在 background thread 里执行。"""
+    """实际跑 git 的同步函数。在 background thread 里执行。
+    A-H13: 连续失败累计 → 阈值 push notification;先尝试清孤儿 index.lock 再重试一次。"""
     try:
         if not _is_repo(vault_dir):
             # 写第一次时 vault 还没 init(用户改 vault 后才启动 gateway 那种边缘)
             ensure_repo(vault_dir)
-        # add
-        if paths:
-            add_args = ["git", "add", "--"]
-            for p in paths:
-                pp = Path(p)
-                if pp.is_absolute():
-                    try:
-                        pp = pp.relative_to(vault_dir)
-                    except ValueError:
-                        continue
-                add_args.append(str(pp))
-        else:
-            add_args = ["git", "add", "-A"]
-        rc, _, err = _run(add_args, vault_dir, timeout=15)
-        if rc != 0:
-            log.info(f"[vault_git] add failed: {err.strip()}")
-            _report_silent("vault_git_add_failed", err.strip()[:120],
-                context={"author": author, "summary": summary[:60]})
-            return
-        # 没变化 → skip(git diff --cached --quiet 返 1 表示有变化)
-        rc, _, _ = _run(["git", "diff", "--cached", "--quiet"], vault_dir, timeout=10)
-        if rc == 0:
-            return  # no_changes
-        msg = f"{summary} @{author}\n\nauto-commit by gateway at {datetime.now().isoformat(timespec='seconds')}"
-        rc, _, err = _run(["git", "commit", "-q", "-m", msg], vault_dir, timeout=15)
-        if rc != 0:
-            log.info(f"[vault_git] commit failed: {err.strip()[:200]}")
-            _report_silent("vault_git_commit_failed", err.strip()[:200],
-                context={"author": author, "summary": summary[:60]})
+        _try_commit_once(vault_dir, summary, author, paths, retry_after_lock_clear=True)
     except Exception as e:
         log.info(f"[vault_git] commit thread crashed: {type(e).__name__}: {e}")
         _report_silent("vault_git_thread_crashed",
             f"{type(e).__name__}: {str(e)[:120]}",
             context={"author": author, "summary": summary[:60]})
+        _on_failure(f"thread crashed: {type(e).__name__}")
+
+
+def _try_commit_once(vault_dir: Path, summary: str, author: str,
+                     paths: list[Path] | None,
+                     retry_after_lock_clear: bool) -> None:
+    """跑一遍 add+commit。失败时若 retry_after_lock_clear=True + 检测到孤儿锁则清 + 重试。"""
+    # add
+    if paths:
+        add_args = ["git", "add", "--"]
+        for p in paths:
+            pp = Path(p)
+            if pp.is_absolute():
+                try:
+                    pp = pp.relative_to(vault_dir)
+                except ValueError:
+                    continue
+            add_args.append(str(pp))
+    else:
+        add_args = ["git", "add", "-A"]
+    rc, _, err = _run(add_args, vault_dir, timeout=15)
+    if rc != 0:
+        # 可能撞 index.lock
+        if retry_after_lock_clear and _clear_stale_index_lock(vault_dir):
+            return _try_commit_once(vault_dir, summary, author, paths, retry_after_lock_clear=False)
+        log.info(f"[vault_git] add failed: {err.strip()}")
+        _report_silent("vault_git_add_failed", err.strip()[:120],
+            context={"author": author, "summary": summary[:60]})
+        _on_failure(f"add: {err.strip()[:120]}")
+        return
+    # 没变化 → skip(git diff --cached --quiet 返 0 表示无变化)
+    rc, _, _ = _run(["git", "diff", "--cached", "--quiet"], vault_dir, timeout=10)
+    if rc == 0:
+        return  # no_changes
+    msg = f"{summary} @{author}\n\nauto-commit by gateway at {datetime.now().isoformat(timespec='seconds')}"
+    rc, _, err = _run(["git", "commit", "-q", "-m", msg], vault_dir, timeout=15)
+    if rc != 0:
+        if retry_after_lock_clear and _clear_stale_index_lock(vault_dir):
+            return _try_commit_once(vault_dir, summary, author, paths, retry_after_lock_clear=False)
+        log.info(f"[vault_git] commit failed: {err.strip()[:200]}")
+        _report_silent("vault_git_commit_failed", err.strip()[:200],
+            context={"author": author, "summary": summary[:60]})
+        _on_failure(f"commit: {err.strip()[:120]}")
+        return
+    # 成功 → 失败计数清零
+    _reset_failure()
+
+
+def _on_failure(detail: str) -> None:
+    """A-H13: 连续失败累计;到阈值弹用户必看的通知。"""
+    n = _bump_failure()
+    if n == _CONSECUTIVE_FAILURES_THRESHOLD:  # 只在跨过阈值那次弹,避免重复弹
+        _push_broken_notification(detail)

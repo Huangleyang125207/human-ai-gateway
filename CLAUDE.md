@@ -34,7 +34,13 @@ gateway/                ← 本目录
 
 ## Local progress(gateway 自己)
 
-- [ ] (next)
+- [x] v0.1.20: 三轮 ultracode review 出的 P1+P2 22 条全部收口
+      (atomic writes / writeguard 加 lock+fsync / silent-failure consent gate /
+       /forget + X-Admin-Token / thread-history corrupt-recovery modal /
+       vault_git index.lock 探测 + 连续失败通知;详 [INTERNAL_TEST_BACKLOG.md](INTERNAL_TEST_BACKLOG.md))
+- [ ] v0.1.21: keyring (3 平台) + updater 切 HTTPS(需 server 端 Caddy 先配 /updates/ HTTPS)
+- [ ] P4 服务端 deploy:feedback-sink 改动 + Caddy snippet 上 yanpai
+      (ssh 命令在 [INTERNAL_TEST_BACKLOG.md](INTERNAL_TEST_BACKLOG.md) P4 段)
 
 更新这个 list 每次 commit 后。
 
@@ -45,3 +51,12 @@ gateway/                ← 本目录
 - 不要在 gateway/ 加 `npm` / `build` 依赖(纯 vanilla JS + python single-file)
 - 不要把数据写进 gateway/ 子树(走 APP_STATE_DIR / VAULT_DIR)
 - 不要在 `--add-data` 漏新 .html / .py 时还 ship DMG(test-bundle 会抓但别赌)
+- 不要在 `_report_silent_failure` 绕过 `_sanitize_sf_context` 白名单 → 把用户原文塞 context(v0.1.19 C-#9 收口的硬合同)
+- 不要在 `_report_silent_failure` 绕过 consent gate(v0.1.20 C-#4 收口:撤回期连本地都不写)
+- 不要把 `_safe_write_text` 改回 `.tmp` 固定名(v0.1.20 A-H3 上了 uuid + path-keyed lock,改回去就重新撞)
+- 不要去掉 fsync(fd+parent dir)(v0.1.20 A-M5:断电后 atomic rename 不保内容到盘)
+- 不要让 patch_journal_block / insert_journal_block / append_comment 绕过 sha256 baseline + `_get_vault_md_lock`(v0.1.19 A-C5:Obsidian 并发会静默覆盖)
+- 不要让 thread-history 读端损坏返 `[]` 后让前端直接 saveHistory(v0.1.20 A-H14:返 `status: 'corrupt'` + baks 列表,前端走 restore modal)
+- 不要让 vault_git daemon 失败完全静默(v0.1.20 A-H13:连续 5 次 → push notification `vault-git-broken`;不报 = 用户审计链断了不知)
+- 不要在 tauri.conf.json 改 updater endpoint 为 HTTPS 之前没确认 `https://feedback.{domain}/updates/latest.json` 在 yanpai 是 200(否则所有自动更新链断)
+- 不要在客户端 silent-failure 后做"假装写本地兜底再回灌"——撤回 consent 之后本地也不写(v0.1.20 C-#4)

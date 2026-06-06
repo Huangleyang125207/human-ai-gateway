@@ -91,10 +91,17 @@ fn write_updater_pending(version: &str) {
     let path = dir.join(".updater-pending.json");
     let _ = std::fs::create_dir_all(&dir);
     let payload = serde_json::json!({ "version": version });
-    if let Err(e) = std::fs::write(&path, payload.to_string()) {
-        log::warn!("[updater] write pending file 失败: {e}");
-    } else {
-        log::info!("[updater] pending 文件已写: {path:?}");
+    // A-H4: atomic tmp + rename。直接 fs::write 中途崩 / 半写 = sidecar 读损坏 JSON
+    // 进入 unlink 失败路径 → pending banner 永久卡。tmp+rename POSIX/Win 都 atomic。
+    let tmp = path.with_extension("json.tmp");
+    let write_res = std::fs::write(&tmp, payload.to_string())
+        .and_then(|_| std::fs::rename(&tmp, &path));
+    match write_res {
+        Ok(_) => log::info!("[updater] pending 文件已写(atomic): {path:?}"),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp); // 残留 tmp 清掉
+            log::warn!("[updater] write pending file 失败: {e}");
+        }
     }
 }
 

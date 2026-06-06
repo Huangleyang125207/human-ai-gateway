@@ -179,8 +179,23 @@ def compute_all(vault: Path, since: str | None = None,
 
 
 def save_outcomes(data: dict, path: Path = DEFAULT_OUTCOMES) -> None:
+    # A-H8: atomic + rotate;outcomes 指针损坏 = 训练 DPO 数据全没了
+    import os as _os
+    import uuid as _uuid
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 5-rotate backup
+    try:
+        if path.exists():
+            for i in range(5, 1, -1):
+                src = path.with_name(f"{path.name}.bak.{i-1}")
+                if src.exists():
+                    src.rename(path.with_name(f"{path.name}.bak.{i}"))
+            path.with_name(f"{path.name}.bak.1").write_bytes(path.read_bytes())
+    except Exception:
+        pass  # 备份失败不阻塞主写
+    tmp = path.with_name(f"{path.name}.{_os.getpid()}.{_uuid.uuid4().hex[:8]}.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    _os.replace(str(tmp), str(path))
 
 
 def load_outcomes(path: Path = DEFAULT_OUTCOMES) -> dict:
@@ -188,7 +203,19 @@ def load_outcomes(path: Path = DEFAULT_OUTCOMES) -> dict:
         return {"computed_at": None, "count": 0, "outcomes": {}}
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        # A-H8: 不再静默 — 至少 stderr 让 caller / cron 看到
+        import sys as _sys
+        _sys.stderr.write(
+            f"[outcome_tracker] WARN: failed to parse {path}: {type(e).__name__}: {e}\n"
+        )
+        # 尝试 bak.1 回滚
+        bak = path.with_name(f"{path.name}.bak.1")
+        if bak.exists():
+            try:
+                return json.loads(bak.read_text(encoding="utf-8"))
+            except Exception:
+                pass
         return {"computed_at": None, "count": 0, "outcomes": {}}
 
 

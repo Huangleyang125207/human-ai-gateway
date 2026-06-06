@@ -25,8 +25,18 @@ import os
 import re
 import subprocess
 import sys
+import uuid as _uuid
 from datetime import datetime, timedelta
 from pathlib import Path
+
+
+# A-H7: 离线 exporter 不 import server 避免拉 FastAPI 栈;复刻最小 atomic write。
+# 同一进程内多个 .jsonl 写,tmp 文件名用 uuid 避免撞。
+def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{_uuid.uuid4().hex[:8]}.tmp")
+    tmp.write_text(content, encoding=encoding)
+    os.replace(str(tmp), str(path))
 
 # ── 路径解析(独立于 server,避免 import 牵扯整个 FastAPI 栈)──────
 
@@ -294,7 +304,12 @@ def export(vault: Path = DEFAULT_VAULT,
         if opath and opath.exists():
             try:
                 outcomes_map = json.loads(opath.read_text(encoding="utf-8")).get("outcomes", {})
-            except Exception:
+            except Exception as e:
+                # A-H8: 不再静默吞 — 训练语料丢 outcome 是高代价静默退化
+                sys.stderr.write(
+                    f"[history_exporter] WARN: failed to load outcomes "
+                    f"from {opath}: {type(e).__name__}: {e}\n"
+                )
                 outcomes_map = {}
         per_source_count[src_name] = len(commits)
         for c in commits:
@@ -312,17 +327,21 @@ def export(vault: Path = DEFAULT_VAULT,
 
     # 按 ts 排序所有 rows(跨 repo 时间线交织)
     all_rows.sort(key=lambda r: r.get("ts") or "")
-    all_path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in all_rows) + "\n",
-                        encoding="utf-8")
+    _atomic_write_text(
+        all_path,
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in all_rows) + "\n",
+    )
     for tag, lines in by_tag_handles.items():
         # sub-tag `配置系统/ctrl-c-v` 不能直接当 filename — 把 / 替成 _
         safe_name = tag.replace("/", "_").replace("\\", "_") or "_empty"
-        (out_dir / "by-tag" / f"{safe_name}.jsonl").write_text(
-            "\n".join(lines) + "\n", encoding="utf-8")
+        _atomic_write_text(
+            out_dir / "by-tag" / f"{safe_name}.jsonl",
+            "\n".join(lines) + "\n",
+        )
     for author, lines in by_author_handles.items():
-        (out_dir / "by-author" / f"{author}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        _atomic_write_text(out_dir / "by-author" / f"{author}.jsonl", "\n".join(lines) + "\n")
     for src, lines in by_source_handles.items():
-        (out_dir / "by-source" / f"{src}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        _atomic_write_text(out_dir / "by-source" / f"{src}.jsonl", "\n".join(lines) + "\n")
 
     return {
         "commits": len(all_rows),

@@ -146,6 +146,13 @@
     try {
       const r = await fetch("/api/thread/history");
       const d = await r.json();
+      // A-H14: server 显式 status='corrupt' → 拦下 saveHistory + 弹 modal 让用户选 bak
+      // 5.17 教训的另一半:不能把"返空"当真覆盖
+      if (d.status === "corrupt") {
+        console.warn("[thread] server 报 thread-history 损坏", d);
+        _showCorruptModal(d);
+        return;  // 不动 state.history,不 push,不 _rerender
+      }
       const serverHist = Array.isArray(d.history) ? d.history : [];
       const serverMtime = d.mtime || 0;
 
@@ -166,6 +173,84 @@
       }
       // 其余:相等 → 已同步
     } catch {}
+  }
+
+  function _showCorruptModal(d) {
+    // 极简 modal:不引外部 UI 框架,直接 DOM 拼
+    if (document.querySelector(".thread-corrupt-modal")) return;
+    const baks = Array.isArray(d.baks) ? d.baks : [];
+    const overlay = document.createElement("div");
+    overlay.className = "thread-corrupt-modal";
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:99998;display:flex;align-items:center;justify-content:center;";
+    const fmtTime = (ms) => {
+      try { return new Date(ms).toLocaleString(); } catch { return String(ms); }
+    };
+    const bakRows = baks.map(b =>
+      `<label style="display:block;padding:8px;border:1px solid #ddd;border-radius:4px;margin:4px 0;cursor:pointer;">
+        <input type="radio" name="bak_choice" value="${b.index}" style="margin-right:8px;" />
+        bak.${b.index} · ${b.size_kb} KB · ${fmtTime(b.mtime)}
+      </label>`
+    ).join("");
+    overlay.innerHTML = `
+      <div style="background:#f8f5ec;color:#1d1c1a;max-width:520px;width:90%;padding:24px;border-radius:8px;font-family:inherit;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+        <h3 style="margin:0 0 12px;">聊天历史读取失败</h3>
+        <p style="margin:0 0 12px;font-size:14px;line-height:1.6;">
+          server 的 <code>thread-history.json</code> 损坏(可能是上次写盘中断)。
+          选一份 bak 恢复,或新开一段。
+        </p>
+        <p style="margin:0 0 12px;font-size:12px;color:#666;">${d.error || ''}</p>
+        ${baks.length > 0
+          ? `<div style="margin:12px 0;">${bakRows}</div>`
+          : `<p style="font-size:13px;color:#a33;">无 bak 可用 — 只能新开。</p>`}
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+          <button class="thread-corrupt-fresh" style="padding:8px 16px;border:1px solid #999;background:#fff;border-radius:4px;cursor:pointer;">新开一段</button>
+          ${baks.length > 0 ? `<button class="thread-corrupt-restore" style="padding:8px 16px;border:0;background:#3b6f4a;color:#f5efe0;border-radius:4px;cursor:pointer;font-weight:600;">从 bak 恢复</button>` : ''}
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector(".thread-corrupt-fresh").addEventListener("click", () => {
+      // start-fresh:把本地 state 清掉,让 saveHistory 推一个空 list (会过 server 端 CAS)
+      state.history = [];
+      lastServerMtime = 0;
+      _persistLocal();
+      _rerender();
+      overlay.remove();
+    });
+    const restoreBtn = overlay.querySelector(".thread-corrupt-restore");
+    if (restoreBtn) {
+      restoreBtn.addEventListener("click", async () => {
+        const checked = overlay.querySelector("input[name=bak_choice]:checked");
+        if (!checked) {
+          alert("先选一份 bak");
+          return;
+        }
+        restoreBtn.disabled = true;
+        restoreBtn.textContent = "恢复中…";
+        try {
+          const r = await fetch("/api/thread/restore-from-bak", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ bak_index: parseInt(checked.value, 10) }),
+          });
+          if (!r.ok) {
+            const err = await r.text();
+            alert(`恢复失败: ${err}`);
+            restoreBtn.disabled = false;
+            restoreBtn.textContent = "从 bak 恢复";
+            return;
+          }
+          overlay.remove();
+          // 触发一次 sync 拿最新 history
+          lastServerMtime = 0;
+          await loadHistory();
+        } catch (e) {
+          alert(`恢复失败: ${e}`);
+          restoreBtn.disabled = false;
+          restoreBtn.textContent = "从 bak 恢复";
+        }
+      });
+    }
   }
 
   // ── DOM ──────────────────────────────────────────────

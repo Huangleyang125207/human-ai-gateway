@@ -13,3 +13,10 @@ src-tauri/target/
 src-tauri/gen/
 dist-sidecar/
 src-tauri/binaries/
+
+# C-#6 兜底:silent-failure 通道 ring buffer / 设备匿名 UUID / app-state dump
+# 若 user 手动把 HUMAN_AI_HOME 指 repo 根再 git add . 不至于把这些塞进版本控制
+silent-failures.jsonl
+silent-failures.cursor
+client-id.txt
+data/
