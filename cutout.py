@@ -25,6 +25,23 @@ import requests
 
 from ocr import _get_access_token  # 复用 token 缓存
 
+# B-#6: silent-failure sink, server.py 启动时注入
+_FAILURE_SINK = None
+
+
+def set_failure_sink(sink) -> None:
+    global _FAILURE_SINK
+    _FAILURE_SINK = sink
+
+
+def _emit_failure(error_type: str, message: str = "", context: dict = None) -> None:
+    if _FAILURE_SINK is None:
+        return
+    try:
+        _FAILURE_SINK(error_type, message, context or {})
+    except Exception:
+        pass
+
 log = logging.getLogger("cutout")
 
 _ENDPOINT = "https://aip.baidubce.com/rest/2.0/image-process/v1/segment"
@@ -184,15 +201,34 @@ def baidu_cutout_image(file_path: Path | str, api_key: str, secret_key: str) -> 
         r.raise_for_status()
         data = r.json()
         if "error_code" in data:
-            log.warning(f"baidu cutout error {data.get('error_code')}: {data.get('error_msg')}")
+            code = int(data.get("error_code") or 0)
+            msg = str(data.get("error_msg") or "")[:120]
+            log.warning(f"baidu cutout error {code}: {msg}")
+            # B-#6: 通报具体桶,caller 看 silent-failure 通道知道是 quota/token/QPS 还是别的
+            if code in (110, 111):
+                bucket = "cutout_baidu_token_invalid"
+            elif code == 17:
+                bucket = "cutout_baidu_qps_exceeded"
+            elif code in (18, 19):
+                bucket = "cutout_baidu_quota_exhausted"
+            else:
+                bucket = "cutout_baidu_failed"
+            _emit_failure(bucket, f"baidu_code={code}",
+                          context={"status_code": code})
             return None
         b64_result = data.get("image", "")
         if not b64_result:
             log.warning(f"baidu cutout missing image field: {data}")
+            _emit_failure("cutout_baidu_missing_image",
+                          "baidu 返 200 但 image 字段空")
             return None
         raw_png = base64.b64decode(b64_result)
         whitened = _whiten_to_transparent(raw_png)
         return normalize_subject_frame(whitened)
     except Exception as e:
         log.warning(f"baidu cutout request failed: {type(e).__name__}: {e}")
+        # B-#6: 网络/响应解析挂了也走通道
+        _emit_failure("cutout_baidu_network_failed",
+                      f"{type(e).__name__}: {str(e)[:80]}",
+                      context={"network_marker": "baidu_cutout_post_failed"})
         return None

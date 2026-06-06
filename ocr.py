@@ -35,6 +35,52 @@ _MAX_EDGE_PX = 4000  # 留 96px 余量
 _MAX_BASE64_BYTES = int(3.8 * 1024 * 1024)  # 4MB 留余量
 
 
+# B-#2: baidu error_code 不再静默返 "",抛 BaiduOCRError 让 caller 区分 quota/token/QPS
+# 5.20 长鑫存储 → 港币 凭空猜 那次根因就是 "" 被 caller 当作 "图里没字" 看
+class BaiduOCRError(Exception):
+    """百度 OCR API 返 error_code 时抛出。code 对照:
+    110/111 token 失效,17 QPS 超,18/19 quota,4 file too large(已被 _prep_image_bytes 兜住)
+    """
+    def __init__(self, code: int, msg: str):
+        super().__init__(f"baidu ocr error {code}: {msg}")
+        self.code = code
+        self.msg = msg
+
+
+# B-#6: 给 ocr.py 装上报针脚。server.py 启动时调 set_failure_sink 注入 _report_silent_failure,
+# 避免 lazy import 循环 + 给 library 模块统一的上报范式
+_FAILURE_SINK = None
+
+
+def set_failure_sink(sink) -> None:
+    """server.py 启动期一次性调用,注入 _report_silent_failure。
+    sink 签名: (error_type: str, message: str, context: dict = None) → None
+    """
+    global _FAILURE_SINK
+    _FAILURE_SINK = sink
+
+
+def _emit_failure(error_type: str, message: str = "", context: dict = None) -> None:
+    """library 模块上报失败的统一入口。sink 没注入(单测 / cli 使用)时静音。"""
+    if _FAILURE_SINK is None:
+        return
+    try:
+        _FAILURE_SINK(error_type, message, context or {})
+    except Exception:
+        pass  # 反馈通道挂了不阻塞主路径
+
+
+def _baidu_error_type(code: int) -> str:
+    """B-#2: error_code → silent-failure error_type 桶。"""
+    if code in (110, 111):
+        return "ocr_baidu_token_invalid"
+    if code == 17:
+        return "ocr_baidu_qps_exceeded"
+    if code in (18, 19):
+        return "ocr_baidu_quota_exhausted"
+    return "ocr_baidu_failed"
+
+
 def _prep_image_bytes(file_path: Path) -> bytes | None:
     """读图,如超百度限(分辨率 / base64 体积),用 Pillow 缩到限内。
     返回原始或重编码后的 bytes;失败返 None。
@@ -110,6 +156,11 @@ def _get_access_token(api_key: str, secret_key: str) -> str | None:
         return token
     except Exception as e:
         log.warning(f"baidu token fetch failed: {type(e).__name__}: {e}")
+        # B-#6: 网络异常时 stale cache 也清掉,避免下个 caller 命中过期的 token
+        _TOKEN_CACHE.pop(cache_key, None)
+        _emit_failure("baidu_oauth_network_failed",
+                      f"{type(e).__name__}: {str(e)[:80]}",
+                      context={"network_marker": "baidu_oauth_post_failed"})
         return None
 
 
@@ -140,16 +191,25 @@ def baidu_ocr_image(file_path: Path | str, api_key: str, secret_key: str) -> str
         r.raise_for_status()
         data = r.json()
         if "error_code" in data:
-            log.warning(f"baidu ocr error {data.get('error_code')}: {data.get('error_msg')}")
+            code = int(data.get("error_code") or 0)
+            msg = str(data.get("error_msg") or "")[:120]
+            log.warning(f"baidu ocr error {code}: {msg}")
             # B-#3: token 失效 → 清 cache 让下次重新换
-            # 老版 `_TOKEN_CACHE["token"] = None` 写错 key(真 key 是 f"{api_key}:{secret}"),
-            # stale token 原封不动 → OCR 整进程返 "",只能重启 .app 才修
-            if data.get("error_code") in (110, 111):
+            if code in (110, 111):
                 cache_key = f"{api_key}:{secret_key}"
                 _TOKEN_CACHE.pop(cache_key, None)
-            return ""
+            # B-#2+#6: 不再静默返 "" — 抛 BaiduOCRError 让 _ocr_text 能 silent-failure 上报
+            _emit_failure(_baidu_error_type(code),
+                          f"baidu_code={code}", context={"status_code": code})
+            raise BaiduOCRError(code, msg)
         words = [w.get("words", "") for w in data.get("words_result", [])]
         return "\n".join(words).strip()
+    except BaiduOCRError:
+        raise  # error_code 路径已经 emit + raise,不再 swallow
     except Exception as e:
         log.warning(f"baidu ocr request failed: {type(e).__name__}: {e}")
+        # B-#2+#6: 网络层异常也不再静默 — 让 _ocr_text 知道 "" 不是"图里没字"是"调用挂了"
+        _emit_failure("ocr_baidu_network_failed",
+                      f"{type(e).__name__}: {str(e)[:80]}",
+                      context={"network_marker": "baidu_ocr_post_failed"})
         return ""

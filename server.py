@@ -467,7 +467,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.21"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.22"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -796,17 +796,76 @@ def _sf_drain_once(url_base: str):
         )
         if r.status_code == 200:
             _sf_cursor_write(cursor + len(pending))
+            _sf_sink_4xx_reset()  # 成功 = 通道恢复
         elif r.status_code == 429:
             # rate limited — 下次再试,不推进 cursor
             log.info("[sf-sender] rate-limited, will retry next interval")
+        elif r.status_code in (401, 403, 404):
+            # B-#4: 鉴权 / endpoint 路径错 — 不推进 cursor 防把所有 pending 倒进 /dev/null
+            # 累计 streak,阈值后 push notification 让用户能看到反馈通道挂了
+            log.warning(f"[sf-sender] HTTP {r.status_code}: {r.text[:120]}")
+            streak = _sf_sink_4xx_bump()
+            if streak >= _SF_SINK_4XX_THRESHOLD:
+                _maybe_push_sink_broken(r.status_code, r.text[:120])
+        elif 400 <= r.status_code < 500:
+            # B-#4: 400/422 schema/payload 错 — 单条不可上送,advance 1 条防整批卡死
+            # 不是整批 advance(那样把后面的 OK 条目也吞了)
+            log.warning(f"[sf-sender] HTTP {r.status_code} (schema?): {r.text[:120]}")
+            _sf_cursor_write(cursor + 1)
         else:
             log.warning(f"[sf-sender] HTTP {r.status_code}: {r.text[:120]}")
-            # 4xx 一般是 schema 错,推进 cursor 防死循环;5xx 不推进等下次
-            if 400 <= r.status_code < 500:
-                _sf_cursor_write(cursor + len(pending))
+            # 5xx 不推进等下次
     except Exception as e:
         log.warning(f"[sf-sender] POST failed: {type(e).__name__}: {e}")
         # 网络 / DNS / 超时 — 不推进 cursor,下次再试
+
+
+# B-#4: sink 4xx streak 跟踪。401/403/404 连续 ≥ 阈值 → push notification 让用户看到
+# 反馈通道挂了。文件持久化避免 sidecar 重启 streak 归零。
+_SF_SINK_4XX_PATH = DATA_DIR / "silent-failures-sink-4xx-streak"
+_SF_SINK_4XX_THRESHOLD = 3
+_SF_SINK_BROKEN_NOTIFIED_PATH = DATA_DIR / "silent-failures-sink-broken-notified"
+
+
+def _sf_sink_4xx_bump() -> int:
+    try:
+        prev = 0
+        if _SF_SINK_4XX_PATH.exists():
+            try:
+                prev = int(_SF_SINK_4XX_PATH.read_text(encoding="utf-8").strip())
+            except Exception:
+                prev = 0
+        new = prev + 1
+        _safe_write_text(_SF_SINK_4XX_PATH, str(new), rotate=False)
+        return new
+    except Exception:
+        return 0
+
+
+def _sf_sink_4xx_reset() -> None:
+    try:
+        if _SF_SINK_4XX_PATH.exists():
+            _SF_SINK_4XX_PATH.unlink()
+        if _SF_SINK_BROKEN_NOTIFIED_PATH.exists():
+            _SF_SINK_BROKEN_NOTIFIED_PATH.unlink()
+    except Exception:
+        pass
+
+
+def _maybe_push_sink_broken(status_code: int, body_snippet: str) -> None:
+    """到阈值后只弹一次,直到通道恢复才再弹下一波(避免每 60s 一条骚扰)。"""
+    if _SF_SINK_BROKEN_NOTIFIED_PATH.exists():
+        return
+    try:
+        _push_notification(
+            "sink-broken",
+            f"反馈通道挂了(HTTP {status_code}) — 内测期诊断数据上送暂停。"
+            f"检查 FEEDBACK_SINK_URL 配置或 deploy key。",
+            {"status_code": status_code, "body_snippet": body_snippet[:200]},
+        )
+        _safe_write_text(_SF_SINK_BROKEN_NOTIFIED_PATH, str(int(time.time())), rotate=False)
+    except Exception:
+        pass
 
 def get_profile(model_id=None):
     profiles = list_profiles_full()
@@ -2763,6 +2822,19 @@ async def _startup_vault_reference_and_migration():
         _consume_pending_notifications()
     except Exception as e:
         log.warning(f"_consume_pending_notifications: {e}")
+    # B-#6: 把 silent-failure 通道挂进 library 模块(ocr.py / cutout.py),
+    # 避免它们 silent swallow 网络/quota 失败 — 5.29 加的 37 hooks 全在 server.py,
+    # 没覆盖 library 层。注入 callable 走 import-time 避免循环依赖。
+    try:
+        from ocr import set_failure_sink as _ocr_set_sink
+        _ocr_set_sink(_report_silent_failure)
+    except Exception as e:
+        log.warning(f"ocr set_failure_sink: {e}")
+    try:
+        from cutout import set_failure_sink as _cutout_set_sink
+        _cutout_set_sink(_report_silent_failure)
+    except Exception:
+        pass  # cutout 可能还没装上报针脚,先 best-effort
 
 
 def _consume_updater_pending():
@@ -3058,8 +3130,15 @@ def _ocr_text(file_path: Path) -> str:
             _report_silent_failure("ocr_all_unavailable",
                 "端侧 OCR 不可用且百度 OCR 未配 key,返空")
             return ""
-        from ocr import baidu_ocr_image
-        return baidu_ocr_image(file_path, api_key, secret_key) or ""
+        from ocr import baidu_ocr_image, BaiduOCRError
+        try:
+            return baidu_ocr_image(file_path, api_key, secret_key) or ""
+        except BaiduOCRError as be:
+            # B-#2: ocr.py 已经按 code 分桶上报过(_emit_failure),这里不重复;
+            # 但 _ocr_text 返 "" 给上层 → 上层把"返空"区分不出"图里没字"和"API 挂了"
+            # 看 ocr.py emit 的 silent-failure 上报通道,不要靠这个返回值
+            log.warning(f"baidu OCR error code {be.code} for {file_path.name}: {be.msg}")
+            return ""
     except Exception as e:
         log.warning(f"baidu OCR also failed for {file_path.name}: {e}")
         _report_silent_failure("ocr_baidu_failed",
