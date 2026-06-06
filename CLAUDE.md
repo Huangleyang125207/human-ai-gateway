@@ -38,7 +38,13 @@ gateway/                ← 本目录
       (atomic writes / writeguard 加 lock+fsync / silent-failure consent gate /
        /forget + X-Admin-Token / thread-history corrupt-recovery modal /
        vault_git index.lock 探测 + 连续失败通知;详 [INTERNAL_TEST_BACKLOG.md](INTERNAL_TEST_BACKLOG.md))
-- [ ] v0.1.21: keyring (3 平台) + updater 切 HTTPS(需 server 端 Caddy 先配 /updates/ HTTPS)
+- [x] v0.1.21: B 补录 3 件 high(token cache 写错 key / vision config missing return / schema migration 接 silent-failure 通道)
+- [x] v0.1.22: B 补录收尾 3 件(BaiduOCRError raise 不静默 + sink 4xx cursor 分桶 + ocr.py/cutout.py 上报针脚)
+- [x] 沉淀子 agent 编排框架:[AGENT_BRIEFING_TEMPLATE.md](AGENT_BRIEFING_TEMPLATE.md)
+      单 agent briefing 9 字段 schema + [AGENT_ORCHESTRATION_PATTERNS.md](AGENT_ORCHESTRATION_PATTERNS.md)
+      5 个 pattern (parallel review / extract→verify→synthesize / adversarial verify /
+      single brief / 反 pattern) + 决策树 + schema 纪律 + token 成本数据
+- [ ] v0.1.23+: keyring (3 平台) + updater 切 HTTPS(需 server 端 Caddy 先配 /updates/ HTTPS)
 - [ ] P4 服务端 deploy:feedback-sink 改动 + Caddy snippet 上 yanpai
       (ssh 命令在 [INTERNAL_TEST_BACKLOG.md](INTERNAL_TEST_BACKLOG.md) P4 段)
 
