@@ -42,9 +42,12 @@ gateway/                ← 本目录
 - [x] v0.1.22: B 补录收尾 3 件(BaiduOCRError raise 不静默 + sink 4xx cursor 分桶 + ocr.py/cutout.py 上报针脚)
 - [x] 沉淀子 agent 编排框架:[AGENT_BRIEFING_TEMPLATE.md](AGENT_BRIEFING_TEMPLATE.md) + [AGENT_ORCHESTRATION_PATTERNS.md](AGENT_ORCHESTRATION_PATTERNS.md)
 - [x] v0.1.23 部分收 C-#2/#8 updater HTTPS:腾讯云 CDN cdn.yanpaidb.cn 接入(下载大文件 + LE 证书 + latest.json 不缓存规则)
-      tauri.conf.json endpoints 双轨 (HTTPS CDN 优先 + HTTP yanpai 兜底);yanpai latest.json 二进制 url 字段改 https 让现役 v0.1.16-22 也走 CDN
-- [ ] v0.1.24+: 关 dangerousInsecureTransportProtocol + 只留 HTTPS endpoint(等 CDN 稳定 1-2 周后)
-- [ ] keyring (3 平台,2-3 天) — 留 v0.1.24+
+      tauri.conf.json endpoints 双轨 (HTTPS CDN 优先 + HTTP yanpai 兜底);yanpai latest.json 二进制 url 字段改 http://cdn.yanpaidb.cn 让现役 v0.1.16-22 也走 CDN
+- [x] v0.1.24: trivial version bump(为了真测 v0.1.23→v0.1.24 自更新触发)。commit + tag + CI + publish Latest 全完;**yanpai sync 卡住**因 VPN 当天抽风,二进制从 GitHub Release 国内拉一直截到 3.3M(正常 151M)
+- [⚠️] **SSL HTTPS 死锁** — cdn.yanpaidb.cn 是 CDN 接入的 CNAME → `_dnsauth.cdn.yanpaidb.cn` 因 DNS CNAME exclusivity 永远 NXDOMAIN → 腾讯 TrustAsia DV 探针查不到 → 验证永远 stuck。解法:**v0.1.25 换 update.yanpaidb.cn 直 A 记录指 yanpai box + Caddy + LE**(绕开 CDN CNAME 死锁路径,自管 SSL)
+- [⚠️] **自更新 UX 不对** — 现 v0.1.23 实际行为:5s 后 silent download_and_install 不问用户、不显进度、装完才弹 banner"重启生效"。要改:**v0.1.25 加询问 modal(检测到新版"现在更新? / 稍后 / 跳过") + 实时进度条**(详 [INTERNAL_TEST_BACKLOG.md](INTERNAL_TEST_BACKLOG.md))
+- [ ] v0.1.25+: 同时收 ①update.yanpaidb.cn 直 A + Caddy + LE 启 HTTPS、②updater UX 询问+进度、③关 dangerousInsecureTransportProtocol、④保留 yanpai box :18080 作 HTTP fallback
+- [ ] keyring (3 平台,2-3 天) — 留 v0.1.26+
 - [ ] P4 服务端 deploy:feedback-sink 改动 + Caddy snippet 上 yanpai
       (ssh 命令在 [INTERNAL_TEST_BACKLOG.md](INTERNAL_TEST_BACKLOG.md) P4 段)
 
@@ -64,5 +67,8 @@ gateway/                ← 本目录
 - 不要让 patch_journal_block / insert_journal_block / append_comment 绕过 sha256 baseline + `_get_vault_md_lock`(v0.1.19 A-C5:Obsidian 并发会静默覆盖)
 - 不要让 thread-history 读端损坏返 `[]` 后让前端直接 saveHistory(v0.1.20 A-H14:返 `status: 'corrupt'` + baks 列表,前端走 restore modal)
 - 不要让 vault_git daemon 失败完全静默(v0.1.20 A-H13:连续 5 次 → push notification `vault-git-broken`;不报 = 用户审计链断了不知)
-- 不要在 tauri.conf.json 改 updater endpoint 为 HTTPS 之前没确认 `https://feedback.{domain}/updates/latest.json` 在 yanpai 是 200(否则所有自动更新链断)
+- 不要在 tauri.conf.json 改 updater endpoint 为 HTTPS 之前没确认 endpoint 在线 200(否则所有自动更新链断)
 - 不要在客户端 silent-failure 后做"假装写本地兜底再回灌"——撤回 consent 之后本地也不写(v0.1.20 C-#4)
+- 不要在 CDN 接入的子域(CNAME 类型)下面加 TXT/A 类记录——CNAME exclusivity 会让那些 record 永远 NXDOMAIN(v0.1.23 SSL DV 卡死的真因)
+- 不要把 v0.1.x 客户端 hardcoded endpoint 当永久合同改回——v0.1.16 client 死磕 http://101.42.108.30:18080,即使 v0.1.23+ client 双 endpoint 看 CDN,yanpai box :18080 也要长期保持服务给历史客户端续命
+- 不要让 updater silent download(违反"用户授权拉流量"基本契约)——v0.1.23 现状是 5s 后偷下,v0.1.25+ 必须加询问 modal + 进度条

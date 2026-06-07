@@ -10,10 +10,14 @@
 
 ### Updater 通道安全
 
-- [~] **C-#2 + #8** updater HTTPS 接 TLS — v0.1.23 走腾讯云 CDN HTTP (cdn.yanpaidb.cn);HTTPS 因 CNAME 接入下 DV 验证死锁 (子域 CNAME → `_dnsauth.cdn.yanpaidb.cn` NXDOMAIN) 卡 3h+
+- [~] **C-#2 + #8** updater HTTPS 接 TLS — v0.1.23 走腾讯云 CDN HTTP (cdn.yanpaidb.cn);HTTPS 因 CNAME 接入下 DV 验证死锁 (子域 CNAME → `_dnsauth.cdn.yanpaidb.cn` NXDOMAIN) 卡 3h+ 后放弃
   - v0.1.23 已做:CDN 加速域 cdn.yanpaidb.cn (下载大文件 + yanpai:18080 源 + latest.json 不缓存);tauri.conf.json endpoints 双轨 (HTTPS CDN 优先 + HTTP yanpai 兜底);yanpai latest.json 二进制 url 指 http://cdn.yanpaidb.cn (现役 v0.1.16-22 也走 CDN)
   - HTTPS 临时风险评估:minisign 签名验证堵 MITM 改包 + Tauri updater 自动比 version 堵降级,真剩风险只有"嗅探看你版本+IP"(内测 0 真用户基本无影响)
-  - 留 v0.1.25+:换 update.yanpaidb.cn 走直 A 记录到 yanpai box + Caddy + LE 证书(绕开 CDN CNAME 死锁),Tauri endpoint 切纯 HTTPS,关 dangerousInsecureTransportProtocol;为此 v0.1.24 测 HTTP CDN 自更新触发完整链路,确认 channel 通了再走 HTTPS 路
+  - **v0.1.25 必修**:换 `update.yanpaidb.cn` 走直 A 记录到 yanpai box + Caddy + LE 证书(自管 SSL 完全绕开 CDN CNAME 死锁路径),Tauri endpoint 切纯 HTTPS,关 dangerousInsecureTransportProtocol
+  - **v0.1.24 测试遗留**: trivial bump commit + tag + CI + publish 都完成,yanpai sync 卡在 VPN 抽风(GitHub Release 资产从国内拉一直截断 3.3M,正常 151M);自更新触发完整链路(restart → check → download → install → restart 验 plutil) 未跑完,留下次 VPN 正常或换 yanpai 内网拉 GitHub 时补
+- [~] **updater UX 不对 (新发现)** — v0.1.23 现行为:5s 后 silent `download_and_install`,不问用户、`download_and_install(|_chunk,_total| {}, || {})` 进度回调是空函数、装完才弹 banner "立即重启"
+  - **违反"用户授权拉流量"基本契约**(150MB 偷下)+ 慢网络无进度反馈 + 突然弹 banner 用户没心理准备
+  - **v0.1.25 必修**:① `check_for_updates` 检测到新版 → 不调 `download_and_install`,先 emit Tauri event `update-available { version, notes }` ② 前端 update-banner.js 加询问 modal(接 event,选项"现在更新/稍后/跳过这个版本") ③ 用户点"更新" → 前端调 Tauri command `start_update_download` ④ Rust 端 `download_and_install` 进度回调用 emit `update-progress { chunk, total }` → 前端实时画进度条 ⑤ 装完走现有"立即重启" banner
 
 ### Privacy / Consent 合规
 
