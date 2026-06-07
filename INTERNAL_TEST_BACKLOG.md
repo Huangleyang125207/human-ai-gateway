@@ -10,11 +10,11 @@
 
 ### Updater 通道安全
 
-- [~] **C-#2 + #8** updater HTTPS 接 TLS — 当前 `dangerousInsecureTransportProtocol: true` 是 Tauri 显式 opt-in 的"我知道这不安全"开关 — **服务端就绪**(v0.1.20: caddy-snippet.txt 加 /updates/ HTTPS 路由 + /forget DELETE 口);**客户端切换留 v0.1.21**(需 server 先 deploy + 验证 `https://feedback.{domain}/updates/latest.json` 200,再改 tauri.conf.json 关 dangerous flag)
-  - 风险:MITM 降级(manifest.version 与 tarball 内部版本无交叉校验);版本+IP 明文嗅探可与 heartbeat client_id 时序关联反匿名
-  - 修法:Caddy snippet 加 @updates handle 反代 feedback-sink:8000 的 StaticFiles `/updates`;tauri.conf.json updater endpoint 切 `https://feedback.{domain}/updates/latest.json`
-  - 注意:PULSE 自承"接 TLS 后关掉"
-  - 顺便:把 v0.1.19 强制改的 IP+port URL 改回域名(参 26.6.7 02:00 那段 yanpai sync 操作)
+- [~] **C-#2 + #8** updater HTTPS 接 TLS — v0.1.23 走腾讯云 CDN (cdn.yanpaidb.cn) + 双 endpoint 失效保护;dangerousInsecureTransportProtocol 留 v0.1.24+ 内测稳定后再关
+  - v0.1.23 已做:tauri.conf.json endpoints 改成 `["https://cdn.yanpaidb.cn/updates/latest.json", "http://101.42.108.30:18080/updates/latest.json"]` (CDN 优先,yanpai 直 IP 兜底);yanpai latest.json 里二进制 url 字段改 https://cdn.yanpaidb.cn (现役 v0.1.16-22 client 二进制下载也走 CDN)
+  - 留 v0.1.24+:把 HTTP fallback endpoint 去掉,只留 HTTPS,关 dangerousInsecureTransportProtocol;前提:CDN 稳定运行 1-2 周无 HTTPS 中断
+  - 顺便保留:yanpai box :18080 长期不下线,即使 CDN 整个挂也能直接服务
+  - 路径迁移记录:腾讯云 CDN 接入(CNAME cdn.yanpaidb.cn → cdn.yanpaidb.cn.cdn.dnsv1.com)→ SSL DV 证书自动验证 → /updates/latest.json 不缓存规则 → /updates/Gateway.* 30 天大文件缓存
 
 ### Privacy / Consent 合规
 

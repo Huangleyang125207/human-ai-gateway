@@ -40,11 +40,11 @@ gateway/                ← 本目录
        vault_git index.lock 探测 + 连续失败通知;详 [INTERNAL_TEST_BACKLOG.md](INTERNAL_TEST_BACKLOG.md))
 - [x] v0.1.21: B 补录 3 件 high(token cache 写错 key / vision config missing return / schema migration 接 silent-failure 通道)
 - [x] v0.1.22: B 补录收尾 3 件(BaiduOCRError raise 不静默 + sink 4xx cursor 分桶 + ocr.py/cutout.py 上报针脚)
-- [x] 沉淀子 agent 编排框架:[AGENT_BRIEFING_TEMPLATE.md](AGENT_BRIEFING_TEMPLATE.md)
-      单 agent briefing 9 字段 schema + [AGENT_ORCHESTRATION_PATTERNS.md](AGENT_ORCHESTRATION_PATTERNS.md)
-      5 个 pattern (parallel review / extract→verify→synthesize / adversarial verify /
-      single brief / 反 pattern) + 决策树 + schema 纪律 + token 成本数据
-- [ ] v0.1.23+: keyring (3 平台) + updater 切 HTTPS(需 server 端 Caddy 先配 /updates/ HTTPS)
+- [x] 沉淀子 agent 编排框架:[AGENT_BRIEFING_TEMPLATE.md](AGENT_BRIEFING_TEMPLATE.md) + [AGENT_ORCHESTRATION_PATTERNS.md](AGENT_ORCHESTRATION_PATTERNS.md)
+- [x] v0.1.23 部分收 C-#2/#8 updater HTTPS:腾讯云 CDN cdn.yanpaidb.cn 接入(下载大文件 + LE 证书 + latest.json 不缓存规则)
+      tauri.conf.json endpoints 双轨 (HTTPS CDN 优先 + HTTP yanpai 兜底);yanpai latest.json 二进制 url 字段改 https 让现役 v0.1.16-22 也走 CDN
+- [ ] v0.1.24+: 关 dangerousInsecureTransportProtocol + 只留 HTTPS endpoint(等 CDN 稳定 1-2 周后)
+- [ ] keyring (3 平台,2-3 天) — 留 v0.1.24+
 - [ ] P4 服务端 deploy:feedback-sink 改动 + Caddy snippet 上 yanpai
       (ssh 命令在 [INTERNAL_TEST_BACKLOG.md](INTERNAL_TEST_BACKLOG.md) P4 段)
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Gateway",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "identifier": "com.humanai.gateway",
   "build": {
     "frontendDist": "../tauri-stub"
@@ -48,6 +48,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
+        "https://cdn.yanpaidb.cn/updates/latest.json",
         "http://101.42.108.30:18080/updates/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFERUEwQUE2QjM0QUQyMkEKUldRcTBrcXpwZ3JxcmIzeEx1bUNWZk1RRUNPUDhyL2xvVG5NTTZ3TElUcFBIMStYdGk2SDlRK2kK",
