@@ -10,11 +10,10 @@
 
 ### Updater 通道安全
 
-- [~] **C-#2 + #8** updater HTTPS 接 TLS — v0.1.23 走腾讯云 CDN (cdn.yanpaidb.cn) + 双 endpoint 失效保护;dangerousInsecureTransportProtocol 留 v0.1.24+ 内测稳定后再关
-  - v0.1.23 已做:tauri.conf.json endpoints 改成 `["https://cdn.yanpaidb.cn/updates/latest.json", "http://101.42.108.30:18080/updates/latest.json"]` (CDN 优先,yanpai 直 IP 兜底);yanpai latest.json 里二进制 url 字段改 https://cdn.yanpaidb.cn (现役 v0.1.16-22 client 二进制下载也走 CDN)
-  - 留 v0.1.24+:把 HTTP fallback endpoint 去掉,只留 HTTPS,关 dangerousInsecureTransportProtocol;前提:CDN 稳定运行 1-2 周无 HTTPS 中断
-  - 顺便保留:yanpai box :18080 长期不下线,即使 CDN 整个挂也能直接服务
-  - 路径迁移记录:腾讯云 CDN 接入(CNAME cdn.yanpaidb.cn → cdn.yanpaidb.cn.cdn.dnsv1.com)→ SSL DV 证书自动验证 → /updates/latest.json 不缓存规则 → /updates/Gateway.* 30 天大文件缓存
+- [~] **C-#2 + #8** updater HTTPS 接 TLS — v0.1.23 走腾讯云 CDN HTTP (cdn.yanpaidb.cn);HTTPS 因 CNAME 接入下 DV 验证死锁 (子域 CNAME → `_dnsauth.cdn.yanpaidb.cn` NXDOMAIN) 卡 3h+
+  - v0.1.23 已做:CDN 加速域 cdn.yanpaidb.cn (下载大文件 + yanpai:18080 源 + latest.json 不缓存);tauri.conf.json endpoints 双轨 (HTTPS CDN 优先 + HTTP yanpai 兜底);yanpai latest.json 二进制 url 指 http://cdn.yanpaidb.cn (现役 v0.1.16-22 也走 CDN)
+  - HTTPS 临时风险评估:minisign 签名验证堵 MITM 改包 + Tauri updater 自动比 version 堵降级,真剩风险只有"嗅探看你版本+IP"(内测 0 真用户基本无影响)
+  - 留 v0.1.25+:换 update.yanpaidb.cn 走直 A 记录到 yanpai box + Caddy + LE 证书(绕开 CDN CNAME 死锁),Tauri endpoint 切纯 HTTPS,关 dangerousInsecureTransportProtocol;为此 v0.1.24 测 HTTP CDN 自更新触发完整链路,确认 channel 通了再走 HTTPS 路
 
 ### Privacy / Consent 合规
 
