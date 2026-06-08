@@ -119,17 +119,19 @@
       { key: "install",  label: "安装" },
       { key: "migrating", label: "MD 迁移" },
     ];
-    const currentIdx = (() => {
-      if (state.step === "download" || state.step === "found") return 0;
-      if (state.step === "install") return 1;
-      if (state.step === "ready_restart") return 1; // 装完,等重启:Step 2 完
-      if (state.step === "migrating") return 2;
-      if (state.step === "migrated") return 3;
-      return -1;
-    })();
+    // dot 状态:done / active / pending。ready_restart 时 Step 1+2 都 done,Step 3 仍 pending(没人 active,等用户重启)。
+    const stepStatus = (i) => {
+      if (state.step === "migrated") return "done";
+      if (state.step === "migrating") return i < 2 ? "done" : (i === 2 ? "active" : "pending");
+      if (state.step === "ready_restart") return i <= 1 ? "done" : "pending";
+      if (state.step === "install") return i < 1 ? "done" : (i === 1 ? "active" : "pending");
+      if (state.step === "download" || state.step === "found") return i === 0 ? "active" : "pending";
+      return "pending";
+    };
     const dotsHtml = steps.map((s, i) => {
-      const isDone = i < currentIdx || state.step === "migrated";
-      const isActive = i === currentIdx && state.step !== "migrated";
+      const st = stepStatus(i);
+      const isDone = st === "done";
+      const isActive = st === "active";
       const bg = isDone ? "#a3d9a5" : isActive ? "#f5efe0" : "rgba(245,239,224,0.3)";
       const fg = isDone || isActive ? "#3b6f4a" : "#f5efe0";
       const mark = isDone ? "✓" : (i + 1);
@@ -411,6 +413,8 @@
     bindMigrationStream();
     setTimeout(poll, FIRST_POLL_MS);
     setInterval(poll, POLL_MS);
+    // dev hook:暴露状态机入口给手测 / Playwright smoke。production 也开,3 字节开销可忽略。
+    window.__updateBannerDev = { onProgress, onMigrationEvent, state };
   }
 
   if (document.readyState === "loading") {
