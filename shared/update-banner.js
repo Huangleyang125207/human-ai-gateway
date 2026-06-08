@@ -89,13 +89,25 @@
   function renderCollapsed() {
     const pct = progressPct();
     const ver = state.version ? ` v${state.version}` : "";
+    const hasErr = state.migration.filesError > 0 || state.step === "error";
+    const errBadge = hasErr ? `<span style="color:#ffd6d6;">⚠</span>` : "";
+    let extra = "";
+    if (state.step === "download") {
+      extra = `<span style="opacity:0.7;">${pct.toFixed(0)}%</span>`;
+    } else if (state.step === "migrating") {
+      const m = state.migration;
+      const done = m.filesDone + m.filesError;
+      const total = m.planTotal || "?";
+      extra = `<span style="opacity:0.7;">${done}/${total}</span>`;
+    }
     return `
       <div style="display:flex; align-items:center; gap:10px; padding:4px 14px; cursor:pointer; height:24px; font-size:12px;"
            data-action="expand"
            title="点击展开">
         <span style="opacity:0.85;">Gateway${ver}</span>
+        ${errBadge}
         <span style="opacity:0.95;">${stepLabel(state.step)}</span>
-        ${state.step === "download" ? `<span style="opacity:0.7;">${pct.toFixed(0)}%</span>` : ""}
+        ${extra}
         <span style="margin-left:auto; opacity:0.7;">▾</span>
       </div>`;
   }
@@ -177,14 +189,32 @@
         </div>`;
     } else if (state.step === "migrated") {
       const m = state.migration;
-      const tail = m.filesError > 0 ? `,${m.filesError} 个跳过(留 .bak 兜底)` : "";
+      const hasErr = m.filesError > 0;
+      const tail = hasErr ? `,${m.filesError} 个跳过(留 .bak 兜底)` : "";
+      const errDetails = (hasErr && state.expandedErrors)
+        ? `<div style="margin-top:8px; padding:8px 10px; background:rgba(0,0,0,0.15); border-radius:4px; font-size:12px; font-family:monospace; max-height:120px; overflow-y:auto;">
+            ${m.errors.slice(0, 5).map((e) => `
+              <div style="opacity:0.85; margin-bottom:4px;">
+                <span style="color:#ffd6d6;">⚠</span> ${(e.user_file || "").split("/").pop()}: ${e.error || ""}
+              </div>`).join("")}
+            ${m.errors.length > 5 ? `<div style="opacity:0.6;">…还有 ${m.errors.length - 5} 个</div>` : ""}
+          </div>`
+        : "";
       stepDetailHtml = `
-        <div style="display:flex; align-items:center; gap:12px;">
-          <span style="opacity:0.9;">✓ 升级完成:${m.filesDone} 个文件已更新${tail}</span>
-          <span data-action="dismiss" style="background:transparent; color:#f5efe0; border:1px solid rgba(245,239,224,0.5); padding:4px 12px; border-radius:4px; cursor:pointer; font-size:12px;">收起</span>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <span style="opacity:0.9;">✓ 升级完成:${m.filesDone} 个文件已更新${tail}</span>
+            ${hasErr ? `<span data-action="toggle_errors" style="background:transparent; color:#f5efe0; border:1px solid rgba(245,239,224,0.5); padding:4px 12px; border-radius:4px; cursor:pointer; font-size:12px;">${state.expandedErrors ? "藏起" : "看跳过的"}</span>` : ""}
+            <span data-action="dismiss" style="background:transparent; color:#f5efe0; border:1px solid rgba(245,239,224,0.5); padding:4px 12px; border-radius:4px; cursor:pointer; font-size:12px;">收起</span>
+          </div>
+          ${errDetails}
         </div>`;
     } else if (state.step === "error") {
-      stepDetailHtml = `<div style="opacity:0.9; color:#ffcccc;">${state.errorMessage || "出错了"}</div>`;
+      stepDetailHtml = `
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="opacity:0.95; color:#ffd6d6;">⚠ ${state.errorMessage || "出错了"}</span>
+          <span data-action="dismiss" style="background:transparent; color:#f5efe0; border:1px solid rgba(245,239,224,0.5); padding:4px 12px; border-radius:4px; cursor:pointer; font-size:12px;">收起</span>
+        </div>`;
     }
 
     return `
@@ -216,6 +246,7 @@
         else if (action === "dismiss") { state.visible = false; render(); }
         else if (action === "postpone") { state.visible = false; render(); }
         else if (action === "restart") { await restartApp(); }
+        else if (action === "toggle_errors") { state.expandedErrors = !state.expandedErrors; render(); }
       });
     });
   }
