@@ -1,9 +1,10 @@
 // Gateway 桌面壳 — Tauri 只管「窗口 + 进程」,所有内容走 HTTP 到 sidecar(localhost:4321)。
 // 铁律:不碰 Tauri JS 桥,前端零改,壳可热插拔。
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
@@ -23,21 +24,79 @@ async fn check_for_updates(app: AppHandle, sidecar_port: u16) {
         Ok(Some(update)) => {
             let new_ver = update.version.clone();
             log::info!("[updater] new version available: {}", new_ver);
-            // 下载 + 安装 — 用户重启时生效;失败 silent
+            // v0.1.25 T-A:emit `updater://progress` 给前端 banner 显示 3 步进度。
+            // chunk callback 接受 chunk_length(本次到的字节)+ Option<content_length>(总长);
+            // 累计字节用 AtomicU64 跨 Fn-closure 共享(progress callback 是 Fn 不是 FnMut)。
+            // 失败 silent 旧路径保留 — 改成 emit error 步骤让 banner 显警告,不破坏 v0.1.23 兜底。
+            let _ = app.emit(
+                "updater://progress",
+                serde_json::json!({ "step": "found", "version": new_ver }),
+            );
+            let bytes_so_far = Arc::new(AtomicU64::new(0));
+            let bytes_cb = bytes_so_far.clone();
+            let app_progress = app.clone();
+            let app_finish = app.clone();
+            let app_ready = app.clone();
+            let new_ver_for_ready = new_ver.clone();
             match update
-                .download_and_install(|_chunk, _total| {}, || {})
+                .download_and_install(
+                    move |chunk_len, total| {
+                        let cum = bytes_cb.fetch_add(chunk_len as u64, Ordering::Relaxed)
+                            + chunk_len as u64;
+                        let _ = app_progress.emit(
+                            "updater://progress",
+                            serde_json::json!({
+                                "step": "download",
+                                "bytes": cum,
+                                "total": total,
+                            }),
+                        );
+                    },
+                    move || {
+                        let _ = app_finish.emit(
+                            "updater://progress",
+                            serde_json::json!({ "step": "install" }),
+                        );
+                    },
+                )
                 .await
             {
                 Ok(()) => {
+                    let _ = app_ready.emit(
+                        "updater://progress",
+                        serde_json::json!({
+                            "step": "ready_restart",
+                            "version": new_ver_for_ready,
+                        }),
+                    );
                     log::info!("[updater] download+install done, notifying sidecar");
-                    // POST sidecar 让它推 banner 给前端 "重启生效"
                     notify_sidecar_updater_installed(sidecar_port, &new_ver).await;
                 }
-                Err(e) => log::warn!("[updater] download/install failed: {e}"),
+                Err(e) => {
+                    let _ = app.emit(
+                        "updater://progress",
+                        serde_json::json!({
+                            "step": "error",
+                            "stage": "download_or_install",
+                            "message": format!("{e}"),
+                        }),
+                    );
+                    log::warn!("[updater] download/install failed: {e}");
+                }
             }
         }
         Ok(None) => log::info!("[updater] no new version"),
-        Err(e) => log::warn!("[updater] check failed: {e}"),
+        Err(e) => {
+            let _ = app.emit(
+                "updater://progress",
+                serde_json::json!({
+                    "step": "error",
+                    "stage": "check",
+                    "message": format!("{e}"),
+                }),
+            );
+            log::warn!("[updater] check failed: {e}");
+        }
     }
 }
 

@@ -97,7 +97,7 @@ v0.1.23 当前用户没法靠新 UI 拉 v0.1.25（接收的还是 silent updater
 
 ### Tasks
 
-- [ ] T-A SMALL: `lib.rs` chunk callback emit Tauri event（Step 1 下载进度）→ T1 GREEN
+- [x] T-A SMALL: `lib.rs` chunk callback emit Tauri event（5 个 step：found/download/install/ready_restart/error；cargo check 通过）
 - [ ] T-B SMALL: `update-banner.js` timeline 骨架 + 收起态 + Step 1 渲染
 - [ ] T-C MEDIUM: sidecar `/api/migration/stream` SSE + `.last-migrated-version` 读写 → T2 GREEN
 - [ ] T-D MEDIUM: `migration_plan.py` LLM classify+rewrite，含 backup 兜底 → T3+T4 GREEN
