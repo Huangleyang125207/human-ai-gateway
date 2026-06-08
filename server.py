@@ -2812,6 +2812,8 @@ async def _startup_vault_reference_and_migration():
         log.warning(f"_ensure_vault_reference_files: {e}")
     # 迁移走 async background,LLM call 不阻塞 startup
     asyncio.create_task(_run_schema_migration_if_needed())
+    # v0.1.25 起:LLM 弹性 MD 迁移(scope 不预设);走 /api/migration/stream SSE 通报进度
+    asyncio.create_task(_startup_v0125_md_migration())
     # 接 Rust updater 落的 pending(review #18)
     try:
         _consume_updater_pending()
@@ -2955,6 +2957,173 @@ async def migration_stream():
             "X-Accel-Buffering": "no",  # 防代理 buffer 卡死 SSE
         },
     )
+
+
+# ─── v0.1.25 MD 迁移 LLM 客户端 + startup hook (T-E) ─────────────────
+# 走 get_client() / get_model() 复用主聊天链(单 API 入口铁律)。
+# 没配置 key → factory 返 None → startup 跳过迁移(graceful)。
+# 同步 OpenAI client 用 asyncio.to_thread 包成 async,不阻 event loop。
+
+class _MigrationLLM:
+    """migration_plan.run_migration 用的 LLM 客户端。
+
+    协议:
+      async call_plan(templates, vault) → [{user_file, target_template, action, reason}, ...]
+      async call_rewrite(plan_item) → 新 user_file 内容(完整 MD text)
+    """
+
+    _PLAN_SYS = (
+        "你是 MD 文件迁移 planner。给你新版 binary 自带的 canonical templates 列表"
+        "+ 用户 vault 里现有的 MD 文件列表(及内容片段)。"
+        "为每个 user MD 决定:它对应哪个 template(没有则 \"\"),action 是 migrate 还是 skip,reason 一句话。"
+        "严格返 JSON 数组,无前后说明:[{\"user_file\":\"...\",\"target_template\":\"...\",\"action\":\"migrate|skip\",\"reason\":\"...\"}]"
+    )
+
+    _REWRITE_SYS = (
+        "你是 MD 重写助手。把用户现有 MD 按新版 template 的结构重新组织。"
+        "铁律:user 原内容(措辞、数据、tag、个人信息)100% 保留;template 的新区段在合理位置加上"
+        "(可空可默认填);返**完整新 MD 文件内容**,无 code fence 无前后说明。"
+    )
+
+    def __init__(self, client, model: str):
+        self._client = client
+        self._model = model
+
+    async def call_plan(self, templates: list, vault: list) -> list:
+        tmpl_summary = "\n".join(
+            f"- {t.name}" for t in templates
+        ) or "(无)"
+        # vault 只送文件名 + 前 600 字节,降 token
+        vault_summary_lines = []
+        for v in vault:
+            try:
+                head = v.read_text(encoding="utf-8")[:600].replace("\n", " ⏎ ")
+            except Exception:
+                head = "(读失败)"
+            vault_summary_lines.append(f"- {v}: {head}")
+        vault_summary = "\n".join(vault_summary_lines) or "(无)"
+
+        user_msg = (
+            f"## 新版 templates\n{tmpl_summary}\n\n"
+            f"## 用户 vault(每文件前 600 字)\n{vault_summary}\n\n"
+            "请输出 JSON 数组。"
+        )
+
+        def _do_call():
+            r = self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": self._PLAN_SYS},
+                    {"role": "user", "content": user_msg},
+                ],
+                response_format={"type": "json_object"},
+                timeout=120.0,
+            )
+            return r.choices[0].message.content or ""
+
+        text = await asyncio.to_thread(_do_call)
+        text = text.strip()
+        # response_format json_object 会返 `{"...":[...]}` 单 key 包对象;容忍。
+        if text.startswith("{"):
+            obj = json.loads(text)
+            for v in obj.values():
+                if isinstance(v, list):
+                    return v
+            return []
+        return json.loads(text)
+
+    async def call_rewrite(self, plan_item: dict) -> str:
+        user_file = Path(plan_item["user_file"])
+        template_name = plan_item.get("target_template", "")
+        try:
+            user_text = user_file.read_text(encoding="utf-8")
+        except Exception as e:
+            raise RuntimeError(f"read user_file fail: {e}")
+        # 找对应 template — 假设 bundle_dir/templates/<name>
+        template_path = GATEWAY_DIR / "templates" / template_name if template_name else None
+        if template_path and template_path.exists():
+            try:
+                template_text = template_path.read_text(encoding="utf-8")
+            except Exception:
+                template_text = "(无)"
+        else:
+            template_text = "(无)"
+
+        user_msg = (
+            f"## 用户现有 MD ({user_file.name})\n{user_text}\n\n"
+            f"## 新版 template ({template_name})\n{template_text}\n\n"
+            "请输出新 MD 文件完整内容。"
+        )
+
+        def _do_call():
+            r = self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": self._REWRITE_SYS},
+                    {"role": "user", "content": user_msg},
+                ],
+                timeout=120.0,
+            )
+            return r.choices[0].message.content or ""
+
+        text = await asyncio.to_thread(_do_call)
+        return text.strip()
+
+
+def _create_migration_llm():
+    """工厂:有 key 时返 _MigrationLLM 实例,没有返 None。
+    None 时 startup hook 跳过迁移,记一次 log 不告警。
+    """
+    client = get_client()
+    if client is None:
+        return None
+    model = get_model()
+    return _MigrationLLM(client, model)
+
+
+async def _startup_v0125_md_migration():
+    """v0.1.25 起的 MD 迁移 startup hook。
+
+    spawn 一个后台 task 跑 migration_plan.run_migration。
+    progress_callback = push_migration_event(SSE 出口)。
+    bundle_dir = GATEWAY_DIR(PyInstaller frozen 时是 _MEIPASS / Resources;dev 时是 repo root)。
+    vault_dir = VAULT_DIR。state_dir = ~/.human-ai/(跟 .updater-pending.json 同层)。
+    """
+    try:
+        import migration_plan  # 延迟 import 避免 server.py 模块加载顺序问题
+    except Exception as e:
+        log.warning(f"migration_plan import fail: {e}")
+        return
+
+    llm = _create_migration_llm()
+    if llm is None:
+        log.info("[v0.1.25 migration] LLM 没配置,跳过迁移")
+        return
+
+    state_dir = Path.home() / ".human-ai"
+    try:
+        await migration_plan.run_migration(
+            app_version=APP_VERSION,
+            bundle_dir=GATEWAY_DIR,
+            vault_dir=VAULT_DIR,
+            state_dir=state_dir,
+            llm_client=llm,
+            progress_callback=push_migration_event,
+        )
+    except Exception as e:
+        log.warning(f"[v0.1.25 migration] 顶层异常: {e}")
+        # 兜底:推 migration_done(had_errors=True)让 SSE 客户端能收尾
+        try:
+            await push_migration_event({
+                "kind": "migration_done",
+                "success": False,
+                "had_errors": True,
+                "files_done": 0,
+                "files_error": 0,
+                "error": f"{type(e).__name__}: {e}",
+            })
+        except Exception:
+            pass
 
 
 async def _auto_create_loop():
