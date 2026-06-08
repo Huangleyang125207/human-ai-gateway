@@ -2871,6 +2871,92 @@ def _consume_updater_pending():
         pass
     _ = pushed  # 留一个变量调试时看
 
+
+# ─── v0.1.25 MD 迁移 SSE 通道 (T-C) ────────────────────────────────
+# 跟旧 _run_schema_migration_if_needed 的 schema-version 机制并存:那个是
+# 单文件 marker 驱动;这个是 LLM 弹性扫描所有 MD,scope 不预设。前端 banner
+# 监听 /api/migration/stream 实时显 Step 3 进度。
+#
+# 设计:
+#   _migration_log    缓存所有已发生的事件,新 client 接入立即 replay
+#   _migration_consumers 当前监听的 SSE 客户端队列,broadcast 推新事件
+#   _migration_done   true 后 SSE 自动 close
+#
+# 异步 lock 必须懒构(asyncio.Lock 绑当前 loop),所以走 _migration_lock_get()。
+_migration_log: list[dict] = []
+_migration_consumers: list[asyncio.Queue] = []
+_migration_done: bool = False
+_migration_lock: asyncio.Lock | None = None
+
+
+def _migration_lock_get() -> asyncio.Lock:
+    global _migration_lock
+    if _migration_lock is None:
+        _migration_lock = asyncio.Lock()
+    return _migration_lock
+
+
+async def push_migration_event(ev: dict) -> None:
+    """T-D run_migration 的 progress_callback 入口。
+
+    把事件落 log + fanout 给所有 SSE 客户端。
+    `kind in ("migration_done", "migration_skipped")` 标记终态,SSE 自动收尾。
+    """
+    global _migration_done
+    async with _migration_lock_get():
+        _migration_log.append(ev)
+        consumers = list(_migration_consumers)
+        if ev.get("kind") in ("migration_done", "migration_skipped"):
+            _migration_done = True
+    for q in consumers:
+        try:
+            await q.put(ev)
+        except Exception:
+            pass  # 客户端断了不影响其他
+
+
+@app.get("/api/migration/stream")
+async def migration_stream():
+    """SSE: v0.1.25 起的 MD 迁移进度推送。
+
+    新 client 连接 → 先 replay 已有 log → 然后实时 stream → 见 migration_done/skipped 关闭。
+    多 client 共存(用户刷新页面也能继续看)。
+    """
+    q: asyncio.Queue = asyncio.Queue()
+    async with _migration_lock_get():
+        snapshot = list(_migration_log)
+        already_done = _migration_done
+        if not already_done:
+            _migration_consumers.append(q)
+
+    async def event_gen():
+        try:
+            for ev in snapshot:
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                if ev.get("kind") in ("migration_done", "migration_skipped"):
+                    return
+            if already_done:
+                return
+            while True:
+                ev = await q.get()
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                if ev.get("kind") in ("migration_done", "migration_skipped"):
+                    return
+        finally:
+            async with _migration_lock_get():
+                if q in _migration_consumers:
+                    _migration_consumers.remove(q)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # 防代理 buffer 卡死 SSE
+        },
+    )
+
+
 async def _auto_create_loop():
     while True:
         try:

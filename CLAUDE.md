@@ -99,7 +99,7 @@ v0.1.23 当前用户没法靠新 UI 拉 v0.1.25（接收的还是 silent updater
 
 - [x] T-A SMALL: `lib.rs` chunk callback emit Tauri event（5 个 step：found/download/install/ready_restart/error；cargo check 通过）
 - [x] T-B SMALL: `update-banner.js` timeline 骨架 + 收起态 + Step 1 渲染（listen `updater://progress` 重写整段，3 dot timeline + 进度条 + 收起到 24px 顶条；node --check 通过；visual smoke 推迟到 v0.1.25 build）
-- [ ] T-C MEDIUM: sidecar `/api/migration/stream` SSE + `.last-migrated-version` 读写 → T2 GREEN
+- [x] T-C MEDIUM: sidecar `/api/migration/stream` SSE 通道（log buffer + 多 client broadcast + replay；`push_migration_event` 入口给 T-D 用；`.last-migrated-version` 读写延后到 T-D 一起做）+ 31 existing tests 全绿无回归
 - [ ] T-D MEDIUM: `migration_plan.py` LLM classify+rewrite，含 backup 兜底 → T3+T4 GREEN
 - [ ] T-E MEDIUM: sidecar startup hook spawn 迁移协程 → T5 GREEN
 - [ ] T-F SMALL: `update-banner.js` Step 2 + Step 3 渲染（listen SSE）

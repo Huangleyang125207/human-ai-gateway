@@ -3,6 +3,7 @@
 *.log
 /dist/
 /.venv-build/
+/.venv-test/
 /dist-pyinstaller/
 /build/
 *.spec
