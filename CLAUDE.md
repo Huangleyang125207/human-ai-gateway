@@ -55,6 +55,62 @@ gateway/                ← 本目录
 
 ---
 
+## Active spec — v0.1.25 updater 可视化 + 弹性 MD 迁移
+
+> LARGE 任务，正在执行；提交完所有 T-A..T-G 后删掉这段。
+> 上手前必读 PULSE.md "Cannot break"，特别是 silent-failure 反馈通道 + vault md sha256 baseline 不能被 MD 迁移绕过。
+
+### What
+
+把现行 silent updater 替换成「3 步 timeline banner」：
+- Step 1 下载（Tauri 进度透传 → 前端进度条）
+- Step 2 安装（Tauri 信号 → 显"安装完成，点击重启"）
+- Step 3 重启后 MD 迁移（新版 sidecar 调 LLM，根据现实需求决定迁移范围，全自动、user 只看进度）
+
+UI 装在 gateway HTML 顶部 banner，可收起成右上角圆点。LLM 走百炼 deepseek-v4（单 API 入口）。
+done = v0.1.25 dmg 手装一次后，从 v0.1.25 升 v0.1.26 时三步 banner 全跑通 + 任意 MD 模板变化能自动迁移。
+
+### Plan
+
+| 文件 | 改什么 |
+|---|---|
+| `src-tauri/src/lib.rs` | `download_and_install` 进度 callback 装真，emit `updater://progress` Tauri events（chunk/total + step 标记） |
+| `shared/update-banner.js` | 拓展成 3-step timeline + 收起态；listen Tauri events + SSE；render 当前 step + 进度 |
+| `server.py` | sidecar startup hook 加 MD 迁移协程；`/api/migration/stream` SSE endpoint；`.last-migrated-version` 读写 |
+| 新 `migration_plan.py`（或 server.py helper 段） | LLM 调用：① classify＋diff round 出 plan；② per-file 重写；user 内容保留 + 新结构 merge |
+| `Contents/Resources/templates/`（构建侧） | binary bundle 自带 canonical templates；sidecar 用 `sys._MEIPASS / "templates"` 读 |
+| `tauri.conf.json` | 不动 |
+
+迁移失败兜底：每个被改 MD 留 `<file>.bak.before-v0.1.x`，错的跳，banner 显 "Step 3 部分失败"。LLM 5xx / 网断 → 同样跳 + 兜底。
+
+### Known gap
+
+v0.1.23 当前用户没法靠新 UI 拉 v0.1.25（接收的还是 silent updater）→ v0.1.25 首发走手动 dmg；v0.1.25 → v0.1.26 之后链路才走新 UI。
+
+### Test plan
+
+- [ ] T1 boundary：Tauri chunk callback 触发 emit → 前端能 listen 到事件
+- [ ] T2 contract：sidecar `.last-migrated-version == APP_VERSION` 时迁移协程立即 return（idempotent）
+- [ ] T3 effect：fake `templates/` + fake vault MD → LLM 返 plan → 真按 plan 重写 + 留 .bak
+- [ ] T4 effect：LLM 5xx → user MD 保持原样 + .bak 不丢 + banner Step 3 显警告
+- [ ] T5 effect：sidecar 启动时迁移协程在 background task 跑，不阻塞 `/` 路由
+
+### Tasks
+
+- [ ] T-A SMALL: `lib.rs` chunk callback emit Tauri event（Step 1 下载进度）→ T1 GREEN
+- [ ] T-B SMALL: `update-banner.js` timeline 骨架 + 收起态 + Step 1 渲染
+- [ ] T-C MEDIUM: sidecar `/api/migration/stream` SSE + `.last-migrated-version` 读写 → T2 GREEN
+- [ ] T-D MEDIUM: `migration_plan.py` LLM classify+rewrite，含 backup 兜底 → T3+T4 GREEN
+- [ ] T-E MEDIUM: sidecar startup hook spawn 迁移协程 → T5 GREEN
+- [ ] T-F SMALL: `update-banner.js` Step 2 + Step 3 渲染（listen SSE）
+- [ ] T-G SMALL: banner 错误态 UI + 完成态收尾
+
+### Findings
+
+（执行中记 surprise）
+
+---
+
 ## Do not(gateway 本地补充 — 跟 PULSE 红线不重复)
 
 - 不要在 gateway/ 加 `npm` / `build` 依赖(纯 vanilla JS + python single-file)
