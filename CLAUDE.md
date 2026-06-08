@@ -102,7 +102,7 @@ v0.1.23 当前用户没法靠新 UI 拉 v0.1.25（接收的还是 silent updater
 - [x] T-C MEDIUM: sidecar `/api/migration/stream` SSE 通道（log buffer + 多 client broadcast + replay；`push_migration_event` 入口给 T-D 用；`.last-migrated-version` 读写延后到 T-D 一起做）+ 31 existing tests 全绿无回归
 - [x] T-D MEDIUM: `migration_plan.py` LLM classify+rewrite + `.last-migrated-version` 读写 + .bak 兜底（T1-T5 全 GREEN：plan_ready/file_started/file_done/file_error/migration_done/migration_skipped 事件，idempotent，LLM 失败 user MD 不动，async 不阻塞 event loop）
 - [x] T-E MEDIUM: `_MigrationLLM` wrapper（复用 `get_client()` + `get_model()` 单 API 入口） + `_startup_v0125_md_migration` 注册到 startup 事件，spawn 异步任务调 `migration_plan.run_migration` + `push_migration_event` 出口；LLM 没配置走 graceful skip
-- [ ] T-F SMALL: `update-banner.js` Step 2 + Step 3 渲染（listen SSE）
+- [x] T-F SMALL: `update-banner.js` Step 2(install)+ Step 3(migrating)渲染 + EventSource 订阅 `/api/migration/stream` + 重启按钮分流（Tauri invoke / fallback /api/quit），trivial 0-file 完成不显 banner
 - [ ] T-G SMALL: banner 错误态 UI + 完成态收尾
 
 ### Findings

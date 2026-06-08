@@ -30,6 +30,14 @@
     bytes: 0,
     total: null,
     errorMessage: null,
+    // ── Step 3 MD 迁移状态(T-F) ──
+    migration: {
+      planTotal: 0,        // plan 里 action=migrate 的总数
+      filesDone: 0,
+      filesError: 0,
+      currentFile: null,   // 正在改写的 user_file basename
+      errors: [],          // [{user_file, error}, ...]  T-G 展示
+    },
   };
   let rootEl = null;
 
@@ -140,8 +148,41 @@
     } else if (state.step === "install") {
       stepDetailHtml = `<div style="opacity:0.85;">下载完毕,正在安装到 /Applications…</div>`;
     } else if (state.step === "ready_restart") {
-      // T-F 完整接,这里先占位
-      stepDetailHtml = `<div style="opacity:0.85;">v${state.version} 已下载,重启 app 生效。</div>`;
+      stepDetailHtml = `
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="opacity:0.9;">Gateway v${state.version} 已下载,重启 app 生效</span>
+          <span data-action="restart" style="background:#f5efe0; color:#3b6f4a; padding:6px 14px; border-radius:4px; cursor:pointer; font-weight:600;">立即重启</span>
+          <span data-action="postpone" style="background:transparent; color:#f5efe0; border:1px solid rgba(245,239,224,0.5); padding:6px 14px; border-radius:4px; cursor:pointer;">稍后</span>
+        </div>`;
+    } else if (state.step === "migrating") {
+      const m = state.migration;
+      const done = m.filesDone + m.filesError;
+      const total = m.planTotal || 0;
+      const pct = total > 0 ? (done / total) * 100 : 0;
+      const curr = m.currentFile ? `<span style="opacity:0.8; font-size:12px;">${m.currentFile}</span>` : "";
+      stepDetailHtml = `
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="opacity:0.9;">AI 正在按新版重写日记模板…</span>
+            ${curr}
+          </div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div style="flex:1; height:6px; background:rgba(245,239,224,0.25); border-radius:3px; overflow:hidden;">
+              <div style="height:100%; width:${pct}%; background:#f5efe0; transition:width 0.3s;"></div>
+            </div>
+            <span style="font-variant-numeric:tabular-nums; opacity:0.9; font-size:12px;">
+              ${done} / ${total || "?"}${m.filesError > 0 ? ` (${m.filesError} 跳过)` : ""}
+            </span>
+          </div>
+        </div>`;
+    } else if (state.step === "migrated") {
+      const m = state.migration;
+      const tail = m.filesError > 0 ? `,${m.filesError} 个跳过(留 .bak 兜底)` : "";
+      stepDetailHtml = `
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="opacity:0.9;">✓ 升级完成:${m.filesDone} 个文件已更新${tail}</span>
+          <span data-action="dismiss" style="background:transparent; color:#f5efe0; border:1px solid rgba(245,239,224,0.5); padding:4px 12px; border-radius:4px; cursor:pointer; font-size:12px;">收起</span>
+        </div>`;
     } else if (state.step === "error") {
       stepDetailHtml = `<div style="opacity:0.9; color:#ffcccc;">${state.errorMessage || "出错了"}</div>`;
     }
@@ -168,12 +209,37 @@
     el.innerHTML = state.collapsed ? renderCollapsed() : renderExpanded();
     // delegate clicks
     el.querySelectorAll("[data-action]").forEach((node) => {
-      node.addEventListener("click", (ev) => {
+      node.addEventListener("click", async (ev) => {
         const action = node.getAttribute("data-action");
         if (action === "expand") { state.collapsed = false; render(); }
         else if (action === "collapse") { state.collapsed = true; render(); }
+        else if (action === "dismiss") { state.visible = false; render(); }
+        else if (action === "postpone") { state.visible = false; render(); }
+        else if (action === "restart") { await restartApp(); }
       });
     });
+  }
+
+  // ─── 重启逻辑(从老 showUpdateBanner 拆出,复用) ─────────────
+
+  async function restartApp() {
+    const tauri = window.__TAURI__;
+    const inTauri = !!(tauri && (tauri.core?.invoke || tauri.process?.relaunch));
+    if (!inTauri) {
+      state.errorMessage = "请在 Gateway 桌面壳里点重启(浏览器无法控制壳)";
+      render();
+      return;
+    }
+    try {
+      if (tauri.core?.invoke) { await tauri.core.invoke("plugin:process|restart"); return; }
+      if (tauri.process?.relaunch) { await tauri.process.relaunch(); return; }
+    } catch (e) {
+      console.warn("[update-banner] Tauri relaunch 失败,走 fallback", e);
+    }
+    // fallback:让 sidecar 退出,Tauri 检测 sidecar 死 → Tauri 退,user 手动重开
+    try { await fetch("/api/quit", { method: "POST" }); } catch (e) {}
+    state.errorMessage = "Gateway 已关闭,请手动重开";
+    render();
   }
 
   // ─── 状态更新入口 ────────────────────────────────────────────
@@ -205,6 +271,69 @@
     } catch (e) {
       console.warn("[update-banner] Tauri event listen 失败", e);
     }
+  }
+
+  // ─── Step 3 MD 迁移 SSE (T-F) ─────────────────────────────────
+  // 接 server.py /api/migration/stream — sidecar 启动跑 LLM 迁移时实时推。
+  // 已经 done/skipped 的会 replay 整 log,看到后 SSE 自然关闭。
+
+  function bindMigrationStream() {
+    if (typeof EventSource === "undefined") return;
+    let es;
+    try { es = new EventSource("/api/migration/stream"); }
+    catch (e) { console.warn("[update-banner] SSE connect 失败", e); return; }
+
+    es.onmessage = (msg) => {
+      try { onMigrationEvent(JSON.parse(msg.data)); }
+      catch (e) { console.warn("[update-banner] SSE parse 失败", e, msg.data); }
+    };
+    es.onerror = (e) => {
+      // 服务端 close stream → readyState=CLOSED;不 panic 重连(防 spam)
+      if (es.readyState === EventSource.CLOSED) {
+        es.close();
+      }
+    };
+  }
+
+  function onMigrationEvent(ev) {
+    if (!ev || typeof ev !== "object") return;
+    const m = state.migration;
+    state.visible = true;
+    switch (ev.kind) {
+      case "plan_ready":
+        m.planTotal = Array.isArray(ev.plan)
+          ? ev.plan.filter((x) => x?.action === "migrate").length
+          : 0;
+        // 有要做的事 → 切到 migrating 态
+        if (m.planTotal > 0) {
+          state.step = "migrating";
+        }
+        break;
+      case "file_started":
+        state.step = "migrating";
+        try { m.currentFile = ev.user_file?.split("/").pop() || ev.user_file; } catch (e) {}
+        break;
+      case "file_done":
+        m.filesDone += 1;
+        break;
+      case "file_error":
+        m.filesError += 1;
+        m.errors.push({ user_file: ev.user_file, error: ev.error });
+        break;
+      case "migration_done":
+        // 0 文件成功 + 0 文件失败 = trivial 完成,不显
+        if (m.filesDone === 0 && m.filesError === 0 && (m.planTotal || 0) === 0) {
+          state.visible = false;
+        } else {
+          state.step = "migrated";
+        }
+        break;
+      case "migration_skipped":
+        // 版本已迁移过,不显
+        if (state.step === null) state.visible = false;
+        break;
+    }
+    render();
   }
 
   // ─── 老路径:notification poll(updater-installed / vault-schema-*) ─
@@ -248,6 +377,7 @@
 
   function boot() {
     bindTauriEvents();
+    bindMigrationStream();
     setTimeout(poll, FIRST_POLL_MS);
     setInterval(poll, POLL_MS);
   }
