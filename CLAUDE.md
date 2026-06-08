@@ -46,68 +46,12 @@ gateway/                ← 本目录
 - [x] v0.1.24: trivial version bump(为了真测 v0.1.23→v0.1.24 自更新触发)。commit + tag + CI + publish Latest 全完;**yanpai sync 卡住**因 VPN 当天抽风,二进制从 GitHub Release 国内拉一直截到 3.3M(正常 151M)
 - [⚠️] **SSL HTTPS 死锁** — cdn.yanpaidb.cn 是 CDN 接入的 CNAME → `_dnsauth.cdn.yanpaidb.cn` 因 DNS CNAME exclusivity 永远 NXDOMAIN → 腾讯 TrustAsia DV 探针查不到 → 验证永远 stuck。解法:**v0.1.25 换 update.yanpaidb.cn 直 A 记录指 yanpai box + Caddy + LE**(绕开 CDN CNAME 死锁路径,自管 SSL)
 - [⚠️] **自更新 UX 不对** — 现 v0.1.23 实际行为:5s 后 silent download_and_install 不问用户、不显进度、装完才弹 banner"重启生效"。要改:**v0.1.25 加询问 modal(检测到新版"现在更新? / 稍后 / 跳过") + 实时进度条**(详 [INTERNAL_TEST_BACKLOG.md](INTERNAL_TEST_BACKLOG.md))
-- [ ] v0.1.25+: 同时收 ①update.yanpaidb.cn 直 A + Caddy + LE 启 HTTPS、②updater UX 询问+进度、③关 dangerousInsecureTransportProtocol、④保留 yanpai box :18080 作 HTTP fallback
+- [⏳] v0.1.25: ②updater UX 可视化 + 弹性 MD 迁移 = **代码完成**(T-A..T-G 全 7 个子任务，T1-T5 全绿，132/133 总 + 1 pre-existing 与本次无关)。等手 dmg 装 + 真测自更新跳通 + ship v0.1.26 验新 UI 路径。①SSL update.yanpaidb.cn 直 A + Caddy + LE / ③关 dangerousInsecureTransportProtocol / ④yanpai :18080 HTTP fallback 仍待
 - [ ] keyring (3 平台,2-3 天) — 留 v0.1.26+
 - [ ] P4 服务端 deploy:feedback-sink 改动 + Caddy snippet 上 yanpai
       (ssh 命令在 [INTERNAL_TEST_BACKLOG.md](INTERNAL_TEST_BACKLOG.md) P4 段)
 
 更新这个 list 每次 commit 后。
-
----
-
-## Active spec — v0.1.25 updater 可视化 + 弹性 MD 迁移
-
-> LARGE 任务，正在执行；提交完所有 T-A..T-G 后删掉这段。
-> 上手前必读 PULSE.md "Cannot break"，特别是 silent-failure 反馈通道 + vault md sha256 baseline 不能被 MD 迁移绕过。
-
-### What
-
-把现行 silent updater 替换成「3 步 timeline banner」：
-- Step 1 下载（Tauri 进度透传 → 前端进度条）
-- Step 2 安装（Tauri 信号 → 显"安装完成，点击重启"）
-- Step 3 重启后 MD 迁移（新版 sidecar 调 LLM，根据现实需求决定迁移范围，全自动、user 只看进度）
-
-UI 装在 gateway HTML 顶部 banner，可收起成右上角圆点。LLM 走百炼 deepseek-v4（单 API 入口）。
-done = v0.1.25 dmg 手装一次后，从 v0.1.25 升 v0.1.26 时三步 banner 全跑通 + 任意 MD 模板变化能自动迁移。
-
-### Plan
-
-| 文件 | 改什么 |
-|---|---|
-| `src-tauri/src/lib.rs` | `download_and_install` 进度 callback 装真，emit `updater://progress` Tauri events（chunk/total + step 标记） |
-| `shared/update-banner.js` | 拓展成 3-step timeline + 收起态；listen Tauri events + SSE；render 当前 step + 进度 |
-| `server.py` | sidecar startup hook 加 MD 迁移协程；`/api/migration/stream` SSE endpoint；`.last-migrated-version` 读写 |
-| 新 `migration_plan.py`（或 server.py helper 段） | LLM 调用：① classify＋diff round 出 plan；② per-file 重写；user 内容保留 + 新结构 merge |
-| `Contents/Resources/templates/`（构建侧） | binary bundle 自带 canonical templates；sidecar 用 `sys._MEIPASS / "templates"` 读 |
-| `tauri.conf.json` | 不动 |
-
-迁移失败兜底：每个被改 MD 留 `<file>.bak.before-v0.1.x`，错的跳，banner 显 "Step 3 部分失败"。LLM 5xx / 网断 → 同样跳 + 兜底。
-
-### Known gap
-
-v0.1.23 当前用户没法靠新 UI 拉 v0.1.25（接收的还是 silent updater）→ v0.1.25 首发走手动 dmg；v0.1.25 → v0.1.26 之后链路才走新 UI。
-
-### Test plan
-
-- [ ] T1 boundary：Tauri chunk callback 触发 emit → 前端能 listen 到事件
-- [ ] T2 contract：sidecar `.last-migrated-version == APP_VERSION` 时迁移协程立即 return（idempotent）
-- [ ] T3 effect：fake `templates/` + fake vault MD → LLM 返 plan → 真按 plan 重写 + 留 .bak
-- [ ] T4 effect：LLM 5xx → user MD 保持原样 + .bak 不丢 + banner Step 3 显警告
-- [ ] T5 effect：sidecar 启动时迁移协程在 background task 跑，不阻塞 `/` 路由
-
-### Tasks
-
-- [x] T-A SMALL: `lib.rs` chunk callback emit Tauri event（5 个 step：found/download/install/ready_restart/error；cargo check 通过）
-- [x] T-B SMALL: `update-banner.js` timeline 骨架 + 收起态 + Step 1 渲染（listen `updater://progress` 重写整段，3 dot timeline + 进度条 + 收起到 24px 顶条；node --check 通过；visual smoke 推迟到 v0.1.25 build）
-- [x] T-C MEDIUM: sidecar `/api/migration/stream` SSE 通道（log buffer + 多 client broadcast + replay；`push_migration_event` 入口给 T-D 用；`.last-migrated-version` 读写延后到 T-D 一起做）+ 31 existing tests 全绿无回归
-- [x] T-D MEDIUM: `migration_plan.py` LLM classify+rewrite + `.last-migrated-version` 读写 + .bak 兜底（T1-T5 全 GREEN：plan_ready/file_started/file_done/file_error/migration_done/migration_skipped 事件，idempotent，LLM 失败 user MD 不动，async 不阻塞 event loop）
-- [x] T-E MEDIUM: `_MigrationLLM` wrapper（复用 `get_client()` + `get_model()` 单 API 入口） + `_startup_v0125_md_migration` 注册到 startup 事件，spawn 异步任务调 `migration_plan.run_migration` + `push_migration_event` 出口；LLM 没配置走 graceful skip
-- [x] T-F SMALL: `update-banner.js` Step 2(install)+ Step 3(migrating)渲染 + EventSource 订阅 `/api/migration/stream` + 重启按钮分流（Tauri invoke / fallback /api/quit），trivial 0-file 完成不显 banner
-- [x] T-G SMALL: error 态红色横幅 + 收起按钮；migrated 态可展开/折叠跳过文件列表（前 5 + 计数）；收起态加 ⚠ 徽章 + migrating 阶段 X/N 文字
-
-### Findings
-
-（执行中记 surprise）
 
 ---
 
