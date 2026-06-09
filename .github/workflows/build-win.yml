@@ -133,7 +133,9 @@ jobs:
           "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           $sig_path = Get-ChildItem -Path "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*-setup.exe.sig" | Select-Object -First 1
           if ($sig_path) {
-            $sig = Get-Content $sig_path.FullName -Raw
+            # 6.9: strip 尾部 \r\n\t空格,防 base64 编码后 minisign 撞 "Invalid symbol 10"。
+            # 与 build-mac.yml 同款 fix。Mac 是 awk strip,Win 是 TrimEnd。
+            $sig = (Get-Content $sig_path.FullName -Raw).TrimEnd("`r","`n"," ","`t")
             "sig<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             $sig | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -245,6 +247,9 @@ jobs:
           Write-Host "smoke pass"
 
       - name: Generate latest.json manifest (Win-side updater)
+        # url 走 COS,同 Mac 侧。Win 独立 manifest 名 `latest-win.json`,客户端
+        # tauri.conf.json `endpoints` 改成 `{{target}}` 占位时区分 Mac/Win 用。
+        # 当前两端 manifest 都上传到 COS bucket 根,Mac→latest.json / Win→latest-win.json。
         shell: pwsh
         run: |
           $ver = "${{ steps.meta.outputs.version }}"
@@ -258,12 +263,35 @@ jobs:
             platforms = @{
               "windows-x86_64" = @{
                 signature = $sig.Trim()
-                url = "https://gateway.yanpaidb.cn/dl/Gateway_${ver}_x64-setup.exe"
+                url = "https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/v${ver}/Gateway_${ver}_x64-setup.exe"
               }
             }
           } | ConvertTo-Json -Depth 4
           $json | Out-File -FilePath latest-win.json -Encoding utf8
           Get-Content latest-win.json
+
+      - name: Upload to COS
+        # CI 直推 COS,同 Mac 路径。binary + sig 先于 manifest。
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+        run: |
+          if (-not $env:COS_SECRET_ID -or -not $env:COS_SECRET_KEY) {
+            Write-Warning "COS_SECRET_ID/COS_SECRET_KEY 未配置,跳过 COS 上传"
+            exit 0
+          }
+          pip install coscmd --quiet
+          coscmd config -a "$env:COS_SECRET_ID" -s "$env:COS_SECRET_KEY" `
+            -b gateway-updates-1341853738 -r ap-shanghai
+          $ver = "${{ steps.meta.outputs.version }}"
+          $exe = Get-ChildItem -Path "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*-setup.exe" | Select-Object -First 1
+          $sig = Get-ChildItem -Path "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*-setup.exe.sig" | Select-Object -First 1
+          coscmd upload $exe.FullName "v$ver/Gateway_${ver}_x64-setup.exe"
+          if ($sig) { coscmd upload $sig.FullName "v$ver/Gateway_${ver}_x64-setup.exe.sig" }
+          coscmd upload latest-win.json latest-win.json
+          Write-Host "✓ COS 上传完成: v$ver"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

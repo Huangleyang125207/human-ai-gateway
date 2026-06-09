@@ -84,15 +84,21 @@ jobs:
         run: |
           VERSION=$(jq -r .version src-tauri/tauri.conf.json)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          # sig 是 tauri auto-sign 出来的(没 manual minisign 步骤)
-          SIG=$(cat src-tauri/target/release/bundle/macos/Gateway.app.tar.gz.sig)
+          # sig 是 tauri auto-sign 出来的(没 manual minisign 步骤)。
+          # 6.9 v0.1.26→v0.1.27 真测发现:.sig 文件末尾的 \n 进 manifest signature 字段
+          # 后,Tauri reqwest minisign 解 base64 撞 offset 404 报"Invalid symbol 10",
+          # 整套自更新链路在 v0.1.16-v0.1.25 全历史版本静默瘫痪。strip 尾部空白根治。
+          SIG=$(awk 'BEGIN{ORS=""} {sub(/[ \t\r\n]+$/,""); print}' src-tauri/target/release/bundle/macos/Gateway.app.tar.gz.sig)
           # 多行 sig 通过 GITHUB_OUTPUT 用 heredoc 传
           echo "sig<<EOF" >> $GITHUB_OUTPUT
           echo "$SIG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Generate latest.json manifest
-        # platforms.darwin-aarch64.signature = .sig 文件全文;url 指 yanpai endpoint
+        # url 走 COS 直链:同腾讯云内网,实测 6+ MB/s vs CDN 回源 yanpai 250 KB/s = 24x 提速。
+        # versioned path 永远不撞 cache,binary + sig 必须先于 manifest 上传(见 Upload to COS step)。
+        # 6.8 实战:CDN→yanpai 3Mbps 慢源拉中流截断,所有 v0.1.16-v0.1.25 自更新都中招。
+        # 6.9 切 COS 后 v0.1.25→v0.1.26 真测 42s 跑通。
         run: |
           cat > /tmp/latest.json <<EOF
           {
@@ -102,12 +108,36 @@ jobs:
             "platforms": {
               "darwin-aarch64": {
                 "signature": $(jq -Rs . <<< "${{ steps.meta.outputs.sig }}"),
-                "url": "http://101.42.108.30:18080/updates/Gateway.app.tar.gz"
+                "url": "https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/v${{ steps.meta.outputs.version }}/Gateway.app.tar.gz"
               }
             }
           }
           EOF
           cat /tmp/latest.json
+
+      - name: Upload to COS
+        # CI 直推 COS,替代「本机当中转 → rsync yanpai」的旧架构。
+        # secrets:COS_SECRET_ID / COS_SECRET_KEY 在 repo Settings → Secrets → Actions。
+        # 顺序铁律:binary + sig 先于 manifest。客户端读 manifest 立刻拉 binary,半秒错位 = 404。
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+        run: |
+          if [ -z "$COS_SECRET_ID" ] || [ -z "$COS_SECRET_KEY" ]; then
+            echo "::warning::COS_SECRET_ID/COS_SECRET_KEY 未配置,跳过 COS 上传(GH artifact 还在)"
+            exit 0
+          fi
+          pip install coscmd --quiet
+          coscmd config -a "$COS_SECRET_ID" -s "$COS_SECRET_KEY" \
+            -b gateway-updates-1341853738 -r ap-shanghai
+          V=${{ steps.meta.outputs.version }}
+          # 先 binary + sig
+          coscmd upload src-tauri/target/release/bundle/macos/Gateway.app.tar.gz v${V}/Gateway.app.tar.gz
+          coscmd upload src-tauri/target/release/bundle/macos/Gateway.app.tar.gz.sig v${V}/Gateway.app.tar.gz.sig
+          # binary 就位后才 publish manifest
+          coscmd upload /tmp/latest.json latest.json
+          echo "✓ COS 上传完成:v${V}"
 
       - name: Upload artifact (workflow_dispatch 时走这条 → 本机 gh run download → rsync yanpai)
         # 历史:本机当中转站,GitHub Actions → 本机 pull → rsync yanpai → client。

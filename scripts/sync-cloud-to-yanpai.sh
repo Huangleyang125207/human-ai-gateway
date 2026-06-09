@@ -51,12 +51,20 @@ echo "→ 文件齐:"
 ls -lh "$TMP_DIR" | grep -v "^total"
 
 # 5. rsync 推 yanpai (deploy key sandbox 在 /opt/feedback-sink/data/updates/)
-echo "→ rsync 推 yanpai (国内→国内,几秒完)..."
+# 6.8 起 binary + sig 推 versioned 子目录 v${VERSION}/,manifest 还在根。
+# CDN 用 versioned URL 永远不撞旧 cache(/updates/v0.1.26/Gateway.app.tar.gz 是新 key)。
+# 旧 v0.1.x client(hardcoded 根路径 url) 不影响 — manifest 给的就是 versioned url。
+VERSION=$(grep -oE '"version":\s*"[^"]+"' "$TMP_DIR/latest.json" | head -1 | sed -E 's/.*"([0-9.]+)".*/\1/')
+[ -z "$VERSION" ] && { echo "✗ manifest 里抓不到 version"; exit 1; }
+echo "→ version: $VERSION"
+echo "→ rsync 推 yanpai versioned path + 根 manifest (国内→国内,几秒完)..."
 rsync -e "ssh -i $DEPLOY_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=no" \
       "$TMP_DIR/Gateway.app.tar.gz" \
       "$TMP_DIR/Gateway.app.tar.gz.sig" \
+      "ubuntu@$YANPAI:v${VERSION}/"
+rsync -e "ssh -i $DEPLOY_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=no" \
       "$TMP_DIR/latest.json" \
-      ubuntu@$YANPAI:./
+      "ubuntu@$YANPAI:./"
 
 # 6. verify
 echo ""
