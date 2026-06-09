@@ -2822,6 +2822,30 @@ body.thread-resizing { transition: none; }
 .setup-details > summary:hover { color: var(--ink-2); }
 .setup-details[open] > summary { color: var(--ink-2); margin-bottom: 10px; }
 
+/* 看图教程 — 折叠在 howto 之后,图随用户展开才加载 */
+.setup-tutorial { margin: 8px 0 12px; }
+.setup-tutorial > summary {
+  cursor: pointer; user-select: none; font: 13px var(--sans);
+  color: #b4731e; padding: 6px 0; list-style: none;
+}
+.setup-tutorial > summary::before { content: "▸ "; }
+.setup-tutorial[open] > summary::before { content: "▾ "; }
+.setup-tutorial > summary:hover { color: #8a5712; }
+.setup-tutorial-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 10px;
+}
+.setup-tutorial figure { margin: 0; }
+.setup-tutorial img {
+  width: 100%; height: auto; display: block;
+  border: 1px solid rgba(58, 52, 44, 0.18); border-radius: 4px;
+  cursor: zoom-in; background: #fff;
+}
+.setup-tutorial img:hover { border-color: rgba(58, 52, 44, 0.4); }
+.setup-tutorial figcaption {
+  font: 12px var(--sans); color: var(--ink-3);
+  margin-top: 4px; text-align: center; line-height: 1.4;
+}
+
 /* 百炼 1-key 卡 — v2 setup 主区 */
 .bailian-card {
   background: rgba(255, 252, 242, 0.6);

@@ -135,6 +135,16 @@
                 <li>复制 sk-... 粘贴到下方,测试通过即可</li>
               </ol>
             </div>
+            <details class="setup-tutorial">
+              <summary>📷 看图教程 (5 步)</summary>
+              <div class="setup-tutorial-grid">
+                <figure><img src="https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/tutorial/ds-step01-login.png" loading="lazy" alt="step 1"><figcaption>① 输手机 + 收验证码登录</figcaption></figure>
+                <figure><img src="https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/tutorial/ds-step02-find-apikey.png" loading="lazy" alt="step 2"><figcaption>② 左菜单 → API keys</figcaption></figure>
+                <figure><img src="https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/tutorial/ds-step03-create-btn.png" loading="lazy" alt="step 3"><figcaption>③ 点[创建 API key]</figcaption></figure>
+                <figure><img src="https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/tutorial/ds-step04-name-create.png" loading="lazy" alt="step 4"><figcaption>④ 起名 → 点[创建]</figcaption></figure>
+                <figure><img src="https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/tutorial/ds-step05-copy.png" loading="lazy" alt="step 5"><figcaption>⑤ 点复制 → 粘到下方</figcaption></figure>
+              </div>
+            </details>
             <div class="bailian-card" id="deepseekCard"></div>
           </section>
 
@@ -150,6 +160,15 @@
                 <li>免费额度用完后 → <a href="https://expense.console.aliyun.com/finance/recharge" target="_blank" rel="noopener">阿里云充值入口</a></li>
               </ol>
             </div>
+            <details class="setup-tutorial">
+              <summary>📷 看图教程 (4 步)</summary>
+              <div class="setup-tutorial-grid">
+                <figure><img src="https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/tutorial/bl-step01-login.png" loading="lazy" alt="step 1"><figcaption>① 扫支付宝/钉钉 APP 码登录</figcaption></figure>
+                <figure><img src="https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/tutorial/bl-step02-create-btn.png" loading="lazy" alt="step 2"><figcaption>② 点[+ 创建 API Key]</figcaption></figure>
+                <figure><img src="https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/tutorial/bl-step03-dialog.png" loading="lazy" alt="step 3"><figcaption>③ 起名(描述)→ 点[确定]</figcaption></figure>
+                <figure><img src="https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/tutorial/bl-step04-copy.png" loading="lazy" alt="step 4"><figcaption>④ 点复制 → 粘到下方</figcaption></figure>
+              </div>
+            </details>
             <div class="bailian-card" id="bailianCard"></div>
           </section>
 
@@ -173,6 +192,11 @@
 
     if (canClose) document.getElementById("setupCloseBtn").addEventListener("click", close);
     document.getElementById("setupSaveBtn").addEventListener("click", save);
+
+    // 点教程缩略图 → 新窗口打开原图(替代 lightbox,减依赖)
+    overlay.querySelectorAll(".setup-tutorial img").forEach(img => {
+      img.addEventListener("click", () => window.open(img.src, "_blank", "noopener"));
+    });
 
     renderDeepseek();
     renderBailian();
