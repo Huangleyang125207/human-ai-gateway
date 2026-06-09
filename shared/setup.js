@@ -269,7 +269,7 @@
       const d = await r.json();
       deepseek._testing = false;
       if (d.ok) { deepseek.tested = true; deepseek._err = ""; }
-      else { deepseek.tested = false; deepseek._err = d.reason || "未知错"; }
+      else { deepseek.tested = false; deepseek._err = friendlyReason(d.reason); }
     } catch (e) {
       deepseek._testing = false; deepseek.tested = false; deepseek._err = e.message;
     }
@@ -329,7 +329,7 @@
       const d = await r.json();
       bailian._testing = false;
       if (d.ok) { bailian.tested = true; bailian._err = ""; }
-      else { bailian.tested = false; bailian._err = d.reason || "未知错"; }
+      else { bailian.tested = false; bailian._err = friendlyReason(d.reason); }
     } catch (e) {
       bailian._testing = false; bailian.tested = false; bailian._err = e.message;
     }
@@ -364,7 +364,7 @@
       });
       const d = await r.json();
       baidu._tested = !!d.ok;
-      if (!d.ok) gatewayAlert(`抠图测试失败: ${d.reason || ""}`);
+      if (!d.ok) gatewayAlert(`抠图测试失败: ${friendlyReason(d.reason)}`);
       renderBaidu();
     } catch (e) {
       gatewayAlert(`测试请求失败: ${e.message}`);
@@ -377,17 +377,46 @@
   }
 
   function refreshSaveState() {
-    // 至少 DeepSeek tested + 选一个 model 才能保存
+    // 任意一个 provider 通过测试就能保存 — DeepSeek 或 百炼都行。
+    // 6.9 onboarding 修:陌生用户先填免费的百炼(送 100 万 token)就能起跑,
+    // DeepSeek 当"想要更聪明对话"再开。降低 setup 第一屏掏钱包阻力。
     const dsOk = deepseek.tested && Object.values(deepseek.selected).some(v => v);
+    const blOk = bailian.tested;
+    const anyOk = dsOk || blOk;
     const btn = document.getElementById("setupSaveBtn");
     const hint = document.getElementById("setupHint");
-    if (btn) btn.disabled = !dsOk;
+    if (btn) btn.disabled = !anyOk;
     if (hint) {
-      if (!deepseek.tested) hint.textContent = "填 DeepSeek key + 测试通过即可保存";
-      else if (!Object.values(deepseek.selected).some(v=>v)) hint.textContent = "至少勾选一个 DeepSeek model";
-      else if (!bailian.tested) hint.textContent = "可以保存了(视觉助手没配的话拖图会瘸)";
-      else hint.textContent = "全部就绪 — 保存";
+      if (!deepseek.tested && !bailian.tested) {
+        hint.textContent = "填 ① DeepSeek 或 ② 百炼任一个 key + 测试即可保存(推荐先填免费的 ② 百炼)";
+      } else if (dsOk && blOk) {
+        hint.textContent = "全部就绪 — 保存";
+      } else if (blOk && !deepseek.tested) {
+        hint.textContent = "百炼测试通过 — 可保存(对话用 qwen 模型;想换 DeepSeek 后续设置里加)";
+      } else if (dsOk && !bailian.tested) {
+        hint.textContent = "DeepSeek 就绪 — 可保存(视觉助手没配的话拖图会瘸)";
+      } else if (deepseek.tested && !Object.values(deepseek.selected).some(v=>v)) {
+        hint.textContent = "至少勾选一个 DeepSeek model";
+      }
     }
+  }
+
+  // 测试失败时把后端 raw error 翻译成陌生人能懂的话
+  function friendlyReason(reason) {
+    const s = String(reason || "");
+    if (/401|Unauthorized|Incorrect API key|invalid.*key|InvalidApiKey/i.test(s)) {
+      return "key 不对 — 复制时是不是漏了字符 / 多了空格 / 漏了 sk-?";
+    }
+    if (/insufficient.*balance|余额不足|InsufficientBalance/i.test(s)) {
+      return "余额不足 — 去充值(DeepSeek 起充 10 元 / 百炼新用户有免费额度)";
+    }
+    if (/timeout|timed out|网络|connection/i.test(s)) {
+      return "网卡了 — 检查代理 / 换 WiFi 重试";
+    }
+    if (/model.*not.*found|UnsupportedModel/i.test(s)) {
+      return "选的 model 不对 — 平台可能下线了某个模型,换默认";
+    }
+    return s || "未知错误,刷新重试";
   }
 
   async function save() {
