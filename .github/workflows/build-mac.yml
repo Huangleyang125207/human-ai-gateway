@@ -97,9 +97,13 @@ jobs:
       - name: Generate latest.json manifest
         # url 走 COS 直链:同腾讯云内网,实测 6+ MB/s vs CDN 回源 yanpai 250 KB/s = 24x 提速。
         # versioned path 永远不撞 cache,binary + sig 必须先于 manifest 上传(见 Upload to COS step)。
-        # 6.8 实战:CDN→yanpai 3Mbps 慢源拉中流截断,所有 v0.1.16-v0.1.25 自更新都中招。
-        # 6.9 切 COS 后 v0.1.25→v0.1.26 真测 42s 跑通。
+        # 6.9 v0.1.28 真测发现:bash here-string `<<<` 会在输入末尾追加 LF
+        # → jq -Rs 把 LF 当 sig 内容编进 JSON `\n` → Tauri minisign 解 base64
+        # 撞 offset 404 报"Invalid symbol 10"。改用直接 JSON inline + Python
+        # 一刀 strip 末尾 whitespace,根治 v0.1.16-v0.1.28 历史 bug。
+        # sig 是纯 base64(alphanumeric + /+ = chars),inline 进 JSON 不需要 escape。
         run: |
+          SIG=$(python3 -c "import sys; sys.stdout.write(open('src-tauri/target/release/bundle/macos/Gateway.app.tar.gz.sig').read().rstrip())")
           cat > /tmp/latest.json <<EOF
           {
             "version": "${{ steps.meta.outputs.version }}",
@@ -107,12 +111,21 @@ jobs:
             "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "platforms": {
               "darwin-aarch64": {
-                "signature": $(jq -Rs . <<< "${{ steps.meta.outputs.sig }}"),
+                "signature": "${SIG}",
                 "url": "https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/v${{ steps.meta.outputs.version }}/Gateway.app.tar.gz"
               }
             }
           }
           EOF
+          # verify sig 末尾确实没 \n(防 future regression)
+          python3 -c "
+          import json
+          d = json.load(open('/tmp/latest.json'))
+          sig = d['platforms']['darwin-aarch64']['signature']
+          assert not sig.endswith(chr(10)), 'FATAL: sig ends with LF, minisign will reject'
+          assert not sig.endswith(' '), 'FATAL: sig ends with space'
+          print(f'sig OK ({len(sig)} chars, ends with {sig[-3:]!r})')
+          "
           cat /tmp/latest.json
 
       - name: Upload to COS
