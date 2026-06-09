@@ -276,7 +276,7 @@ jobs:
       - name: Upload to COS
         # CI 直推 COS,同 Mac 路径。binary + sig 先于 manifest。
         # 6.9 review B4:sig 缺失硬 fail(不 silent 过关让客户端验签挂)。
-        # 6.9 review:用 `python -m coscmd` 不依赖 PATH 上有 coscmd cmd。
+        # 6.9 review:用 `coscmd` 不依赖 PATH 上有 coscmd cmd。
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
@@ -288,7 +288,7 @@ jobs:
             exit 0
           }
           pip install coscmd --quiet
-          python -m coscmd config -a "$env:COS_SECRET_ID" -s "$env:COS_SECRET_KEY" `
+          coscmd config -a "$env:COS_SECRET_ID" -s "$env:COS_SECRET_KEY" `
             -b gateway-updates-1341853738 -r ap-shanghai
           $ver = "${{ steps.meta.outputs.version }}"
           # Win 的 .exe-setup 同时是自更新 binary + 首装包,不需要单独 .dmg
@@ -296,10 +296,10 @@ jobs:
           $sig = Get-ChildItem -Path "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*-setup.exe.sig" | Select-Object -First 1
           if (-not $exe) { Write-Error "exe missing — Tauri NSIS bundle broken"; exit 1 }
           if (-not $sig) { Write-Error "sig missing — updater artifact broken (createUpdaterArtifacts off?)"; exit 1 }
-          python -m coscmd upload $exe.FullName "v$ver/Gateway_${ver}_x64-setup.exe"
-          python -m coscmd upload $sig.FullName "v$ver/Gateway_${ver}_x64-setup.exe.sig"
+          coscmd upload $exe.FullName "v$ver/Gateway_${ver}_x64-setup.exe"
+          coscmd upload $sig.FullName "v$ver/Gateway_${ver}_x64-setup.exe.sig"
           # manifest 后上,防 race 404(client 拿 manifest 立刻拉 binary)
-          python -m coscmd upload latest-windows-x86_64.json latest-windows-x86_64.json
+          coscmd upload latest-windows-x86_64.json latest-windows-x86_64.json
           Write-Host "✓ COS 上传完成: v$ver"
 
       - name: Verify COS upload (binary/sig/manifest 全 200)
