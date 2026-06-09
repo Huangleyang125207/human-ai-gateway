@@ -1,3 +1,10 @@
+; ⚠️ DEPRECATED (6.9 v0.1.28 起) — 留作 6.1 历史归档,**不在 CI 调用链上**。
+; 6.1-6.5 老 PyInstaller 阶段用过 Inno Setup 打包,6.6 起切 Tauri 桌面壳
+; (NSIS,build-win.yml 直接 cargo tauri build),这个文件没人再跑。
+; 不要照搬这里的 AppUpdatesURL=https://gateway.yanpaidb.cn/ 等 6.1 老 URL,
+; 那时 yanpai 3 Mbps 慢源,现已切 COS。新 Win 路径看 build-win.yml。
+;
+; ----- 6.1 历史 ----- (以下原注释保留供考古)
 ; Inno Setup installer for Gateway (Windows)
 ; CI 调用:ISCC.exe /DGatewayVersion=0.1.4 installer\gateway.iss
 ; 产物:installer\Output\Gateway-Setup-{version}-x64.exe
