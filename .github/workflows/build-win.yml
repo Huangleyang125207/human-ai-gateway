@@ -247,12 +247,15 @@ jobs:
           Write-Host "smoke pass"
 
       - name: Generate latest.json manifest (Win-side updater)
-        # url 走 COS,同 Mac 侧。Win 独立 manifest 名 `latest-win.json`,客户端
-        # tauri.conf.json `endpoints` 改成 `{{target}}` 占位时区分 Mac/Win 用。
-        # 当前两端 manifest 都上传到 COS bucket 根,Mac→latest.json / Win→latest-win.json。
+        # url 走 COS。v0.1.28 起 manifest 名 latest-windows-x86_64.json,匹配
+        # client 端 tauri.conf.json `endpoints = "latest-{{target}}.json"`。
         shell: pwsh
         run: |
           $ver = "${{ steps.meta.outputs.version }}"
+          # 6.9 v0.1.27 review B3:here-string `@"..."@` 会塞入起始换行 +
+          # GITHUB_OUTPUT heredoc 也可能尾带 \n,line 265 `$sig.Trim()` 是
+          # 必须的 belt-and-suspenders,**不要删**,删了撞 minisign offset 404
+          # (v0.1.16-v0.1.25 全历史版本曾因此瘫痪)。
           $sig = @"
           ${{ steps.meta.outputs.sig }}
           "@
@@ -262,16 +265,18 @@ jobs:
             pub_date = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
             platforms = @{
               "windows-x86_64" = @{
-                signature = $sig.Trim()
+                signature = $sig.Trim()  # ← B3: 必须 Trim,见上注释
                 url = "https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/v${ver}/Gateway_${ver}_x64-setup.exe"
               }
             }
           } | ConvertTo-Json -Depth 4
-          $json | Out-File -FilePath latest-win.json -Encoding utf8
-          Get-Content latest-win.json
+          $json | Out-File -FilePath latest-windows-x86_64.json -Encoding utf8
+          Get-Content latest-windows-x86_64.json
 
       - name: Upload to COS
         # CI 直推 COS,同 Mac 路径。binary + sig 先于 manifest。
+        # 6.9 review B4:sig 缺失硬 fail(不 silent 过关让客户端验签挂)。
+        # 6.9 review:用 `python -m coscmd` 不依赖 PATH 上有 coscmd cmd。
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
@@ -283,15 +288,39 @@ jobs:
             exit 0
           }
           pip install coscmd --quiet
-          coscmd config -a "$env:COS_SECRET_ID" -s "$env:COS_SECRET_KEY" `
+          python -m coscmd config -a "$env:COS_SECRET_ID" -s "$env:COS_SECRET_KEY" `
             -b gateway-updates-1341853738 -r ap-shanghai
           $ver = "${{ steps.meta.outputs.version }}"
+          # Win 的 .exe-setup 同时是自更新 binary + 首装包,不需要单独 .dmg
           $exe = Get-ChildItem -Path "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*-setup.exe" | Select-Object -First 1
           $sig = Get-ChildItem -Path "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*-setup.exe.sig" | Select-Object -First 1
-          coscmd upload $exe.FullName "v$ver/Gateway_${ver}_x64-setup.exe"
-          if ($sig) { coscmd upload $sig.FullName "v$ver/Gateway_${ver}_x64-setup.exe.sig" }
-          coscmd upload latest-win.json latest-win.json
+          if (-not $exe) { Write-Error "exe missing — Tauri NSIS bundle broken"; exit 1 }
+          if (-not $sig) { Write-Error "sig missing — updater artifact broken (createUpdaterArtifacts off?)"; exit 1 }
+          python -m coscmd upload $exe.FullName "v$ver/Gateway_${ver}_x64-setup.exe"
+          python -m coscmd upload $sig.FullName "v$ver/Gateway_${ver}_x64-setup.exe.sig"
+          # manifest 后上,防 race 404(client 拿 manifest 立刻拉 binary)
+          python -m coscmd upload latest-windows-x86_64.json latest-windows-x86_64.json
           Write-Host "✓ COS 上传完成: v$ver"
+
+      - name: Verify COS upload (binary/sig/manifest 全 200)
+        # coscmd exit code 不可靠,HEAD 200 是真源验证。
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+        run: |
+          if (-not $env:COS_SECRET_ID) { Write-Host "skip (no secrets)"; exit 0 }
+          $ver = "${{ steps.meta.outputs.version }}"
+          $base = "https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com"
+          @(
+            "$base/v$ver/Gateway_${ver}_x64-setup.exe",
+            "$base/v$ver/Gateway_${ver}_x64-setup.exe.sig",
+            "$base/latest-windows-x86_64.json"
+          ) | ForEach-Object {
+            $r = Invoke-WebRequest -Uri $_ -Method Head -TimeoutSec 10 -ErrorAction SilentlyContinue
+            if ($r.StatusCode -eq 200) { Write-Host "✓ $_" }
+            else { Write-Error "✗ 404 or fail: $_"; exit 1 }
+          }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

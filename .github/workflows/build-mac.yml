@@ -132,12 +132,42 @@ jobs:
           coscmd config -a "$COS_SECRET_ID" -s "$COS_SECRET_KEY" \
             -b gateway-updates-1341853738 -r ap-shanghai
           V=${{ steps.meta.outputs.version }}
-          # 先 binary + sig
+          # 先自更新 binary + sig
           coscmd upload src-tauri/target/release/bundle/macos/Gateway.app.tar.gz v${V}/Gateway.app.tar.gz
           coscmd upload src-tauri/target/release/bundle/macos/Gateway.app.tar.gz.sig v${V}/Gateway.app.tar.gz.sig
+          # 首装包(.dmg)同时上 COS — yanpai gateway.yanpaidb.cn/dl/ Caddy redirect 指这,
+          # 国内陌生用户首装也能秒拉(替代之前 GH Release / yanpai 慢源中转)
+          DMG=$(ls src-tauri/target/release/bundle/dmg/*.dmg | head -1)
+          if [ -n "$DMG" ]; then
+            DMG_NAME=$(basename "$DMG")
+            coscmd upload "$DMG" "v${V}/${DMG_NAME}"
+            echo "✓ dmg uploaded: v${V}/${DMG_NAME}"
+          fi
           # binary 就位后才 publish manifest
+          # v0.1.28 起 manifest 名走 {{target}} 占位(latest-darwin-aarch64.json),
+          # 同时 latest.json 作 v0.1.16-v0.1.27 老客户端兼容别名,过渡 1-2 版本再删
+          coscmd upload /tmp/latest.json latest-darwin-aarch64.json
           coscmd upload /tmp/latest.json latest.json
           echo "✓ COS 上传完成:v${V}"
+
+      - name: Verify COS upload (binary/sig/manifest 全 200)
+        # coscmd exit code 不可靠(SDK 内吞过 5xx),HEAD 200 是真源验证。
+        # 任一文件 404 = 自更新链路断 = 立刻 fail CI。
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+        run: |
+          [ -z "$COS_SECRET_ID" ] && { echo "skip (no secrets)"; exit 0; }
+          V=${{ steps.meta.outputs.version }}
+          BASE=https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com
+          for url in \
+            "$BASE/v${V}/Gateway.app.tar.gz" \
+            "$BASE/v${V}/Gateway.app.tar.gz.sig" \
+            "$BASE/latest-darwin-aarch64.json" \
+            "$BASE/latest.json"; do
+            curl -sIf --max-time 10 "$url" > /dev/null || { echo "✗ 404: $url"; exit 1; }
+            echo "✓ $url"
+          done
 
       - name: Upload artifact (workflow_dispatch 时走这条 → 本机 gh run download → rsync yanpai)
         # 历史:本机当中转站,GitHub Actions → 本机 pull → rsync yanpai → client。
