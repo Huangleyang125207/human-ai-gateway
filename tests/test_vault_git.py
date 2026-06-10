@@ -124,6 +124,35 @@ def test_ensure_repo_on_nonexistent_returns_no_vault(tmp_path):
     assert vault_git.ensure_repo(nonexistent) == "no_vault"
 
 
+# ─── T7 · 活锁退避重试 — 撞 index.lock(<600s)不立即放弃 ──────────────
+
+def test_commit_retries_on_transient_index_lock(fresh_vault):
+    """活锁场景:另一进程短暂持 .git/index.lock(age≈0,非孤儿),
+    commit 应退避重试,锁释放后落 commit,而非立即报 vault_git_*_failed。
+    回归 feedback-sink 6.4-6.9 收到的 26 条 index.lock 错误。"""
+    if not vault_git._git_available():
+        pytest.skip("git not on PATH")
+    import threading
+    vault_git.ensure_repo(fresh_vault)
+    initial = _git_log_oneline(fresh_vault)
+    f = fresh_vault / "半小时复盘" / "26.5.24.md"
+    f.write_text("# 9：00\n\n## #思考 x @ai\nbody\n", encoding="utf-8")
+    # 模拟活锁:age≈0,现有孤儿清理(>600s 才清)不会动它
+    lock = fresh_vault / ".git" / "index.lock"
+    lock.write_text("", encoding="utf-8")
+    # 持锁进程 0.8s 后释放
+    def _release():
+        time.sleep(0.8)
+        try:
+            lock.unlink()
+        except FileNotFoundError:
+            pass
+    threading.Thread(target=_release, daemon=True).start()
+    vault_git.commit_after_write(fresh_vault, "transient lock", author="ai", paths=[f])
+    assert _wait_for_commit(fresh_vault, len(initial) + 1, timeout=8.0), \
+        f"活锁释放后应退避重试成功; log: {_git_log_oneline(fresh_vault)}"
+
+
 # ─── T6 · .gitignore 内容合理 ────────────────────────────────────────
 
 def test_gitignore_excludes_pulse_and_attachments(fresh_vault):

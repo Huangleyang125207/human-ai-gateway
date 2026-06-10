@@ -132,26 +132,63 @@ def _push_broken_notification(detail: str):
 
 _INDEX_LOCK_NAME = "index.lock"
 _INDEX_LOCK_MAX_AGE_SEC = 600  # 10 min — 比这老一定是孤儿
+# 活锁退避序列(秒):另一进程(Obsidian/手动 git/本进程别的 commit thread)短暂
+# 持锁。feedback-sink 6.4-6.9 收的 26 条 index.lock 错误全是这种 <600s 活锁,
+# 旧代码只清孤儿(>600s)对活锁零重试 → 撞上即报 silent-failure。
+_LOCK_CONTENTION_BACKOFFS = (0.3, 0.7, 1.5, 3.0)
+
+# 进程内串行化:gateway 自己连发的 commit thread(schedule + 聚合 + PULSE 镜像)
+# 不互抢同一把 .git 锁 —— 自我竞态是这批错误的主要来源之一。
+_GIT_OP_LOCK = threading.Lock()
+
+
+def _index_lock_age(vault_dir: Path) -> float | None:
+    """index.lock 存在则返其 age(秒),不存在/读不到返 None。"""
+    lock = vault_dir / ".git" / _INDEX_LOCK_NAME
+    try:
+        if not lock.exists():
+            return None
+        import time as _time
+        return _time.time() - lock.stat().st_mtime
+    except Exception:
+        return None
 
 
 def _clear_stale_index_lock(vault_dir: Path) -> bool:
-    """A-H13: .git/index.lock 老于 10min 的卡死锁(上次 commit 崩没清)。
+    """A-H13: 清 .git/index.lock 老于 10min 的卡死锁(上次 commit 崩没清)。
+    只清孤儿 —— 活锁(<600s)是别的进程在用,删了会破坏对方的 git 操作。
     返 True 表示清掉了,caller 可以重试。
     """
-    lock = vault_dir / ".git" / _INDEX_LOCK_NAME
-    if not lock.exists():
+    age = _index_lock_age(vault_dir)
+    if age is None or age < _INDEX_LOCK_MAX_AGE_SEC:
         return False
     try:
-        import time as _time
-        age = _time.time() - lock.stat().st_mtime
-        if age < _INDEX_LOCK_MAX_AGE_SEC:
-            return False
-        lock.unlink()
+        (vault_dir / ".git" / _INDEX_LOCK_NAME).unlink()
         log.warning(f"[vault_git] 清掉孤儿 index.lock(age={int(age)}s)")
         return True
     except Exception as e:
         log.warning(f"[vault_git] 清 index.lock 失败: {e}")
         return False
+
+
+def _run_git_lock_aware(args: list[str], vault_dir: Path, timeout: float) -> tuple[int, str, str]:
+    """跑 git,撞 index.lock 时智能重试:
+      · 孤儿锁(>600s) → 清掉立即重试
+      · 活锁(<600s)   → 退避等持锁进程释放后重试
+    退避序列耗尽仍失败 → 返最后一次 (rc, out, err) 交 caller 报 silent-failure。
+    非 index.lock 错误不重试(如真 merge 冲突),原样返回。"""
+    rc, out, err = _run(args, vault_dir, timeout=timeout)
+    if rc == 0 or "index.lock" not in (err or ""):
+        return rc, out, err
+    import time as _time
+    for backoff in _LOCK_CONTENTION_BACKOFFS:
+        if not _clear_stale_index_lock(vault_dir):
+            # 不是孤儿 → 活锁,等一下让对方释放
+            _time.sleep(backoff)
+        rc, out, err = _run(args, vault_dir, timeout=timeout)
+        if rc == 0 or "index.lock" not in (err or ""):
+            return rc, out, err
+    return rc, out, err
 
 
 # 连续失败计数:线程间共享,简单整数 + Lock
@@ -198,7 +235,9 @@ def _commit_sync(vault_dir: Path, summary: str, author: str,
         if not _is_repo(vault_dir):
             # 写第一次时 vault 还没 init(用户改 vault 后才启动 gateway 那种边缘)
             ensure_repo(vault_dir)
-        _try_commit_once(vault_dir, summary, author, paths, retry_after_lock_clear=True)
+        # 进程内串行 add+commit:本进程并发的 commit thread 排队,不自相竞锁
+        with _GIT_OP_LOCK:
+            _try_commit_once(vault_dir, summary, author, paths)
     except Exception as e:
         log.info(f"[vault_git] commit thread crashed: {type(e).__name__}: {e}")
         _report_silent("vault_git_thread_crashed",
@@ -208,9 +247,9 @@ def _commit_sync(vault_dir: Path, summary: str, author: str,
 
 
 def _try_commit_once(vault_dir: Path, summary: str, author: str,
-                     paths: list[Path] | None,
-                     retry_after_lock_clear: bool) -> None:
-    """跑一遍 add+commit。失败时若 retry_after_lock_clear=True + 检测到孤儿锁则清 + 重试。"""
+                     paths: list[Path] | None) -> None:
+    """跑一遍 add+commit。撞 index.lock 由 _run_git_lock_aware 退避/清孤儿重试,
+    退避耗尽仍失败才报 silent-failure。"""
     # add
     if paths:
         add_args = ["git", "add", "--"]
@@ -224,11 +263,8 @@ def _try_commit_once(vault_dir: Path, summary: str, author: str,
             add_args.append(str(pp))
     else:
         add_args = ["git", "add", "-A"]
-    rc, _, err = _run(add_args, vault_dir, timeout=15)
+    rc, _, err = _run_git_lock_aware(add_args, vault_dir, timeout=15)
     if rc != 0:
-        # 可能撞 index.lock
-        if retry_after_lock_clear and _clear_stale_index_lock(vault_dir):
-            return _try_commit_once(vault_dir, summary, author, paths, retry_after_lock_clear=False)
         log.info(f"[vault_git] add failed: {err.strip()}")
         _report_silent("vault_git_add_failed", err.strip()[:120],
             context={"author": author, "summary": summary[:60]})
@@ -239,10 +275,8 @@ def _try_commit_once(vault_dir: Path, summary: str, author: str,
     if rc == 0:
         return  # no_changes
     msg = f"{summary} @{author}\n\nauto-commit by gateway at {datetime.now().isoformat(timespec='seconds')}"
-    rc, _, err = _run(["git", "commit", "-q", "-m", msg], vault_dir, timeout=15)
+    rc, _, err = _run_git_lock_aware(["git", "commit", "-q", "-m", msg], vault_dir, timeout=15)
     if rc != 0:
-        if retry_after_lock_clear and _clear_stale_index_lock(vault_dir):
-            return _try_commit_once(vault_dir, summary, author, paths, retry_after_lock_clear=False)
         log.info(f"[vault_git] commit failed: {err.strip()[:200]}")
         _report_silent("vault_git_commit_failed", err.strip()[:200],
             context={"author": author, "summary": summary[:60]})
