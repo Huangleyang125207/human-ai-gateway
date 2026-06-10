@@ -329,7 +329,7 @@ jobs:
           path: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe.sig
-            latest-win.json
+            latest-windows-x86_64.json
           retention-days: 30
 
       - name: Publish to GitHub Release (tag push 时)
@@ -341,7 +341,7 @@ jobs:
           files: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe.sig
-            latest-win.json
+            latest-windows-x86_64.json
           draft: true
           fail_on_unmatched_files: true
           generate_release_notes: true
