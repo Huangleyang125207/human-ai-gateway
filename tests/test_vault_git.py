@@ -163,3 +163,44 @@ def test_gitignore_excludes_pulse_and_attachments(fresh_vault):
     assert "PULSE/" in gi, "PULSE/ must be ignored (it's a mirror)"
     assert "attachments/" in gi, "attachments/ must be ignored (legacy location)"
     assert ".DS_Store" in gi
+
+
+# ─── B1 · .obsidian/ 整目录忽略(首次 git add 拖累源)────────────────
+
+def test_gitignore_excludes_obsidian_dir(fresh_vault):
+    if not vault_git._git_available():
+        pytest.skip("git not on PATH")
+    vault_git.ensure_repo(fresh_vault)
+    gi = (fresh_vault / ".gitignore").read_text(encoding="utf-8")
+    assert ".obsidian/" in gi, "整个 .obsidian/ 应忽略(插件/主题/缓存是大头)"
+    assert ".trash/" in gi
+
+
+# ─── B2 · 巨型 vault 跳过全量 baseline commit ────────────────────────
+
+def test_huge_vault_skips_baseline_commit(fresh_vault, monkeypatch):
+    if not vault_git._git_available():
+        pytest.skip("git not on PATH")
+    monkeypatch.setattr(vault_git, "_BASELINE_MAX_FILES", 2)
+    for i in range(5):
+        (fresh_vault / f"note{i}.md").write_text("x", encoding="utf-8")
+    status = vault_git.ensure_repo(fresh_vault)
+    assert status == "ready"
+    # 超阈值 → 只 init 不 baseline → 无 commit
+    assert _git_log_oneline(fresh_vault) == [], \
+        "文件数超阈值应跳过全量 baseline commit(避免 git add -A 卡死)"
+
+
+def test_exceeds_baseline_limit_skips_big_ignored_dirs(tmp_path, monkeypatch):
+    monkeypatch.setattr(vault_git, "_BASELINE_MAX_FILES", 3)
+    v = tmp_path / "v"
+    v.mkdir()
+    obs = v / ".obsidian"
+    obs.mkdir()
+    for i in range(20):  # .obsidian 里一堆文件,应被 skip 不计数
+        (obs / f"plugin{i}.js").write_text("x", encoding="utf-8")
+    (v / "a.md").write_text("x", encoding="utf-8")
+    assert vault_git._exceeds_baseline_limit(v) is False
+    for i in range(5):  # 真内容文件超阈值
+        (v / f"b{i}.md").write_text("x", encoding="utf-8")
+    assert vault_git._exceeds_baseline_limit(v) is True

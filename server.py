@@ -5790,8 +5790,8 @@ def _startup_migrate_state():
 
 
 # 启动时跑一次 audit,有 drift 就 log 警告(不阻塞启动)
-@app.on_event("startup")
-def _startup_vault_audit():
+def _vault_audit_step():
+    # P0: 从同步 startup 钩子挪进后台 init 线程,不堵 server bind。
     try:
         r = _audit_vault()
         if r["total_drift"] > 0:
@@ -5862,24 +5862,68 @@ def _startup_config_sanity():
         log.warning(f"[config sanity] startup check failed: {e}")
 
 
-@app.on_event("startup")
-def _startup_vault_git_init():
+def _vault_git_init_step():
     """vault 写入自动版本史 — 首次启动 init repo + .gitignore + baseline。
-    pulse-mirror 也装独立 git(PULSE updates 进 training corpus 用)。"""
+    pulse-mirror 也装独立 git(PULSE updates 进 training corpus 用)。
+    P0: 从同步 startup 钩子挪进后台 init 线程 — 大文件夹 git add -A 不堵 server bind。"""
     try:
         status = vault_git.ensure_repo(VAULT_DIR)
         log.info(f"[vault_git] vault ensure_repo: {status} at {VAULT_DIR}")
     except Exception as e:
         log.warning(f"[vault_git] vault ensure_repo failed: {type(e).__name__}: {e}")
     try:
-        # PULSE_DIR 在 line 3929 定义,这里 startup 时还没加载到 — 用全局解析
-        from pathlib import Path as _P
         _pulse = APP_STATE_DIR / "pulse-mirror"
         if _pulse.exists():
             status = vault_git.ensure_repo(_pulse)
             log.info(f"[vault_git] pulse-mirror ensure_repo: {status} at {_pulse}")
     except Exception as e:
         log.warning(f"[vault_git] pulse ensure_repo failed: {type(e).__name__}: {e}")
+
+
+# ── P0: 后台 init —— server 立刻 bind 出页面,重活(git/audit)后台跑 + 进度可查 ──
+_INIT_STATE = {
+    "ready": False, "phase": "starting", "detail": "",
+    "started_at": None, "finished_at": None, "error": None,
+}
+_INIT_LOCK = threading.Lock()
+
+
+def _set_init_phase(phase: str, detail: str = ""):
+    with _INIT_LOCK:
+        _INIT_STATE["phase"] = phase
+        _INIT_STATE["detail"] = detail
+    log.info(f"[init] phase={phase} {detail}")
+
+
+def _background_vault_init():
+    """重活后台序列:git init(含大文件夹 baseline)→ vault audit。
+    顺序保留(audit 依赖 repo 在);全程更新 _INIT_STATE 供前端进度屏轮询。
+    自身永不让 ready 卡死 —— 任一步崩也置 ready,免前端永远转圈。"""
+    try:
+        _set_init_phase("git_init", "初始化版本历史")
+        _vault_git_init_step()
+        _set_init_phase("audit", "检查 vault 完整性")
+        _vault_audit_step()
+    except Exception as e:
+        with _INIT_LOCK:
+            _INIT_STATE["error"] = f"{type(e).__name__}: {str(e)[:160]}"
+        log.warning(f"[init] background init crashed: {e}")
+    finally:
+        with _INIT_LOCK:
+            _INIT_STATE["phase"] = "ready"
+            _INIT_STATE["ready"] = True
+            _INIT_STATE["finished_at"] = datetime.now().isoformat()
+        log.info("[init] background vault init done — ready")
+
+
+@app.on_event("startup")
+def _startup_background_init():
+    """只 spawn 后台线程就返回 → server 立刻开始服务,WebView 秒出页面。"""
+    with _INIT_LOCK:
+        _INIT_STATE["started_at"] = datetime.now().isoformat()
+    threading.Thread(
+        target=_background_vault_init, daemon=True, name="vault-init"
+    ).start()
 
 
 # ── chat thread history(server-side 持久化,跨浏览器/跨设备同步源)──
@@ -5920,6 +5964,14 @@ def _thread_save_is_stale(base_mtime, current_mtime: int) -> bool:
 def api_health():
     """轻量 ping — client 每 30s 检测,断了弹 banner。"""
     return {"ok": True, "ts": datetime.now().isoformat(timespec="seconds")}
+
+
+@app.get("/api/init-status")
+def api_init_status():
+    """P0: 前端初始化屏轮询 — 后台 vault init(git/audit)进度。
+    ready=True 前显示「正在初始化…」而非空白,回答用户「是慢还是卡住了」。"""
+    with _INIT_LOCK:
+        return dict(_INIT_STATE)
 
 
 @app.get("/api/thread/history")

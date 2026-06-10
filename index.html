@@ -11,6 +11,46 @@
 <link rel="stylesheet" href="./shared/style.css?v=20260527thumb">
 </head>
 <body>
+
+<!-- P0 初始化屏:首次启动 / 换 vault 后,后台 init(git/audit)期间盖在最上层,
+     回答用户「是慢还是卡住了」—— 看得见 phase 在动 = 知道没死。ready 后淡出。 -->
+<div id="initGate" style="position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;
+     align-items:center;justify-content:center;background:#f4efe6;color:#3a3530;
+     font:15px/1.7 'Songti SC',serif;transition:opacity .5s ease;text-align:center;padding:40px;">
+  <div style="font-size:22px;letter-spacing:.05em;margin-bottom:18px;">正在初始化你的 vault</div>
+  <div id="initGatePhase" style="color:#8a7f72;font-size:13px;letter-spacing:.03em;">启动中⋯</div>
+  <div id="initGateHint" style="color:#b3a896;font-size:12px;margin-top:22px;max-width:320px;">
+    首次启动或刚换文件夹会慢一些 —— 在建立版本历史、检查完整性,稍候。
+  </div>
+  <div aria-hidden="true" style="margin-top:26px;width:34px;height:34px;border:2px solid #d9cfbf;
+       border-top-color:#8a7f72;border-radius:50%;animation:initSpin 1s linear infinite;"></div>
+</div>
+<style>@keyframes initSpin{to{transform:rotate(360deg)}}</style>
+<script>
+(function(){
+  var gate=document.getElementById("initGate");
+  if(!gate)return;
+  var phaseEl=document.getElementById("initGatePhase");
+  var LABEL={starting:"启动中⋯",git_init:"建立版本历史⋯",audit:"检查 vault 完整性⋯",ready:"就绪"};
+  var tries=0, MAX=150; // ~60s 上限兜底,永不把用户困在屏后
+  function hide(){gate.style.opacity="0";setTimeout(function(){gate.remove();},550);}
+  function poll(){
+    tries++;
+    fetch("/api/init-status",{cache:"no-store"}).then(function(r){return r.json();}).then(function(s){
+      if(phaseEl)phaseEl.textContent=LABEL[s.phase]||(s.phase+"⋯");
+      if(s.ready){hide();return;}
+      if(tries>=MAX){hide();return;}
+      setTimeout(poll,400);
+    }).catch(function(){
+      // 老 server 没这个端点 / 网络抖 → 短暂重试后放行,不挡住
+      if(tries>=6){hide();return;}
+      setTimeout(poll,400);
+    });
+  }
+  poll();
+})();
+</script>
+
 <div id="app">
 
   <div class="breath" aria-hidden="true"></div>

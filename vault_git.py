@@ -17,6 +17,7 @@ vault_git.py — VAULT_DIR 的自动版本史
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import threading
@@ -30,8 +31,16 @@ _GITIGNORE = """\
 .DS_Store
 *.swp
 *~
-.obsidian/workspace*
-.obsidian/cache
+
+# Obsidian app 配置(非日记内容)— 插件/主题/缓存是大头,首次 git add 的拖累源
+.obsidian/
+
+# 依赖目录(极少进 journal vault,但进了就是大头)
+node_modules/
+
+# 系统/编辑器垃圾 + Obsidian 回收站
+.trash/
+Thumbs.db
 
 # 镜像类目录(真源在 APP_STATE_DIR,这里被覆盖):
 PULSE/
@@ -39,6 +48,16 @@ PULSE/
 # legacy 上传位置(已迁到 APP_STATE_DIR/attachments):
 attachments/
 """
+
+# B2: baseline 全量 commit 兜底 — 文件数超此阈值就只 init 不 baseline,
+# 历史随后续编辑增量累积,避免首次 git add -A 在巨型 vault 上挂很久。
+_BASELINE_MAX_FILES = 5000
+
+# review #1: ensure_repo 现在可能被后台 init 线程 + 请求触发的 _commit_sync
+# 并发调用(P0 把 init 挪后台后,server bind 时 init 还在跑)。串行化 check-then-init,
+# 避免两个 ensure_repo 并发 git init / git add -A 撞 index.lock。
+# 独立锁:不跟 _GIT_OP_LOCK 嵌套(ensure_repo 内不取 _GIT_OP_LOCK)→ 无死锁。
+_REPO_INIT_LOCK = threading.Lock()
 
 _NOOP_REASONS = {"no_git", "init_failed", "no_changes"}
 
@@ -66,12 +85,18 @@ def _is_repo(vault_dir: Path) -> bool:
 def ensure_repo(vault_dir: Path) -> str:
     """确保 VAULT_DIR 是 git repo。第一次:init + .gitignore + baseline commit。
     返 "ready" / "no_git" / "init_failed" / "existing"。
-    """
+    review #1: check-then-init 在 _REPO_INIT_LOCK 内串行,防后台 init 与
+    并发 _commit_sync 同时 git init/add -A 撞 index.lock。"""
     if not vault_dir.exists():
         return "no_vault"
     if not _git_available():
         log.warning("[vault_git] git not on PATH — autocommit disabled")
         return "no_git"
+    with _REPO_INIT_LOCK:
+        return _ensure_repo_locked(vault_dir)
+
+
+def _ensure_repo_locked(vault_dir: Path) -> str:
     if _is_repo(vault_dir):
         # 用户已 init 过(或我们之前 init 过),只确保 .gitignore 存在
         gi = vault_dir / ".gitignore"
@@ -93,6 +118,11 @@ def ensure_repo(vault_dir: Path) -> str:
         (vault_dir / ".gitignore").write_text(_GITIGNORE, encoding="utf-8")
     except Exception:
         pass
+    # B2: 巨型 vault 跳过全量 baseline commit — 只 init,历史增量累积。
+    # 否则 git add -A 几万文件会卡很久(就是内测 M1 选大文件夹冻住的根因之一)。
+    if _exceeds_baseline_limit(vault_dir):
+        log.info(f"[vault_git] vault 文件数超 {_BASELINE_MAX_FILES} — 跳过全量 baseline,只 init")
+        return "ready"
     _run(["git", "add", "-A"], vault_dir, timeout=30)
     rc, _, err = _run(
         ["git", "commit", "-q", "-m", "baseline: human-ai vault auto-init"],
@@ -104,6 +134,22 @@ def ensure_repo(vault_dir: Path) -> str:
         _report_silent("vault_git_baseline_commit_failed", err.strip()[:120] or "empty?")
     log.info(f"[vault_git] initialized git repo at {vault_dir}")
     return "ready"
+
+
+def _exceeds_baseline_limit(vault_dir: Path) -> bool:
+    """快速估算 vault 文件数是否超阈值(.gitignore 的大目录不算)。
+    扫到超限即提前返,不全量遍历巨树。"""
+    skip = {".git", ".obsidian", ".trash", "PULSE", "attachments", "node_modules"}
+    n = 0
+    try:
+        for root, dirs, files in os.walk(vault_dir):
+            dirs[:] = [d for d in dirs if d not in skip]
+            n += len(files)
+            if n > _BASELINE_MAX_FILES:
+                return True
+    except Exception:
+        return False
+    return False
 
 
 def _report_silent(error_type: str, message: str = "", context: dict = None):
