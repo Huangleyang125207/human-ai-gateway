@@ -26,6 +26,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta, date
 from pathlib import Path
@@ -536,12 +537,30 @@ _SF_CONTEXT_ALLOWLIST = frozenset({
     "attempt", "retry_count", "dropped_count",
     "err", "bak_err", "err_class",
     "op", "phase",
+    # #2 折叠:同一指纹时间窗内重复次数(coalesced 汇总条带)
+    "occurrences", "coalesced", "window_sec",
 })
 _SF_CONTEXT_VALUE_MAX_LEN = 120
 
+# #1 隐私:home 路径含 OS 登录名(/Users/<name>/、/home/<name>/、C:\Users\<name>\)。
+# message 是 raw git stderr / 异常串,不走 context 白名单,会把用户名带上服务器。
+# 上送前统一塌成 ~。context 的字符串值(err/bak_err 等)同样过一道。
+_PII_UNIX_PATH_RE = re.compile(r'/(?:Users|home)/[^/\s\'"]+')
+_PII_WIN_PATH_RE = re.compile(r'[A-Za-z]:\\Users\\[^\\\s\'"]+', re.IGNORECASE)
+
+
+def _scrub_pii(text):
+    """把 home 目录路径(含用户名)塌成 ~。非字符串原样返回。"""
+    if not text or not isinstance(text, str):
+        return text
+    text = _PII_UNIX_PATH_RE.sub('~', text)
+    text = _PII_WIN_PATH_RE.sub('~', text)
+    return text
+
 
 def _sanitize_sf_context(ctx) -> dict:
-    """白名单过滤 + 标量类型限制 + 字符串截断。dict/list/object 一律 drop(可能嵌套用户内容)。"""
+    """白名单过滤 + 标量类型限制 + 字符串截断 + home 路径脱敏。
+    dict/list/object 一律 drop(可能嵌套用户内容)。"""
     if not ctx or not isinstance(ctx, dict):
         return {}
     out = {}
@@ -554,7 +573,7 @@ def _sanitize_sf_context(ctx) -> dict:
             out[k] = v
         elif isinstance(v, (str, bytes)):
             s = v.decode("utf-8", errors="replace") if isinstance(v, bytes) else v
-            out[k] = s[:_SF_CONTEXT_VALUE_MAX_LEN]
+            out[k] = _scrub_pii(s[:_SF_CONTEXT_VALUE_MAX_LEN])
         else:
             dropped.append(k)
     if dropped:
@@ -566,19 +585,89 @@ def _sanitize_sf_context(ctx) -> dict:
 # 同进程互不撞;append+trim 用同一个 lock,cursor 独立 lock(cursor 是 byte-size 不会撞 line)。
 _SF_FILE_LOCK = threading.Lock()
 
+# #2 折叠:同指纹失败在时间窗内"首条立即落盘(保即时信号)+ 窗内其余只内存累加",
+# 窗口过期(下一条触发 rollover 或 sender tick)落一条 coalesced 汇总
+# (occurrences = 被折叠掉的额外次数,首条已单独落)。把"1 个 bug 刷 26 行"
+# 压成"1 即时 + 1 汇总"。回归 feedback-sink 26 条 index.lock 噪音。
+_SF_DEDUP_WINDOW_SEC = 300
+_SF_DEDUP_MAX = 500  # dedup 表上限,无 sink 时兜底防无界增长
+_sf_dedup_lock = threading.Lock()
+_sf_dedup: dict = {}  # fp -> {first, last, count, error_type, message, context}
+_SF_FP_NUM_RE = re.compile(r'\d+')
+
+
+def _sf_fingerprint(error_type: str, message: str) -> str:
+    """error_type + 归一化 message(数字塌成 #,取前 80 字)。
+    同根因不同实例(行号/时间/字节数变化)归同一指纹。"""
+    norm = _SF_FP_NUM_RE.sub('#', message or '')
+    return f"{error_type}|{norm[:80]}"
+
+
+def _sf_make_entry(error_type, message, context, occurrences=1, coalesced=False):
+    ctx = dict(context or {})
+    if coalesced or occurrences > 1:
+        ctx["occurrences"] = occurrences
+        ctx["coalesced"] = coalesced
+        ctx["window_sec"] = _SF_DEDUP_WINDOW_SEC
+    return {
+        "ts": datetime.now().isoformat(),
+        "client_id": get_client_id(),
+        "error_type": error_type,
+        "message": message,
+        "context": ctx,
+        "app_version": APP_VERSION,
+        "platform": f"{sys.platform}-{_platform.machine()}",
+    }
+
+
+def _sf_write_entry(entry: dict):
+    """锁内 append + flush + fsync 单条。A-H6+H11 写盘契约。"""
+    SILENT_FAILURES_LOG.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(entry, ensure_ascii=False) + "\n"
+    with _SF_FILE_LOCK:
+        with SILENT_FAILURES_LOG.open("a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+            try:
+                os.fsync(f.fileno())  # 反馈通道本身崩了最不该悄无声息
+            except Exception:
+                pass
+    # 偶尔 trim(每 100 条采样一次,均摊 IO)
+    if random.random() < 0.01:
+        _trim_silent_failures()
+
+
+def _sf_flush_dedup(force: bool = False):
+    """sender tick 调:窗口静默过期(或 force)且 count>1 → 落 coalesced 汇总。
+    burst 停止后由这条兜底(rollover 路径只在下一条同指纹到达时触发)。"""
+    now = time.time()
+    to_emit = []
+    with _sf_dedup_lock:
+        for fp, rec in list(_sf_dedup.items()):
+            if force or (now - rec["last"] >= _SF_DEDUP_WINDOW_SEC):
+                if rec["count"] > 1:
+                    to_emit.append((rec["error_type"], rec["message"],
+                                    rec["context"], rec["count"] - 1))
+                del _sf_dedup[fp]
+    for et, msg, ctx, extra in to_emit:
+        try:
+            _sf_write_entry(_sf_make_entry(et, msg, ctx, occurrences=extra, coalesced=True))
+        except Exception:
+            pass
+
 
 def _report_silent_failure(error_type: str, message: str = "", context: dict = None):
     """记一条 silent failure 进本地 ring buffer。fire-and-forget,自身永不 raise。
 
     error_type: 枚举 snake_case,server 侧分类用
                 例: vision_classify_auth / cutout_all_failed / web_search_degraded
-    message:    最长 200 字截断,不放用户内容
+    message:    最长 200 字截断,不放用户内容;入口走 _scrub_pii 塌 home 路径(#1)
     context:    可选 dict,入口走 _sanitize_sf_context 白名单过滤,
                 consent.js 承诺范围外的 key 直接 drop(记 _dropped_keys 作 drift 信号)
 
+    折叠(#2): 同指纹窗内首条立即落,其余内存累加,过期落 coalesced 汇总。
+
     consent: 用户未同意"错误上报"时**连本地 jsonl 都不写**(C-#4 收口)。
-    原设计是"撤回期本地仍写,sender 读 consent 暂停上送,再开同意时回灌历史"——
-    这违反"用户主动撤回过"的承诺(撤回期间数据再开同意时被回灌上送)。
     现在:撤回期间通道完全静音,本地不增长,云端不回灌。
     """
     try:
@@ -590,29 +679,39 @@ def _report_silent_failure(error_type: str, message: str = "", context: dict = N
                 return
         except Exception:
             return
-        entry = {
-            "ts": datetime.now().isoformat(),
-            "client_id": get_client_id(),
-            "error_type": error_type,
-            "message": (message or "")[:200],
-            "context": _sanitize_sf_context(context),
-            "app_version": APP_VERSION,
-            "platform": f"{sys.platform}-{_platform.machine()}",
-        }
-        SILENT_FAILURES_LOG.parent.mkdir(parents=True, exist_ok=True)
-        # A-H6+H11: append 走 lock + flush + fsync,堵 trim/drain 同进程并发
-        line = json.dumps(entry, ensure_ascii=False) + "\n"
-        with _SF_FILE_LOCK:
-            with SILENT_FAILURES_LOG.open("a", encoding="utf-8") as f:
-                f.write(line)
-                f.flush()
-                try:
-                    os.fsync(f.fileno())  # 反馈通道本身崩了最不该悄无声息
-                except Exception:
-                    pass
-        # 偶尔 trim(每 100 条采样一次,均摊 IO)
-        if random.random() < 0.01:
-            _trim_silent_failures()
+        # #1 隐私:message 是 raw stderr,塌 home 路径去用户名;context 在 sanitize 内塌
+        msg = _scrub_pii((message or "")[:200])
+        sanitized = _sanitize_sf_context(context)
+        # #2 折叠:同指纹窗内只首条落盘,其余累加
+        fp = _sf_fingerprint(error_type, msg)
+        now = time.time()
+        flush = None
+        emit_first = True
+        with _sf_dedup_lock:
+            rec = _sf_dedup.get(fp)
+            if rec and (now - rec["first"] < _SF_DEDUP_WINDOW_SEC):
+                rec["count"] += 1
+                rec["last"] = now
+                emit_first = False
+            else:
+                # 新窗口:旧窗口若累加过 extra,rollover 落汇总
+                if rec and rec["count"] > 1:
+                    flush = (rec["error_type"], rec["message"],
+                             rec["context"], rec["count"] - 1)
+                _sf_dedup[fp] = {"first": now, "last": now, "count": 1,
+                                 "error_type": error_type, "message": msg,
+                                 "context": sanitized}
+                # 兜底:无 sink 配置时 sender flush 不跑,dedup 不会被清。
+                # 超上限淘汰最旧(按 last)条目,防长 session 无界增长。
+                if len(_sf_dedup) > _SF_DEDUP_MAX:
+                    oldest = min(_sf_dedup, key=lambda k: _sf_dedup[k]["last"])
+                    _sf_dedup.pop(oldest, None)
+        # 落盘在 dedup lock 外(避免与 _SF_FILE_LOCK 嵌套)
+        if flush:
+            et, m, c, extra = flush
+            _sf_write_entry(_sf_make_entry(et, m, c, occurrences=extra, coalesced=True))
+        if emit_first:
+            _sf_write_entry(_sf_make_entry(error_type, msg, sanitized))
     except Exception as e:
         # 反馈通道自己挂了不能反复上报(避免递归),只 warn
         try:
@@ -690,6 +789,8 @@ def _sf_sender_loop():
     log.info(f"[sf-sender] started, target={url_base}, interval={SF_SENDER_INTERVAL}s")
     while not _SF_SENDER_STOP.wait(SF_SENDER_INTERVAL):
         try:
+            # #2 折叠:先 flush 静默过期窗口的 coalesced 汇总进 jsonl,再 drain 上送
+            _sf_flush_dedup()
             # consent gate — 用户没同意"错误上报"则 drain 跳过(本地 jsonl 兜底仍在,
             # toggle 打开后历史失败可回灌)
             if not _telemetry_consent().get("failures"):
