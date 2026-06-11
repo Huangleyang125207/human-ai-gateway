@@ -12,7 +12,33 @@ use tauri_plugin_updater::UpdaterExt;
 /// 启动时后台 check 是否有新版本。失败 silent — 不阻塞主流程。
 /// 走 yanpai feedback-sink /updates/latest.json,minisign 验签,有新版本下载到临时位置后
 /// 触发应用重启(用户确认 dialog 在前端做,这里只做检测+下载机制)
+/// 诊断:手动拉两个 updater 端点,记 HTTP 状态 + body 前段(含 "version":"x")。
+/// 直接看到 app 网络环境下每个 endpoint 真返回啥 —— 区分"COS 拿到新版但 Tauri 没认"
+/// vs "COS 失败降级 stale yanpai"。check() 本身不暴露用了哪个 endpoint。
+async fn probe_update_endpoints() {
+    let urls = [
+        "https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/latest-darwin-aarch64.json",
+        "http://101.42.108.30:18080/updates/latest.json",
+    ];
+    for url in urls.iter() {
+        match reqwest::get(*url).await {
+            Ok(resp) => {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                let snip: String = body.chars().take(140).collect();
+                log::info!("[updater-probe] {} -> {} | {}", url, status, snip);
+            }
+            Err(e) => log::warn!("[updater-probe] {} -> ERROR: {}", url, e),
+        }
+    }
+}
+
 async fn check_for_updates(app: AppHandle, sidecar_port: u16) {
+    log::info!(
+        "[updater] check start, current version: {}",
+        app.package_info().version
+    );
+    probe_update_endpoints().await;
     let updater = match app.updater() {
         Ok(u) => u,
         Err(e) => {
@@ -217,6 +243,14 @@ pub fn run() {
                 let _ = w.set_focus();
             }
         }))
+        // 落文件日志:之前 tauri-plugin-log 是依赖但没 init,所有 log::info!([updater]…)
+        // 全被丢 → Gateway.log 空 → 自更新成黑盒看不到 check() 为啥失败。
+        // 写 LogDir(~/Library/Logs/com.humanai.gateway/Gateway.log)+ Info 级。
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         // T9 自动更新:启动后台 check yanpai /updates/latest.json,minisign 验签
         // 后下载新 binary;走 feedback-sink 同 host(国内直连稳)
