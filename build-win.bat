@@ -34,7 +34,7 @@ echo -^> 2. 装 deps
 "%VENV%\Scripts\pip" install --quiet --upgrade pip
 "%VENV%\Scripts\pip" install --quiet -r requirements.txt
 REM Windows/Linux 端缺 macOS Vision/Subject Lift,改走 ONNX 兜底:
-"%VENV%\Scripts\pip" install --quiet rapidocr-onnxruntime rembg
+"%VENV%\Scripts\pip" install --quiet rapidocr-onnxruntime rembg==2.0.61
 "%VENV%\Scripts\pip" install --quiet pyinstaller
 
 REM 3. ico from svg(可选,缺就用默认 PyInstaller icon)

@@ -2967,6 +2967,11 @@ async def _startup_vault_reference_and_migration():
         _cutout_set_sink(_report_silent_failure)
     except Exception:
         pass  # cutout 可能还没装上报针脚,先 best-effort
+    try:
+        from cutout_local import set_failure_sink as _cutout_local_set_sink
+        _cutout_local_set_sink(_report_silent_failure)
+    except Exception as e:
+        log.warning(f"cutout_local set_failure_sink: {e}")
 
 
 def _consume_updater_pending():
@@ -5940,6 +5945,14 @@ def _background_vault_init():
         _vault_git_init_step()
         _set_init_phase("audit", "检查 vault 完整性")
         _vault_audit_step()
+        # 抠图模型预热(Win/Linux/老 mac):从自家 COS 拉 u2net,绕开 rembg 内置
+        # GitHub 下载(大陆不可达)。幂等 + 失败自上报,不进 init error(非关键路径)。
+        _set_init_phase("cutout_model", "准备抠图模型")
+        try:
+            from cutout_local import prewarm_u2net
+            prewarm_u2net()
+        except Exception as e:
+            log.warning(f"[init] u2net prewarm: {e}")
     except Exception as e:
         with _INIT_LOCK:
             _INIT_STATE["error"] = f"{type(e).__name__}: {str(e)[:160]}"
