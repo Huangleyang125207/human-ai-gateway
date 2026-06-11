@@ -2607,11 +2607,25 @@ def _do_web_search(query: str, max_results: int = 5, category: str = "general") 
       general  → 360(主力,免费+真来源 URL) → 百炼兜底(360 挂时) → ddgs(海外兜底)
     """
     if category == "wechat":
-        return _sogou_wechat_search(query, max_results)
+        # 包 try:lxml 缺失 / parser 崩 不能逃出去变成 tool hard-error(无 fallback,至少干净返回)
+        try:
+            return _sogou_wechat_search(query, max_results)
+        except Exception as e:
+            _report_silent_failure("web_search_wechat_exception",
+                f"{type(e).__name__}: {str(e)[:80]}")
+            return f"[公众号搜索暂不可用:{type(e).__name__} — 稍后再试]"
     if category == "bilibili":
         return _bilibili_search(query, max_results)
     # 通用:360 主力。失败/无结果 → 百炼兜底(大陆可靠) → ddgs(需代理)
-    r360 = _360_search(query, max_results)
+    # 包 try:防 lxml 缺失/parser 崩 等异常逃出 → 跳过整条 fallback 链 + 隐身(web_search 硬挂真因)
+    try:
+        r360 = _360_search(query, max_results)
+    except Exception as e:
+        log.info(f"[web_search] 360 抛异常,降级百炼: {type(e).__name__}: {str(e)[:120]}")
+        _report_silent_failure("web_search_360_exception",
+            f"360 抛异常,降级百炼: {type(e).__name__}: {str(e)[:80]}")
+        # sentinel 字符串(非 None)—— 后续 .startswith/[:40] 不炸,且触发降级
+        r360 = f"[360 异常:{type(e).__name__}]"
     if r360 and not r360.startswith("[360"):   # 有真结果
         return r360
     log.info(f"[web_search] 360 无结果({r360[:40]}),试百炼兜底")

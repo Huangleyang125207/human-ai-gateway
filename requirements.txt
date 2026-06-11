@@ -4,3 +4,4 @@ openai
 requests
 python-multipart
 Pillow
+lxml          # web_search 解析 360/搜狗公众号 HTML;漏了它生产包不打进 → web_search 全挂(No module named 'lxml')
