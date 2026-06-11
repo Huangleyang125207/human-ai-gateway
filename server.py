@@ -7530,6 +7530,9 @@ _SELF_EVOLVE_TARGETS = {
         "budget": 12000,
         "stale": 60,
         "prompt_template": "default",  # 用 _PULSE_UPDATE_PROMPT
+        # per-user 快照,每个用户都该有:不存在时让 LLM 从对话生成首版(走 bootstrap),
+        # 不像 project_pulse 那样陌生用户没"项目"就 skip。
+        "create_if_absent": True,
     },
     "project_pulse": {
         "path": lambda: _PROJECT_PULSE_PATH,
@@ -7596,9 +7599,11 @@ def _self_evolve_run(target: str, conversation: str) -> dict:
     if not cfg:
         raise HTTPException(400, f"未知 target: {target}")
     path = cfg["path"]()
-    if not path.exists():
-        # 路径不存在(陌生用户没我个人 USER_PULSE / 项目 PULSE)= graceful skip,不算失败
-        # 让 frontend ok_count 算上,防 #20 永远 2/3 + #22 死循环
+    # creating:文件不存在 + 该 target 允许创建(user_pulse)→ 当空 pulse 让 LLM 生成首版(走 bootstrap)。
+    # 不允许创建的(project_pulse:陌生用户没"项目")→ 维持 graceful skip。
+    creating = (not path.exists()) and cfg.get("create_if_absent", False)
+    if not path.exists() and not creating:
+        # graceful skip,不算失败;让 frontend ok_count 算上,防 #20 永远 2/3 + #22 死循环
         return {
             "ok": True,
             "skipped": True,
@@ -7610,12 +7615,16 @@ def _self_evolve_run(target: str, conversation: str) -> dict:
     with _get_evolve_lock(target):
         # 读快照,记 sha256 内容指纹(R10):比 mtime 精确,跨 fs 一致,
         # iCloud / Obsidian Sync / NAS 同秒外部编辑也能检测到。
-        try:
-            old = path.read_text(encoding="utf-8")
-            import hashlib as _hashlib_se
-            old_sha = _hashlib_se.sha256(old.encode("utf-8")).hexdigest()
-        except Exception as e:
-            raise HTTPException(500, f"读 {cfg['name']} 失败: {e}")
+        import hashlib as _hashlib_se
+        if creating:
+            old = ""  # 首次创建:空 pulse,LLM 从对话生成首版
+            old_sha = _hashlib_se.sha256(b"").hexdigest()
+        else:
+            try:
+                old = path.read_text(encoding="utf-8")
+                old_sha = _hashlib_se.sha256(old.encode("utf-8")).hexdigest()
+            except Exception as e:
+                raise HTTPException(500, f"读 {cfg['name']} 失败: {e}")
 
         today = date.today().isoformat()
         bootstrap = not _TS_RE.search(old)  # 全文无 ts = bootstrap 态
@@ -7727,18 +7736,20 @@ def _self_evolve_run(target: str, conversation: str) -> dict:
                     "name": cfg["name"],
                 }
         except FileNotFoundError:
-            _push_notification(
-                "pulse-skip-external-edit",
-                f"{cfg['name']} 在 LLM 重写期间被删除,跳过写入",
-                {"target": target},
-            )
-            return {
-                "ok": True,
-                "skipped": True,
-                "reason": "file-deleted",
-                "target": target,
-                "name": cfg["name"],
-            }
+            # creating 模式:文件本就不存在,这是预期 — 继续写首版,不当"被删"。
+            if not creating:
+                _push_notification(
+                    "pulse-skip-external-edit",
+                    f"{cfg['name']} 在 LLM 重写期间被删除,跳过写入",
+                    {"target": target},
+                )
+                return {
+                    "ok": True,
+                    "skipped": True,
+                    "reason": "file-deleted",
+                    "target": target,
+                    "name": cfg["name"],
+                }
 
         # atomic write + 5 份 rotate backup(#11 #13)
         try:
