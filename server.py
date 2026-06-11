@@ -1342,13 +1342,14 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "insert_journal_block",
-            "description": "加新 H2 条目到时间块。已有内容会 append 新 H2(不覆盖)。AI 调用自动 @ai stamp。",
+            "description": "加新 H2 条目到时间块(标题 + 正文一次写全)。已有内容会 append 新 H2(不覆盖)。AI 调用自动 @ai stamp。",
             "parameters": {
                 "type": "object",
-                "required": ["tag"],
+                "required": ["tag", "body"],
                 "properties": {
                     "tag": {"type": "string", "description": "条目 tag,不带 #。例 '饮食' '探索'"},
                     "title": {"type": "string", "description": "短标题"},
+                    "body": {"type": "string", "description": "正文散文(必填)。写 result + significance:发生了什么 + 为什么重要。禁止只留标题。"},
                     "time": {"type": "string", "description": "HH:MM,omit 默认当前半小时"},
                     "date": {"type": "string", "description": "YYYY-MM-DD,omit 默认今天"},
                 },
@@ -1725,6 +1726,7 @@ def tool_insert_journal_block(args):
     time_str = (args.get("time") or "").strip()
     tag = (args.get("tag") or "").strip()
     title = (args.get("title") or "").strip()
+    body = (args.get("body") or "").strip()
     # 兜底:没指定 time 用当前半小时
     if not time_str:
         now = datetime.now()
@@ -1735,7 +1737,12 @@ def tool_insert_journal_block(args):
     f = find_today_journal(target)
     if not f:
         return {"error": f"no journal file for {target.strftime('%Y-%m-%d')}"}
-    return _insert_block(f, time_str, tag=tag, title=title, author="ai")
+    out = _insert_block(f, time_str, tag=tag, title=title, author="ai", body=body)
+    # 钉子(兜旧习惯):标题-only 条目违反日记协议,在 tool result 里压模型立刻补正文
+    if isinstance(out, dict) and out.get("ok") and not body:
+        out["warning"] = ("⚠ 只写了标题没写正文,违反日记协议(每条 entry 必须有"
+                          "result + significance 的散文)。请立即用 patch_journal_block 补上正文。")
+    return out
 
 
 def tool_append_journal_comment(args):
@@ -8916,11 +8923,13 @@ async def journal_insert_block(req: Request):
     return result
 
 
-def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "", author: str = "ai") -> dict:
+def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "", author: str = "ai", body: str = "") -> dict:
     """加新条目。
     - 块不存在 → 新建 H1 + 一个 ## #tag title 的 H2
     - 块已存在 → append 新的 H2 到该块下(同时间多条目)
     tag/title 都可空,空时落 "## #新" 占位让 parser 不过滤(模板裸 ## 会被过滤)
+    body = H2 下的散文正文(§ H5 result + significance)。标题-only 条目违反日记
+    协议,tool schema 把 body 设 required;这里仍兼容空(老调用路径/前端)。
     Time can be HH:MM (half-width) or HH：MM (full-width). Stored as full-width.
 
     author='ai' (默认) 或 'user',新 H2 末尾 stamp @{author}。owner 决定后续 patch
@@ -8941,6 +8950,9 @@ def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "", author
     # 拼新 H2: tag 优先,兜底 #新;末尾 stamp @author 给 authorship boundary 用
     tag_clean = tag.strip().lstrip("#") or "新"
     h2_line = f"## #{tag_clean}" + (f" {title.strip()}" if title.strip() else "") + f" @{author}"
+    # H2 + 正文一体落盘:body 空时 entry 只有标题行(老路径兼容,tool 层会提醒补写)
+    body_lines = [ln.rstrip() for ln in (body or "").strip().splitlines()]
+    entry_lines = [h2_line] + ([""] + body_lines if body_lines else [])
 
     # 找现有同时间块 + 找按时序插入位置
     existing_h1_idx = None
@@ -8969,17 +8981,17 @@ def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "", author
         # 若块只有占位 `##` 一行,直接替换它(否则 append)
         only_placeholder = False
         if body_end == existing_h1_idx + 2 and lines[existing_h1_idx + 1].strip() == "##":
-            lines[existing_h1_idx + 1] = h2_line
+            lines[existing_h1_idx + 1:existing_h1_idx + 2] = entry_lines
             only_placeholder = True
         elif body_end > existing_h1_idx + 1:
             # 检查 placeholder ## 在范围内
             for j in range(existing_h1_idx + 1, body_end):
                 if lines[j].strip() == "##":
-                    lines[j] = h2_line
+                    lines[j:j + 1] = entry_lines
                     only_placeholder = True
                     break
         if not only_placeholder:
-            lines = lines[:body_end] + ["", h2_line, ""] + lines[body_end:]
+            lines = lines[:body_end] + ["", *entry_lines, ""] + lines[body_end:]
 
         new_text = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
         with _get_vault_md_lock(str(f)):
@@ -8994,10 +9006,10 @@ def _insert_block(f: Path, time_str: str, tag: str = "", title: str = "", author
 
     new_h1 = f"# {hh}：{mm:02d}"
     if insert_idx is not None:
-        new_block = [new_h1, "", h2_line, "", "---", ""]
+        new_block = [new_h1, "", *entry_lines, "", "---", ""]
         new_lines = lines[:insert_idx] + new_block + lines[insert_idx:]
     else:
-        new_lines = lines + ["", "---", "", new_h1, "", h2_line]
+        new_lines = lines + ["", "---", "", new_h1, "", *entry_lines]
 
     new_text = "\n".join(new_lines) + ("\n" if text.endswith("\n") else "")
     with _get_vault_md_lock(str(f)):
