@@ -804,8 +804,11 @@ def _sf_sender_loop():
 _HB_SENDER_THREAD = None
 _HB_SENDER_STOP = threading.Event()
 _HB_LAST_SENT_PATH = DATA_DIR / "heartbeat.last"
-HB_STARTUP_DELAY = 30 * 60   # 启动后延 30min 才首发,避开开机 spike
-HB_INTERVAL = 6 * 3600       # 每 6h 醒一次看要不要发(实际一天最多一次)
+# 即刻反馈:启动 15s 就首发(原 30min 太久,内测 tester 探几分钟就关 → 一次心跳都不发 → DAU 永远 0)。
+# 每天去重(_hb_last_sent_day)保证不刷屏,所以"避开开机 spike"不再靠延迟,靠去重。
+HB_STARTUP_DELAY = 15        # 启动后 15s 首发
+HB_RETRY_INTERVAL = 120      # 没发成(consent 没开 / 网络抖 / 晚勾同意)→ 2min 后重试,抓短会话
+HB_IDLE_INTERVAL = 3600      # 当天已发 → 1h 醒一次看是否跨天
 HB_HTTP_TIMEOUT = 10
 
 
@@ -837,12 +840,15 @@ def _hb_sender_loop():
         return
     log.info(f"[hb-sender] started, target={url_base}, daily")
     while True:
+        sent_today = False
         try:
             if not _telemetry_consent().get("heartbeat"):
-                pass  # consent 关,本周期不发
+                pass  # consent 关,本周期不发(下个 retry 周期再看,用户可能晚点才勾)
             else:
                 today = datetime.utcnow().strftime("%Y-%m-%d")
-                if _hb_last_sent_day() != today:
+                if _hb_last_sent_day() == today:
+                    sent_today = True  # 今天发过了,转 idle 间隔
+                else:
                     tz_off = int(-time.timezone / 60)  # local UTC offset(分钟)
                     payload = {
                         "client_id": get_client_id(),
@@ -854,11 +860,13 @@ def _hb_sender_loop():
                                       timeout=HB_HTTP_TIMEOUT)
                     if r.status_code == 200:
                         _hb_mark_sent(today)
+                        sent_today = True
                     elif r.status_code != 429:
                         log.warning(f"[hb-sender] HTTP {r.status_code}: {r.text[:120]}")
         except Exception as e:
             log.warning(f"[hb-sender] tick failed: {type(e).__name__}: {e}")
-        if _HB_SENDER_STOP.wait(HB_INTERVAL):
+        # 没发成(consent 没开 / 网络 / 晚勾同意)→ 2min 后重试,抓住短会话;发成了 → 1h 看跨天
+        if _HB_SENDER_STOP.wait(HB_IDLE_INTERVAL if sent_today else HB_RETRY_INTERVAL):
             break
 
 
