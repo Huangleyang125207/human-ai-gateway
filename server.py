@@ -4267,6 +4267,10 @@ def _stream_final_reply(client, active_model, messages, loaded_groups, quota_use
             )
         except Exception as e:
             yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
+            # #1 用户功能:聊天 LLM 初始调用失败(网络/quota/auth)— 高频且现在只吐 UI 不上报
+            _report_silent_failure("chat_llm_call_failed",
+                f"{type(e).__name__}: {str(e)[:120]}",
+                context={"model": active_model, "phase": "stream_start"})
             return
 
         buffer = ""
@@ -4388,6 +4392,9 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
             )
         except Exception as e:
             yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
+            _report_silent_failure("chat_llm_call_failed",
+                f"{type(e).__name__}: {str(e)[:120]}",
+                context={"model": active_model, "phase": "tool_loop"})
             return
 
         msg = resp.choices[0].message
@@ -5922,6 +5929,9 @@ def _background_vault_init():
         with _INIT_LOCK:
             _INIT_STATE["error"] = f"{type(e).__name__}: {str(e)[:160]}"
         log.warning(f"[init] background init crashed: {e}")
+        # 后台 init 崩(git init / audit)→ 审计链可能断,远程看不见,上报
+        _report_silent_failure("vault_init_failed",
+            f"{type(e).__name__}: {str(e)[:120]}", context={"err_class": type(e).__name__})
     finally:
         with _INIT_LOCK:
             _INIT_STATE["phase"] = "ready"
@@ -7800,6 +7810,47 @@ async def updater_installed(req: Request):
         {"version": version},
     )
     return {"ok": True}
+
+
+def _ver_tuple(s: str):
+    """'0.1.34' → (0,1,34);解析失败返 None。"""
+    import re as _re
+    m = _re.search(r"(\d+)\.(\d+)\.(\d+)", s or "")
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+@app.post("/api/updater/report")
+async def updater_report(req: Request):
+    """Rust updater check 完把结果 POST 这里,sidecar 判异常后走 silent-failure 通道
+    (本地缓冲 + 联网回传)。让远程用户的自更新故障也进表,不依赖摸到他们机器。
+    body: {current_version, check_result, cos, yanpai}
+      check_result: 'some:X' / 'none' / 'error:<msg>'
+      cos / yanpai:  '<http_status>:<version>' / 'err:<msg>'
+    只报真异常:check 报 error,或 COS 有新版但 check 却说 none(今天 bug 的指纹)。"""
+    try:
+        body = await req.json()
+    except Exception:
+        return {"ok": False}
+    cur = (body.get("current_version") or "").strip()
+    res = (body.get("check_result") or "").strip()
+    cos = (body.get("cos") or "").strip()
+    yanpai = (body.get("yanpai") or "").strip()
+    # 异常 1:check 直接报错(网络/验签/parse)
+    if res.startswith("error"):
+        _report_silent_failure("updater_check_failed",
+            f"cur={cur} {res[:120]}",
+            context={"err": res[7:127], "phase": "check"})
+        return {"ok": True, "reported": "updater_check_failed"}
+    # 异常 2:COS 有更新版本,但 check() 却说无更新 → 自更新静默不弹的指纹
+    if res == "none":
+        cos_ver = _ver_tuple(cos.split(":")[-1] if ":" in cos else cos)
+        cur_ver = _ver_tuple(cur)
+        if cos_ver and cur_ver and cos_ver > cur_ver:
+            _report_silent_failure("updater_silent_no_update",
+                f"COS 有 {cos.split(':')[-1]} > 装机 {cur},但 check 返 none(yanpai={yanpai})",
+                context={"phase": "check"})
+            return {"ok": True, "reported": "updater_silent_no_update"}
+    return {"ok": True, "reported": None}
 
 
 @app.post("/api/pulse/user-update")

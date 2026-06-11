@@ -15,38 +15,72 @@ use tauri_plugin_updater::UpdaterExt;
 /// 诊断:手动拉两个 updater 端点,记 HTTP 状态 + body 前段(含 "version":"x")。
 /// 直接看到 app 网络环境下每个 endpoint 真返回啥 —— 区分"COS 拿到新版但 Tauri 没认"
 /// vs "COS 失败降级 stale yanpai"。check() 本身不暴露用了哪个 endpoint。
-async fn probe_update_endpoints() {
+/// 返 (cos_summary, yanpai_summary),各形如 "200:0.1.34" / "err:<msg>"。
+async fn probe_update_endpoints() -> (String, String) {
     let urls = [
         "https://gateway-updates-1341853738.cos.ap-shanghai.myqcloud.com/latest-darwin-aarch64.json",
         "http://101.42.108.30:18080/updates/latest.json",
     ];
+    let mut out: Vec<String> = Vec::new();
     for url in urls.iter() {
-        match reqwest::get(*url).await {
+        let summary = match reqwest::get(*url).await {
             Ok(resp) => {
-                let status = resp.status();
+                let status = resp.status().as_u16();
                 let body = resp.text().await.unwrap_or_default();
-                let snip: String = body.chars().take(140).collect();
-                log::info!("[updater-probe] {} -> {} | {}", url, status, snip);
+                let ver = serde_json::from_str::<serde_json::Value>(&body)
+                    .ok()
+                    .and_then(|v| v.get("version").and_then(|s| s.as_str()).map(String::from))
+                    .unwrap_or_else(|| "?".to_string());
+                format!("{}:{}", status, ver)
             }
-            Err(e) => log::warn!("[updater-probe] {} -> ERROR: {}", url, e),
-        }
+            Err(e) => format!("err:{}", e),
+        };
+        log::info!("[updater-probe] {} -> {}", url, summary);
+        out.push(summary);
     }
+    (
+        out.get(0).cloned().unwrap_or_default(),
+        out.get(1).cloned().unwrap_or_default(),
+    )
+}
+
+/// 把 updater check 结果 POST 给 sidecar /api/updater/report → 走 silent-failure 通道
+/// (远程用户的自更新故障也能进表,不依赖摸到机器)。fire-and-forget,失败不影响主流程。
+async fn report_updater_check(port: u16, current: &str, result: &str, cos: &str, yanpai: &str) {
+    let url = format!("http://127.0.0.1:{}/api/updater/report", port);
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let _ = client
+        .post(&url)
+        .json(&serde_json::json!({
+            "current_version": current,
+            "check_result": result,
+            "cos": cos,
+            "yanpai": yanpai,
+        }))
+        .send()
+        .await;
 }
 
 async fn check_for_updates(app: AppHandle, sidecar_port: u16) {
-    log::info!(
-        "[updater] check start, current version: {}",
-        app.package_info().version
-    );
-    probe_update_endpoints().await;
+    let cur_ver = app.package_info().version.to_string();
+    log::info!("[updater] check start, current version: {}", cur_ver);
+    let (cos, yanpai) = probe_update_endpoints().await;
     let updater = match app.updater() {
         Ok(u) => u,
         Err(e) => {
             log::warn!("[updater] init failed: {e}");
+            report_updater_check(sidecar_port, &cur_ver, &format!("error:init {e}"), &cos, &yanpai)
+                .await;
             return;
         }
     };
-    match updater.check().await {
+    let check_result: String = match updater.check().await {
         Ok(Some(update)) => {
             let new_ver = update.version.clone();
             log::info!("[updater] new version available: {}", new_ver);
@@ -110,8 +144,12 @@ async fn check_for_updates(app: AppHandle, sidecar_port: u16) {
                     log::warn!("[updater] download/install failed: {e}");
                 }
             }
+            format!("some:{}", new_ver)
         }
-        Ok(None) => log::info!("[updater] no new version"),
+        Ok(None) => {
+            log::info!("[updater] no new version");
+            "none".to_string()
+        }
         Err(e) => {
             let _ = app.emit(
                 "updater://progress",
@@ -122,8 +160,10 @@ async fn check_for_updates(app: AppHandle, sidecar_port: u16) {
                 }),
             );
             log::warn!("[updater] check failed: {e}");
+            format!("error:{}", e)
         }
-    }
+    };
+    report_updater_check(sidecar_port, &cur_ver, &check_result, &cos, &yanpai).await;
 }
 
 /// 把"新版本已下载,重启生效"事件推给 sidecar /api/updater/installed。
