@@ -5986,8 +5986,8 @@ def _thread_save_is_stale(base_mtime, current_mtime: int) -> bool:
 
 @app.get("/api/health")
 def api_health():
-    """轻量 ping — client 每 30s 检测,断了弹 banner。"""
-    return {"ok": True, "ts": datetime.now().isoformat(timespec="seconds")}
+    """轻量 ping — client 每 30s 检测,断了弹 banner。带版本号供设置"关于"页显示。"""
+    return {"ok": True, "ts": datetime.now().isoformat(timespec="seconds"), "version": APP_VERSION}
 
 
 @app.get("/api/init-status")

@@ -40,6 +40,7 @@
           <button class="market-tab${activeTab==='widgets' ? ' on':''}" data-tab="widgets">插件市场</button>
           <button class="market-tab${activeTab==='keys' ? ' on':''}" data-tab="keys">API 钥匙</button>
           <button class="market-tab${activeTab==='corpus' ? ' on':''}" data-tab="corpus">数据</button>
+          <button class="market-tab${activeTab==='about' ? ' on':''}" data-tab="about">关于</button>
         </nav>
         <div class="market-body" id="marketBody"></div>
       </div>
@@ -66,11 +67,63 @@
       renderWidgets(data.widgets || []);
     } else if (activeTab === "corpus") {
       renderCorpus();
+    } else if (activeTab === "about") {
+      renderAbout();
     } else {
       const resp = await fetch("/api/setup/current");
       const cfg = await resp.json();
       renderKeys(cfg);
     }
+  }
+
+  async function renderAbout() {
+    const body = document.getElementById("marketBody");
+    let ver = "⋯";
+    try {
+      const r = await fetch("/api/health", { cache: "no-store" });
+      ver = (await r.json()).version || "?";
+    } catch (e) { ver = "?"; }
+    // 只有 Tauri 桌面壳里才有自动更新;浏览器/dev 模式没有 __TAURI__
+    const tauri = window.__TAURI__;
+    const canUpdate = !!(tauri && tauri.core && tauri.core.invoke);
+    body.innerHTML = `
+      <div class="market-hint">数据 100% 留在你电脑(~/.human-ai/vault/),Obsidian 兼容。这是人 + AI 共写日记的本地优先桌面应用。</div>
+      <div class="market-section" style="padding:14px 0;">
+        <h3>版本</h3>
+        <p style="margin:6px 0;">当前版本 <b>v${ver}</b></p>
+        ${canUpdate ? `
+          <button class="key-add-btn" id="checkUpdateBtn">检查更新</button>
+          <span id="checkUpdateStatus" style="margin-left:10px;font-size:12px;color:var(--ink-4,#8a7f72);"></span>
+        ` : `
+          <p style="font-size:12px;color:var(--ink-4,#8a7f72);">自动更新仅桌面版支持。浏览器里打开请到下载页拿最新版。</p>
+        `}
+      </div>
+    `;
+    if (!canUpdate) return;
+    const btn = document.getElementById("checkUpdateBtn");
+    const status = document.getElementById("checkUpdateStatus");
+    let unlisten = null;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      status.textContent = "检查中⋯";
+      // 监听一次结果:有新版 → banner 接管下载;无新版 → "已是最新";出错 → 显错
+      try {
+        if (tauri.event && tauri.event.listen) {
+          unlisten = await tauri.event.listen("updater://progress", (ev) => {
+            const step = ev.payload && ev.payload.step;
+            if (step === "uptodate") { status.textContent = "已是最新版本 ✓"; btn.disabled = false; }
+            else if (step === "found") { status.textContent = "发现新版,开始下载⋯"; }
+            else if (step === "error") { status.textContent = "检查失败,稍后再试"; btn.disabled = false; }
+          });
+        }
+        await tauri.core.invoke("check_updates_now");
+        // 兜底:8s 没任何事件回来(理论不会)→ 解锁按钮
+        setTimeout(() => { if (btn.disabled && status.textContent === "检查中⋯") { status.textContent = ""; btn.disabled = false; } }, 8000);
+      } catch (e) {
+        status.textContent = "检查失败:" + (e && e.message ? e.message : e);
+        btn.disabled = false;
+      }
+    });
   }
 
   async function renderCorpus() {

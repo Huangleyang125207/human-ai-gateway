@@ -280,6 +280,8 @@
   function onProgress(payload) {
     if (!payload || typeof payload !== "object") return;
     const { step } = payload;
+    // "uptodate"(手动检查发现已是最新)不弹 banner — 设置面板内联显示"已是最新"即可
+    if (step === "uptodate") return;
     state.visible = true;
     state.step = step || state.step;
     if (payload.version) state.version = payload.version;

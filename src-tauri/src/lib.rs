@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
@@ -67,7 +67,7 @@ async fn report_updater_check(port: u16, current: &str, result: &str, cos: &str,
         .await;
 }
 
-async fn check_for_updates(app: AppHandle, sidecar_port: u16) {
+async fn check_for_updates(app: AppHandle, sidecar_port: u16, manual: bool) {
     let cur_ver = app.package_info().version.to_string();
     log::info!("[updater] check start, current version: {}", cur_ver);
     let (cos, yanpai) = probe_update_endpoints().await;
@@ -148,6 +148,13 @@ async fn check_for_updates(app: AppHandle, sidecar_port: u16) {
         }
         Ok(None) => {
             log::info!("[updater] no new version");
+            // 手动检查时:没新版也要给反馈,否则用户点了"检查更新"没动静以为坏了
+            if manual {
+                let _ = app.emit(
+                    "updater://progress",
+                    serde_json::json!({ "step": "uptodate" }),
+                );
+            }
             "none".to_string()
         }
         Err(e) => {
@@ -273,6 +280,19 @@ fn wait_for_port(port: u16, timeout_secs: u64) -> bool {
     false
 }
 
+/// sidecar 动态端口存进 Tauri state,给手动检查更新命令用。
+struct SidecarPort(u16);
+
+/// 设置面板"检查更新"按钮调这个 —— 手动触发一次检查(manual=true,没新版也给"已最新"反馈)。
+/// 后台 spawn,命令立即返回;结果走 updater://progress 事件给前端 banner / 设置状态显示。
+#[tauri::command]
+fn check_updates_now(app: AppHandle, port: State<'_, SidecarPort>) {
+    let p = port.0;
+    tauri::async_runtime::spawn(async move {
+        check_for_updates(app, p, true).await;
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -296,6 +316,7 @@ pub fn run() {
         // 后下载新 binary;走 feedback-sink 同 host(国内直连稳)
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .invoke_handler(tauri::generate_handler![check_updates_now])
         .setup(|app| {
             // T4 自启 sidecar:动态空闲端口 + headless(GATEWAY_NO_OPEN=1)。
             // 用动态端口后,上次崩溃的孤儿占着旧口也不影响 —— 不在启动时杀(那会跟新 spawn 抢资源),
@@ -305,9 +326,11 @@ pub fn run() {
             // 传 port 进去,download 完了好 POST sidecar /api/updater/installed
             let handle = app.handle().clone();
             let updater_port = port;
+            // 端口存进 state,给设置里"手动检查更新"命令用
+            app.manage(SidecarPort(updater_port));
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(5)).await;
-                check_for_updates(handle, updater_port).await;
+                check_for_updates(handle, updater_port, false).await;
             });
             let sidecar = app
                 .shell()
