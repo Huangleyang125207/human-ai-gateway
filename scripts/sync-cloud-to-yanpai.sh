@@ -36,12 +36,14 @@ echo "→ 用 run id: $RUN_ID"
 echo "→ download to $TMP_DIR..."
 gh run download "$RUN_ID" --dir "$TMP_DIR"
 
-# artifact 解到 $TMP_DIR/Gateway-mac-arm64-X.Y.Z/ 子目录,扁平化方便后面操作
-ART_SUBDIR=$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)
-if [ -n "$ART_SUBDIR" ] && [ "$ART_SUBDIR" != "$TMP_DIR" ]; then
-  mv "$ART_SUBDIR"/* "$TMP_DIR/" 2>/dev/null || true
-  rmdir "$ART_SUBDIR" 2>/dev/null || true
-fi
+# artifact 内部布局随 CI 改过几版(扁平 / Gateway-mac-arm64-X.Y.Z 子目录 / 全路径嵌套)。
+# 不猜布局:三件套各自 find 深挖出来,搬到 TMP_DIR 根。
+for f in Gateway.app.tar.gz Gateway.app.tar.gz.sig latest.json; do
+  HIT=$(find "$TMP_DIR" -type f -name "$f" | head -1)
+  if [ -n "$HIT" ] && [ "$HIT" != "$TMP_DIR/$f" ]; then
+    mv "$HIT" "$TMP_DIR/$f"
+  fi
+done
 
 # 4. 检查关键文件齐
 for f in Gateway.app.tar.gz Gateway.app.tar.gz.sig latest.json; do
