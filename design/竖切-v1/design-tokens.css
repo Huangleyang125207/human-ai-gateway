@@ -1,0 +1,80 @@
+/* ════════════════════════════════════════════════════════════════
+   gateway · design-tokens.css
+   一份变量:纸、墨、朱砂、字阶、间距、动画呼吸
+   ----------------------------------------------------------------
+   气味:暖纸调暗 · 台灯感 · 深夜 11 点低光下舒服
+   原则:md 是真相,这一页是热镜像;AI 是空气不是按钮
+   ════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── 纸 ─────────────────────────────────────────────
+     页面整体就是一张夜里的纸,不存在"卡片浮在背景上"。
+     paper-night 是页底,paper-lamp 是台灯照到的亮处,
+     paper-slip 只给"实体纸条"用(AI 留言、引文小签)。 */
+  --paper-night: oklch(23% 0.012 78);
+  --paper-lamp:  oklch(29% 0.018 82);
+  --paper-slip:  oklch(31% 0.022 86);
+
+  /* ── 墨 ───────────────────────────────────────────── */
+  --ink:        oklch(88% 0.022 90);   /* 正文,人写的字 */
+  --ink-kai:    oklch(82% 0.026 95);   /* AI 的字(配楷体用,略温) */
+  --ink-soft:   oklch(68% 0.018 88);   /* 次级:副题、署名 */
+  --ink-faint:  oklch(52% 0.014 85);   /* 三级:时间、标签、注脚 */
+  --hairline:        oklch(88% 0.022 90 / 0.14);
+  --hairline-strong: oklch(88% 0.022 90 / 0.32);
+
+  /* ── 朱砂 ───────────────────────────────────────────
+     像印章:一页一两处。默认只给印鉴、着重号、选中。 */
+  --cinnabar:       oklch(60% 0.155 33);
+  --cinnabar-soft:  oklch(60% 0.155 33 / 0.78);
+  --cinnabar-faint: oklch(60% 0.155 33 / 0.36);
+  --cinnabar-wash:  oklch(60% 0.155 33 / 0.14);
+
+  /* ── 字 ─────────────────────────────────────────────
+     宋体 = 人的印刷体正文;文楷 = AI 落笔的声音。
+     两位作者,两种笔迹。 */
+  --font-song: "Noto Serif SC", "Songti SC", "SimSun", serif;
+  --font-kai:  "LXGW WenKai", "Kaiti SC", "KaiTi", serif;
+  --font-time: "Noto Serif SC", serif;  /* 时刻用宋体表格数字 */
+
+  /* 字阶(印刷的克制:一页不超过 5 阶) */
+  --fs-canon:   17px;    /* 正文 */
+  --fs-title:   21px;    /* 条目题 */
+  --fs-small:   14px;    /* 署名、副题 */
+  --fs-note:    12.5px;  /* 标签、时刻、注脚 */
+  --fs-banner:  58px;    /* 报头日期 */
+  --leading:    2.05;    /* 正文行距(CJK 夜读,慷慨) */
+  --leading-kai: 1.9;    /* 批注行距 */
+
+  /* ── 度 ───────────────────────────────────────────── */
+  --rail-w: 108px;          /* 时间轴栏宽 */
+  --col-w:  620px;          /* 正文栏宽(约 36 字) */
+  --gap-rail: 30px;         /* 轴线到正文的呼吸 */
+  --block-gap: 3.4rem;      /* 半小时块之间 */
+  --piece-gap: 2.4rem;      /* 同块多条之间 */
+
+  /* ── 呼吸(动画) ────────────────────────────────────
+     方向:墨迹晕开、台灯呼吸、纸页起身。绝不闪烁弹跳。 */
+  --d-ink: 1.1s;                              /* 墨迹晕开 */
+  --d-rise: 0.9s;                             /* 起身入场 */
+  --d-breath: 11s;                            /* 台灯呼吸周期 */
+  --ease-ink: cubic-bezier(0.22, 0.61, 0.21, 1);
+
+  /* ── Tweaks 接口(面板只拨这几个旋钮) ───────────── */
+  --lamp-strength: 1;     /* 灯光亮度 0.6 – 1.3 */
+  --motion: 1;            /* 0 = 静止 */
+}
+
+/* 朱砂剂量 · mark 档:时间与标签也染朱 */
+body[data-cinnabar="mark"] {
+  --tag-ink: var(--cinnabar-soft);
+  --time-ink: var(--cinnabar-soft);
+}
+body {
+  --tag-ink: var(--ink-faint);
+  --time-ink: var(--ink-faint);
+}
+
+/* 字体方案切换 */
+body[data-font-scheme="kai"]  { --font-song: "LXGW WenKai", "Kaiti SC", serif; }
+body[data-font-scheme="song"] { --font-kai: "Noto Serif SC", "Songti SC", serif; }

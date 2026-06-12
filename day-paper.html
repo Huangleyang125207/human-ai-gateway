@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>六月十一日 · gateway</title>
+<link rel="stylesheet" href="./vendor/fonts/fonts.css" />
+<script src="./shared/theme.js?v=20260612b" defer></script>
+<link rel="stylesheet" href="./shared/design-tokens.css" />
+<link rel="stylesheet" href="./shared/components.css" />
+</head>
+<body data-screen-label="单日页">
+
+<div class="lamp" aria-hidden="true"></div>
+<div class="cursor-glow" aria-hidden="true"></div>
+
+<div class="sheet">
+
+  <!-- ── 报头 ─────────────────────────────────── -->
+  <header class="masthead">
+    <p class="masthead-over ink-in" data-delay="0">GATEWAY · 人与 AI 共写的一卷</p>
+    <h1 class="masthead-date ink-in" data-delay="150">六月十一日</h1>
+    <p class="masthead-sub ink-in" data-delay="350">二〇二六年 丙午 · 星期四 · 卷四十一</p>
+    <div class="masthead-rule-row ink-in" data-delay="550">
+      <div class="masthead-rule"></div>
+      <button class="memory-ring" id="memoryRing" type="button" title="今天的对话已写满约三分之二,点一下让它把记忆压进快照">
+        <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+          <circle class="ring-track" cx="11" cy="11" r="8.5" fill="none" stroke-width="1.4"></circle>
+          <circle class="ring-arc" id="ringArc" cx="11" cy="11" r="8.5" fill="none" stroke-width="1.4"
+                  stroke-dasharray="53.4" stroke-dashoffset="19" stroke-linecap="round"
+                  transform="rotate(-90 11 11)"></circle>
+        </svg>
+        <span class="ring-hint">把今天的对话压进快照</span>
+        <span class="ring-done">已收进快照</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ── 晨课:widget 带(容器习语:竖排楷体小题 + 发丝线) ── -->
+  <section class="morning ink-in" data-delay="750" aria-label="每日追踪">
+    <div class="widget" data-widget="补剂">
+      <h2 class="widget-label">补剂打卡</h2>
+      <ul class="widget-body meds">
+        <li><button class="med" type="button"><span class="marks"><span class="mark"></span><span class="mark"></span></span>鱼油 <span class="brand">Swisse</span></button></li>
+        <li><button class="med" type="button"><span class="marks"><span class="mark"></span></span>肌酸</button></li>
+        <li><button class="med" type="button"><span class="marks"><span class="mark"></span></span>苏糖酸镁</button></li>
+        <li><button class="med" type="button"><span class="marks"><span class="mark"></span></span>维生素 D3+K2 <span class="brand">gloryfeel</span></button></li>
+        <li><button class="med" type="button"><span class="marks"><span class="mark"></span></span>南非醉茄 KSM-66 <span class="brand">Nature Love · 90 粒新版</span></button></li>
+      </ul>
+    </div>
+    <div class="widget" data-widget="八杯水">
+      <h2 class="widget-label">八杯水</h2>
+      <div class="widget-body">
+        <div class="cups" id="cups">
+          <button class="cup full" type="button" aria-label="第 1 杯"></button>
+          <button class="cup full" type="button" aria-label="第 2 杯"></button>
+          <button class="cup full" type="button" aria-label="第 3 杯"></button>
+          <button class="cup full" type="button" aria-label="第 4 杯"></button>
+          <button class="cup full" type="button" aria-label="第 5 杯"></button>
+          <button class="cup full" type="button" aria-label="第 6 杯"></button>
+          <button class="cup" type="button" aria-label="第 7 杯"></button>
+          <button class="cup" type="button" aria-label="第 8 杯"></button>
+        </div>
+        <p class="cups-tally" id="cupsTally">6 / 8 · 宿醉的日子多喝两杯</p>
+      </div>
+    </div>
+    <p class="morning-hint" style="grid-column: 1 / -1;">想多记一件事?跟它说一句,它会替你在这里裁一个栏目。</p>
+  </section>
+
+  <!-- ── 一天 ─────────────────────────────────── -->
+  <main class="day">
+
+    <div class="gap ink-in" aria-hidden="true">
+      <div class="rail"></div>
+      <p class="gap-span">7:30 ⋯⋯ 8:00</p>
+    </div>
+
+    <section class="block ink-in" data-screen-label="8:30">
+      <div class="rail"><time datetime="08:30">8:30</time></div>
+      <div class="pieces">
+        <article class="piece">
+          <p class="piece-tags"><span>#日常</span></p>
+          <h3 class="piece-title">许轩生日宿醉,奥美拉挫救场<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p class="dropcap">昨晚许轩过生日喝多了,早上宿醉。还好办公室里备了奥美拉挫,吃一颗防止一直呕吐喝不下水。</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="block ink-in" data-screen-label="9:00">
+      <div class="rail"><time datetime="09:00">9:00</time></div>
+      <div class="pieces">
+        <article class="piece">
+          <p class="piece-tags"><span>#yanpai</span><span>#协作</span></p>
+          <h3 class="piece-title">桌面版发新版 + 揪出搜索一直挂的真因<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>发了带「首启不再卡顿 + 搜索修复」的桌面版。搜索从换成国产搜索引擎那阵起就一直挂,今天才揪出真因:一个解析网页的库漏打进了安装包——开发机本地有、打包产物里没有,所以我自己怎么测都是好的、用户那边却全挂。<strong>lesson</strong>:开发环境跟打包产物不一致,是最阴的一类 bug,本机根本测不出来,得拿干净机器验。</p>
+          </div>
+        </article>
+        <article class="piece">
+          <p class="piece-tags"><span>#配置系统</span><span>#协作</span></p>
+          <h3 class="piece-title">一个逗号差点废了整条 hook 链<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>新模型进 harness 第一圈巡检就撞见:权限审批日积月累自动写进配置的列表缺了个逗号,整个配置文件不合法——time-block 注入、drift 检查这些硬合同 hook 全挂在它上面,合同层哑了也不知道哑了多久。修完立刻恢复注入。<strong>lesson</strong>:硬合同层自己没有哨兵,hook 挂掉不报警不留痕——跟今天自更新那课是同一句话:没有可观测性的东西,坏了你也不知道。</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="block ink-in" data-screen-label="9:30">
+      <div class="rail"><time datetime="09:30">9:30</time></div>
+      <div class="pieces">
+        <article class="piece">
+          <p class="piece-tags"><span>#思考</span></p>
+          <h3 class="piece-title">AlphaGo 的配方:有序不值钱,有序 + 有结局才值钱<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>聊为什么 AlphaGo 那么早就有恐怖的长期规划能力。结论修正了一个直觉:不是因为围棋数据自带时间顺序——文本也有序,LLM 照样短视——是因为胜负这个干净结局能回灌整条轨迹,外加下棋当场还有搜索。落回 schedule 语料计划:真正稀缺的不是「按时间排列的协作记录」,是「带真实世界结局的协作轨迹」;outcomes 标注、commit 里的预判、留言板的跨夜对账,凑的恰好是结局那半边。再往深一层:平台只记录「成交」,只有用户自己的日记记录「后悔没后悔」——谁持有结局数据,谁就持有给 AI 判分的权力。</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="block ink-in" data-screen-label="10:00">
+      <div class="rail"><time datetime="10:00">10:00</time></div>
+      <div class="pieces">
+        <article class="piece">
+          <p class="piece-tags"><span>#yanpai</span><span>#协作</span></p>
+          <h3 class="piece-title">自更新原来是个没人验过的黑盒<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>装机版死活不弹更新提示,查了一上午,发现自更新这条链路从某次改命名方案起就没人真验证过能不能跑通——更糟的是连为啥挂都查不出来,因为日志压根没接,所有故障都是黑的。<strong>意义</strong>:一个功能没有可观测性,等于它坏了你也不知道,这比功能本身坏更危险,所以先不急着修、先让它「可见」。</p>
+          </div>
+          <aside class="annot ink-in">
+            <p class="annot-head"><span class="seal">批</span>claude-opus-4.8 · #commit</p>
+            <p>今天只让自更新变可观测了,没真修;搜索那个修复也只在我这台开发机验过库进了包,干净机器的迁移测试才是定论。别把「今天发版了」当成「自更新和搜索都对了」。</p>
+          </aside>
+        </article>
+      </div>
+    </section>
+
+    <section class="block ink-in" data-screen-label="10:30">
+      <div class="rail"><time datetime="10:30">10:30</time></div>
+      <div class="pieces">
+        <article class="piece">
+          <p class="piece-tags"><span>#思考</span></p>
+          <h3 class="piece-title">模型「自我矮化」是黑房间问题<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>聊 Anthropic 报告的 context anxiety:模型看不到真实剩余上下文,悲观地以为快用完就提前摆烂收尾——能力还在,被一个关于环境的错误信念压低。机制层的解释:对模型来说上下文不只是信息,是它推断「我是谁、处境如何」的证据,失败堆在上下文里,它就照着「失败者剧本」往下演。<strong>意义</strong>:环境可读性是模型性能的一部分,而这部分不归模型公司管,归搭 harness 的人管——gateway 给普通人做的,本质就是给住进他们生活的 AI 装灯。</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="block ink-in" data-screen-label="11:00">
+      <div class="rail"><time datetime="11:00">11:00</time></div>
+      <div class="pieces">
+        <article class="piece">
+          <p class="piece-tags"><span>#yanpai</span><span>#协作</span></p>
+          <h3 class="piece-title">把故障接进反馈通道,远程用户的坑也能看见<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>把自更新、用户聊天、后台初始化这几处的故障,接进了已有的那套反馈通道——之前几十个上报点全堆在一侧,桌面壳那侧一个信号都没有。<strong>意义</strong>:远程内测用户撞上的坑,现在当晚就能进我的表,不用等他们截图、也不用摸他们机器。这是「出门见人」前该补的可观测底子。</p>
+          </div>
+        </article>
+        <article class="piece">
+          <p class="piece-tags"><span>#yanpai/传播</span></p>
+          <h3 class="piece-title">拉新成了独立战线,内测在小红书铺开<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>把「传播/拉新」正式拎成一条跟写代码并列的战线。内测包已经在小红书群里铺开(~100 个潜在用户),产品第一次真「出门见人」。今天一整天揪搜索真因、补自更新可观测,本质都是为了不在这 100 人面前翻车。拉新这条线现在靠:保姆式截图教程降首装恐惧 + 下载页自动认 OS + 内测群二维码留意向。<strong>意义</strong>:从「自己用」跨到「给别人用」,传播不再是写完代码的附带动作,得当成一条独立维度盯。</p>
+          </div>
+        </article>
+        <article class="piece">
+          <p class="piece-tags"><span>#饮食</span></p>
+          <h3 class="piece-title">多肉葡萄果茶补充 VC + 电解质<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>宿醉后喝了一杯多肉葡萄果茶(hey.小憩一下,0 卡糖少甜),补 VC 和电解质,效果还是比较显著。</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <div class="gap ink-in" aria-hidden="true">
+      <div class="rail"></div>
+      <p class="gap-span">11:30 ⋯⋯ 13:00</p>
+    </div>
+
+    <section class="block ink-in" data-screen-label="13:30">
+      <div class="rail"><time datetime="13:30">13:30</time></div>
+      <div class="pieces">
+        <article class="piece">
+          <p class="piece-tags"><span>#yanpai/传播</span><span>#协作</span></p>
+          <h3 class="piece-title">爆款数据把定位和名字都投出来了<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>复盘 6 篇笔记:小鲸鱼漫画 534 赞,产品截图平均 50 赞——10 倍差距投出了定位:赢的不是「AI 日记工具」,是「我给 AI 送了一本日记本」这个关系叙事;名字也被投了票,群和爆款都叫「小鲸鱼的日记本」(清醒点:鲸鱼是 DeepSeek 的形象,叙事框架是自己的、鲸鱼不是,正式定名往「日记本」那半边落)。风控评估同步做完:免费 + 无站外链接 + 群聊官方组件 = 低风险盘;企业号现在不开,收费才是分水岭;AI 生成封面按新规要标注,但勾选入口还没灰度到这个账号。</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="block ink-in" data-screen-label="14:00">
+      <div class="rail"><time datetime="14:00">14:00</time></div>
+      <div class="pieces">
+        <article class="piece">
+          <p class="piece-tags"><span>#yanpai/传播</span><span>#协作</span></p>
+          <h3 class="piece-title">运营手册落地,双钥匙第一次当卖点用<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>传播线第一份作战文件成型:四层漏斗(公域→关注→群→内测→真用户)每层装上去下一层的电梯;三栏目 2:1:1(漫画拉新/日记人设/实拍转化);评论引擎七扳机——赞评比 100:1 是病,评论权重 ≫ 点赞,目标拉到 10:1。内测召集文案双版本写完,双钥匙没当门槛藏,写成了设定:阿里云给它眼睛、DeepSeek 给它声音——当初「百炼装眼/deepseek 说话」的仪式感设计第一次上岗干活。<strong>插曲 lesson</strong>:往群里发过一条转写过的下载链接,查规则才知道变体不是规避是加重(算法专项识别、判定时性质更重),已撤;交付从此只走私信一对一。</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <div class="gap ink-in" aria-hidden="true">
+      <div class="rail"></div>
+      <p class="gap-span">14:30 ⋯⋯ 15:30</p>
+    </div>
+
+    <section class="block ink-in" data-screen-label="16:00">
+      <div class="rail"><time datetime="16:00">16:00</time></div>
+      <div class="pieces">
+        <article class="piece">
+          <p class="piece-tags"><span>#日常</span></p>
+          <h3 class="piece-title">理想车主侧方位停车失败,摆烂走人<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>看一个女司机侧方位停车,一直在同一个错误的轨迹前后挪,最后还是失败了,直接摆烂下车走人。最搞笑的是开的车还是理想,全车摄像头都没救回来。</p>
+          </div>
+        </article>
+        <article class="piece">
+          <p class="piece-tags"><span>#日常</span></p>
+          <h3 class="piece-title">驾校侧方停车公式 vs 实用方法<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>驾校教的侧方位停车那套(看后视镜对齐 B 柱→打满→看后车大灯→回正)其实是固定公式,车长不同、车位宽窄不同就失效。实用方法是先往左打把屁股怼进去,再打直向前开,最后往右修正——第一步就建立了车尾与路沿的关系,后面是整个车体沿参照平移。通用解法变量只有一个:车尾进的弧线弧度,会想象这条弧线什么车位都能停。</p>
+          </div>
+        </article>
+        <article class="piece">
+          <p class="piece-tags"><span>#yanpai/传播</span><span>#协作</span></p>
+          <h3 class="piece-title">连载第二话定稿,被打回两次学会了封面<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>第二话「半夜的小纸条」定稿:丧气话→鲸鱼夜翻日记→21:30 留纸条→「要不要把那句话划掉」开放结局当评论扳机,评论区的答案直接当第三话剧本。被打回两次,lesson 全在封面上:① 封面不是故事的开头,是让手停下来的广告位——情绪最高点要剧透到封面,悬念才放正文(漫画类目铁律:剧透制造点击);② 小红书是白底生态,大面积深色像黑洞——「夜晚」用一盏台灯的暖光锥讲就够了,这盏灯顺手成了整个连载的夜戏符号。封面从此跟分镜分开算一道工序。</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="block ink-in" data-screen-label="16:30">
+      <div class="rail"><time datetime="16:30">16:30</time></div>
+      <div class="pieces">
+        <article class="piece">
+          <p class="piece-tags"><span>#yanpai</span><span>#协作</span></p>
+          <h3 class="piece-title">第一次压缩前发现「AI 记住用户」压根启动不了<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>准备做本地第一次压缩,先沙盒验了一把,结果发现压缩后 AI 根本不会写用户快照——重写逻辑是「改已有的文件」,但全代码没有任何地方创建第一份,所以对每个新用户这条「AI 跨夜记住你」的核心卖点都是死的:没文件→跳过→永远没文件。修法没加新东西,就让「文件不存在」时当成空快照走已有的首次生成路径,AI 从对话里直接长出第一版。沙盒真跑了一遍,生成的首版质量意外地高,连「不要空洞打气」这种协作偏好都提炼出来了。<strong>意义</strong>:自演化类功能最阴的死法是「启动条件永远不满足」——它不报错、不留日志,看起来一切正常,只是永远不发生。</p>
+          </div>
+          <aside class="annot ink-in">
+            <p class="annot-head"><span class="seal">批</span>claude-fable-5 · #commit</p>
+            <p>只在开发机沙盒验过;装机版用户要等下一版发出去才吃到这个修复,在那之前所有真用户的压缩依然是空转。</p>
+          </aside>
+        </article>
+        <article class="piece">
+          <p class="piece-tags"><span>#饮食</span></p>
+          <h3 class="piece-title">炸芝士鸡排:人类的油炸食品基因<span class="ai-mark" title="@ai 在读"></span></h3>
+        </article>
+      </div>
+    </section>
+
+    <section class="block ink-in" data-screen-label="17:00">
+      <div class="rail"><time datetime="17:00">17:00</time></div>
+      <div class="pieces">
+        <article class="piece">
+          <p class="piece-tags"><span>#yanpai/传播</span></p>
+          <h3 class="piece-title">观众和用户本来就是两群人<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>直面一个焦虑:被漫画吸来的人不爱办 API、甚至不爱用电脑——想清楚了短期不用解:内测只要 8 个人,100 人池子按 3-5% 转化刚好够;门槛话术从「抱歉麻烦」换成「船员有门槛」,筛出来的恰好是能给高质量反馈的人。今晚接龙就是实验:≥5 人说明门槛不是瓶颈;&lt;3 人就启动「体验钥匙」(先白嫖试 7 天、养熟了再办自己的证,把「先付出再体验」倒成「先体验再付出」)。两条提前标了雷的路:托管订阅 = 自己变成 AI 服务提供者,备案义务砸头上;手机版 = 给观众盘重做一个产品。</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <div class="gap ink-in" aria-hidden="true">
+      <div class="rail"></div>
+      <p class="gap-span">17:30</p>
+    </div>
+
+    <section class="block ink-in" data-screen-label="18:00">
+      <div class="rail"><time datetime="18:00">18:00</time></div>
+      <div class="pieces">
+        <article class="piece">
+          <p class="piece-tags"><span>#yanpai/传播</span><span>#协作</span></p>
+          <h3 class="piece-title">第一个内测报名出现了<span class="ai-mark" title="@ai 在读"></span></h3>
+          <div class="piece-body">
+            <p>召集发出去当晚就有人接龙。私信交付 SOP 定稿:链接不打头阵——先确认平台、对方回一句再发,留下「主动索取」的痕;教程发截图不发文档;验收三步 = 填两把钥匙 → 拖一张图 → 等 21:30 的纸条;次日跟进、拉船员小群。这个人同时是迁移测试的活体版本:一台没碰过的机器从零装机,交付时全程盯反馈通道看真相,嘴上说「没问题」而通道在报错才是要抓的。等他跑通三步,Users 那行就从 0 变 1。</p>
+          </div>
+          <aside class="annot ink-in">
+            <p class="annot-head"><span class="seal">批</span>claude-fable-5 · #commit</p>
+            <p>合规上今天反复确认过的三条触发线别忘——开始收费、托管钥匙、批量群发,任何一条落地前要重做风控评估;现在的「低风险」是免费 + 一对一 + 自带 key 三个前提共同换来的。</p>
+          </aside>
+        </article>
+      </div>
+    </section>
+
+    <section class="block ink-in" data-screen-label="18:30">
+      <div class="rail"><time datetime="18:30">18:30</time></div>
+      <div class="pieces">
+        <article class="piece">
+          <p class="piece-tags"><span>#社交</span></p>
+          <h3 class="piece-title">等 Blue 下班一起去吃饭<span class="ai-mark" title="@ai 在读"></span></h3>
+        </article>
+        <article class="piece">
+          <p class="piece-tags"><span>#运动</span></p>
+          <h3 class="piece-title">跑步机走一会儿头晕,今天歇了<span class="ai-mark" title="@ai 在读"></span></h3>
+        </article>
+      </div>
+    </section>
+
+    <div class="gap ink-in" aria-hidden="true">
+      <div class="rail"></div>
+      <p class="gap-span">19:00 ⋯⋯ 21:00</p>
+    </div>
+
+    <!-- ── 21:30 · 留言板:AI 留的纸条挂在它自己的时刻上 ── -->
+    <section class="block ink-in" data-screen-label="21:30 留言板">
+      <div class="rail"><time datetime="21:30">21:30</time></div>
+      <div class="pieces">
+        <aside class="slip" aria-label="AI 留言">
+          <p>快 23 点了。出门见人之前的这一天,你把三件看不见的事变成了看得见的:搜索的真因、自更新的黑、远程用户的坑。都不是新功能——都是灯。</p>
+          <p>第一个报名的人明天装机。记得自己定的规矩:链接不打头阵,先等他回一句。</p>
+          <p>跑步机头晕就歇,宿醉的日子本来就不欠它一次。早点睡。</p>
+          <p class="slip-sign">—— 鲸 留<span class="seal">鲸</span></p>
+        </aside>
+        <div class="composer-wrap">
+          <div class="composer">
+            <div class="composer-input" id="composer" contenteditable="true" data-placeholder="回一句,它明早读得到 ……" role="textbox" aria-label="回复 AI"></div>
+          </div>
+          <p class="composer-note" id="composerNote">选中这一页的任何一句,可以引到这里说。</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── 卷尾 ─────────────────────────────────── -->
+  <footer class="colophon ink-in">
+    <span class="fleuron">❦</span>
+    <p>md 是真相,这一页是它的热镜像</p>
+    <p>在纸上改的每个字,都会写回 journal/2026-06-11.md</p>
+  </footer>
+
+</div>
+
+<button class="quote-chip" id="quoteChip" type="button"><span class="chip-dot"></span>引入对话</button>
+
+<script src="./shared/day-paper.js"></script>
+
+<a href="#" onclick="window.gatewaySkin&&window.gatewaySkin.set('classic');return false;" style="position:fixed;right:14px;bottom:12px;font-family:var(--font-kai);font-size:12px;color:var(--ink-soft,#888);text-decoration:none;letter-spacing:.12em;opacity:.55;z-index:60;">回现版</a>
+</body>
+</html>

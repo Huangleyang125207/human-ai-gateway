@@ -1,0 +1,495 @@
+/* ════════════════════════════════════════════════════════════════
+   gateway · components.css
+   报头 / 晨课(widget 习语) / 时间轴 / 条目 / AI 批注 / 纸条 / 留言板
+   ----------------------------------------------------------------
+   widget 容器规范(给未来长出来的、我们想不到的 widget):
+   1. 竖排楷体小题 + 一根发丝线,立在内容左侧 —— 这是 widget 的
+      全部"边界",没有底色、没有圆角框、没有投影
+   2. 内容像排字一样直接落在纸上,与正文共用墨色与字阶
+   3. 任何 widget 都可被 @ 进对话;不画按钮,选中即引用
+   ════════════════════════════════════════════════════════════════ */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scrollbar-color: var(--hairline-strong) transparent; }
+
+body {
+  background: var(--paper-night);
+  color: var(--ink);
+  font-family: var(--font-song);
+  font-size: var(--fs-canon);
+  line-height: var(--leading);
+  font-kerning: normal;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: var(--cinnabar-wash);
+  color: var(--ink);
+}
+
+a { color: inherit; }
+
+/* ── 台灯 ─────────────────────────────────────────── */
+.lamp {
+  position: fixed; inset: 0; z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(120vh 85vh at 50% -12vh,
+      oklch(31% 0.02 84 / calc(0.95 * var(--lamp-strength))),
+      transparent 72%);
+}
+.lamp::after {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(ellipse 90% 75% at 50% 36%,
+    transparent 52%, oklch(10% 0.01 78 / 0.4) 100%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html.has-js body:not([data-motion="off"]) .lamp {
+    animation: lamp-breath var(--d-breath) ease-in-out infinite;
+  }
+}
+@keyframes lamp-breath {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.82; }
+}
+
+/* 纸的颗粒 */
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: 4;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* 光标的气息 —— AI 在纸下呼吸,跟着手走 */
+.cursor-glow {
+  position: fixed; left: 0; top: 0; z-index: 0;
+  width: 640px; height: 640px;
+  margin: -320px 0 0 -320px;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(closest-side,
+    oklch(90% 0.03 90 / 0.05), transparent 70%);
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+html.has-js body:not([data-motion="off"]) .cursor-glow.awake { opacity: 1; }
+
+/* ── 页面骨架 ─────────────────────────────────────── */
+.sheet {
+  width: min(92vw, calc(var(--rail-w) + var(--gap-rail) + var(--col-w)));
+  margin: 0 auto;
+  padding: 9vh 0 18vh;
+  position: relative; z-index: 1;
+}
+
+/* ── 报头 ─────────────────────────────────────────── */
+.masthead { text-align: center; }
+.masthead-over {
+  font-size: var(--fs-note);
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;        /* 抵掉末字距,真正居中 */
+  color: var(--ink-faint);
+  font-family: var(--font-song);
+}
+.masthead-date {
+  margin-top: 1.6rem;
+  font-size: var(--fs-banner);
+  font-weight: 900;
+  letter-spacing: 0.13em;
+  line-height: 1.2;
+  color: var(--ink);
+}
+.masthead-sub {
+  margin-top: 1.1rem;
+  font-size: var(--fs-small);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: var(--ink-soft);
+}
+.masthead-rule {
+  margin: 2.4rem auto 0;
+  width: 100%;
+  border-top: 1px solid var(--hairline-strong);
+  border-bottom: 1px solid var(--hairline);
+  height: 4px;
+}
+/* 压缩圆环:对话记忆的小指示,住在报头规线右端 */
+.masthead-rule-row {
+  position: relative;
+}
+.memory-ring {
+  position: absolute; right: 0; top: 50%;
+  transform: translateY(-58%);
+  background: var(--paper-night);
+  padding: 0 0 0 12px;
+  border: none; cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  color: var(--ink-faint);
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+}
+.memory-ring svg { display: block; }
+.memory-ring .ring-track { stroke: var(--hairline-strong); }
+.memory-ring .ring-arc {
+  stroke: var(--cinnabar-soft);
+  transition: stroke-dashoffset 1.4s var(--ease-ink);
+}
+.memory-ring .ring-hint {
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.memory-ring:hover .ring-hint { opacity: 1; }
+.memory-ring .ring-done { display: none; }
+.memory-ring.compressed .ring-hint { display: none; }
+.memory-ring.compressed .ring-done { display: inline; opacity: 1; }
+
+/* ── 晨课(widget 带) ─────────────────────────────── */
+.morning {
+  margin-top: 3.2rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3.5rem;
+}
+.widget {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 18px;
+  align-items: start;
+}
+.widget-label {
+  writing-mode: vertical-rl;
+  font-family: var(--font-kai);
+  font-size: var(--fs-small);
+  letter-spacing: 0.45em;
+  color: var(--ink-soft);
+  padding-left: 12px;
+  border-left: 1px solid var(--hairline-strong);
+  min-height: 5.2em;
+}
+.widget-body { padding-top: 2px; }
+
+/* 八杯水 */
+.cups { display: flex; gap: 11px; padding-top: 6px; }
+.cup {
+  width: 23px; height: 23px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 52% 46% 50% 48%;
+  background: none; cursor: pointer;
+  position: relative;
+  transition: border-color 0.4s ease;
+}
+.cup:nth-child(2n) { border-radius: 47% 53% 45% 52%; }
+.cup::after {
+  content: ""; position: absolute; inset: 3px;
+  border-radius: inherit;
+  background: radial-gradient(circle at 38% 32%, var(--ink-soft), oklch(60% 0.015 88 / 0.75));
+  opacity: 0; transform: scale(0.4);
+  transition: opacity var(--d-ink) var(--ease-ink), transform var(--d-ink) var(--ease-ink);
+}
+.cup.full::after { opacity: 0.92; transform: scale(1); }
+.cup:hover { border-color: var(--ink-faint); }
+.cups-tally {
+  margin-top: 0.9rem;
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 补剂 */
+.meds { list-style: none; display: grid; gap: 0.55rem; }
+.med {
+  display: flex; align-items: baseline; gap: 0.7em;
+  background: none; border: none; cursor: pointer;
+  font: inherit; text-align: left;
+  font-size: 15px;
+  color: var(--ink-soft);
+  transition: color 0.5s ease;
+}
+.med .marks { display: inline-flex; gap: 5px; transform: translateY(1px); }
+.med .mark {
+  width: 11px; height: 11px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 50%;
+  position: relative;
+}
+.med .mark::after {
+  content: ""; position: absolute; inset: 1.5px;
+  border-radius: 50%;
+  background: var(--ink-soft);
+  opacity: 0; transform: scale(0.3);
+  transition: opacity var(--d-ink) var(--ease-ink), transform var(--d-ink) var(--ease-ink);
+}
+.med .mark.done::after { opacity: 0.9; transform: scale(1); }
+.med.alldone { color: var(--ink); }
+.med .brand { font-size: var(--fs-note); color: var(--ink-faint); }
+
+/* widget 生长暗示 —— 不是按钮,是一句话 */
+.morning-hint {
+  margin-top: 2.2rem;
+  text-align: center;
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+  letter-spacing: 0.14em;
+  color: var(--ink-faint);
+}
+
+/* ── 一天 · 时间轴 ────────────────────────────────── */
+.day {
+  margin-top: 4.6rem;
+}
+.block,
+.gap {
+  display: grid;
+  grid-template-columns: var(--rail-w) 1fr;
+}
+.rail {
+  border-right: 1px solid var(--hairline);
+  padding-right: var(--gap-rail);
+  text-align: right;
+}
+.rail time {
+  display: block;
+  position: sticky; top: 28px;
+  font-family: var(--font-time);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--time-ink);
+  line-height: 1;
+  padding-top: 0.55em; /* 与条目题首行对齐 */
+}
+/* 轴上的刻度 */
+.rail time::after {
+  content: ""; position: absolute;
+  right: calc(-1 * var(--gap-rail) - 5px);
+  top: calc(0.55em + 0.5em);
+  width: 10px; height: 1px;
+  background: var(--hairline-strong);
+}
+.pieces {
+  padding-left: var(--gap-rail);
+  padding-bottom: var(--block-gap);
+  display: grid;
+  gap: var(--piece-gap);
+  max-width: var(--col-w);
+}
+
+/* 空白时段:轴变虚,一行小字带过 */
+.gap .rail { border-right: 1px dotted var(--hairline); }
+.gap-span {
+  padding: 0.6rem var(--gap-rail) 2.6rem;
+  font-size: var(--fs-note);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+}
+
+/* ── 条目 ─────────────────────────────────────────── */
+.piece-tags {
+  font-size: var(--fs-note);
+  letter-spacing: 0.1em;
+  color: var(--tag-ink);
+  display: flex; gap: 1.1em;
+  margin-bottom: 0.45rem;
+}
+.piece-title {
+  font-size: var(--fs-title);
+  font-weight: 600;
+  line-height: 1.55;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  display: flex; align-items: baseline; gap: 0.55em;
+}
+/* @ai —— 不是按钮,是一粒会呼吸的朱点:它在读 */
+.ai-mark {
+  flex: none;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--cinnabar-faint);
+  transform: translateY(-3px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html.has-js body:not([data-motion="off"]) .ai-mark {
+    animation: ai-breath 7s ease-in-out infinite;
+  }
+}
+@keyframes ai-breath {
+  0%, 100% { background: var(--cinnabar-faint); }
+  50%      { background: var(--cinnabar-soft); }
+}
+.piece-body { margin-top: 0.75rem; display: grid; gap: 1em; }
+.piece-body p { text-wrap: pretty; }
+strong {
+  font-weight: 600;
+  color: var(--ink);
+  text-emphasis: filled dot var(--cinnabar-soft);
+  text-emphasis-position: over right;
+}
+
+/* 全天第一段的字头 */
+.dropcap::first-letter {
+  font-family: var(--font-kai);
+  font-size: 3.05em;
+  line-height: 1;
+  float: left;
+  padding: 0.08em 0.18em 0 0;
+  color: var(--ink);
+}
+
+/* ── AI 批注(#commit)──────────────────────────────
+   夹批:楷体、缩一格、不画框。AI 的字迹本身就是边界。 */
+.annot {
+  margin-top: 0.4rem;
+  padding-left: 1.6em;
+  font-family: var(--font-kai);
+  font-size: 15.5px;
+  line-height: var(--leading-kai);
+  color: var(--ink-kai);
+  text-wrap: pretty;
+}
+.annot-head {
+  display: flex; align-items: center; gap: 0.6em;
+  margin-bottom: 0.35rem;
+  font-size: var(--fs-note);
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+}
+.seal {
+  flex: none;
+  width: 17px; height: 17px;
+  display: inline-grid; place-items: center;
+  font-family: var(--font-kai);
+  font-size: 11px; line-height: 1;
+  color: var(--cinnabar);
+  border: 1px solid var(--cinnabar-faint);
+  border-radius: 2px;
+  transform: rotate(-2deg);
+  background: var(--cinnabar-wash);
+}
+
+/* ── 21:30 的纸条 ─────────────────────────────────── */
+.slip {
+  background:
+    linear-gradient(oklch(88% 0.022 90 / 0.025), transparent 32%),
+    var(--paper-slip);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 3px 26px oklch(8% 0.01 78 / 0.42);
+  padding: 2.1rem 2.4rem 1.8rem;
+  transform: rotate(-0.45deg);
+  font-family: var(--font-kai);
+  font-size: 16.5px;
+  line-height: var(--leading-kai);
+  color: var(--ink-kai);
+  max-width: 34em;
+}
+.slip p + p { margin-top: 0.9em; }
+.slip-sign {
+  margin-top: 1.4rem;
+  display: flex; justify-content: flex-end; align-items: center; gap: 0.7em;
+  font-size: var(--fs-small);
+  color: var(--ink-soft);
+}
+
+/* ── 留言板 · 回一句 ──────────────────────────────── */
+.composer {
+  margin-top: 0.4rem;
+  max-width: 34em;
+  display: flex; align-items: flex-end; gap: 1em;
+}
+.composer-input {
+  flex: 1;
+  min-height: 1.8em;
+  padding: 0.2em 0.1em;
+  border-bottom: 1px solid var(--hairline-strong);
+  font-family: var(--font-kai);
+  font-size: 16px;
+  line-height: 1.8;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.6s ease;
+}
+.composer-input:focus { border-color: var(--ink-faint); }
+.composer-input:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink-faint);
+}
+.composer-note {
+  margin-top: 0.8rem;
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+  letter-spacing: 0.08em;
+}
+
+/* 选中文字 → 引入对话(@引用 的入口) */
+.quote-chip {
+  position: absolute; z-index: 9;
+  display: flex; align-items: center; gap: 0.5em;
+  background: var(--paper-slip);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: 0 2px 14px oklch(8% 0.01 78 / 0.45);
+  padding: 5px 12px;
+  font-family: var(--font-kai);
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--ink-soft);
+  cursor: pointer;
+  opacity: 0;
+  filter: blur(5px);
+  pointer-events: none;
+  transition: opacity 0.45s var(--ease-ink), filter 0.45s var(--ease-ink);
+}
+.quote-chip.show { opacity: 1; filter: blur(0); pointer-events: auto; }
+.quote-chip .chip-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--cinnabar-soft);
+}
+.quote-chip:hover { color: var(--ink); }
+
+/* ── 卷尾 ─────────────────────────────────────────── */
+.colophon {
+  margin-top: 7rem;
+  text-align: center;
+  font-size: var(--fs-note);
+  letter-spacing: 0.14em;
+  color: var(--ink-faint);
+  line-height: 2.2;
+}
+.colophon .fleuron {
+  display: block;
+  color: var(--cinnabar-faint);
+  font-size: 15px;
+  margin-bottom: 1.2rem;
+  letter-spacing: 0.6em;
+  text-indent: 0.6em;
+}
+
+/* ── 入场:墨迹落纸 ────────────────────────────────
+   基线即终态;只有 JS 在场 + 允许动效时才从隐去起笔 */
+@media (prefers-reduced-motion: no-preference) {
+  html.has-js body:not([data-motion="off"]):not([data-frozen]) .ink-in {
+    opacity: 0;
+    filter: blur(7px);
+    transform: translateY(7px);
+    transition:
+      opacity var(--d-rise) var(--ease-ink),
+      filter var(--d-ink) var(--ease-ink),
+      transform var(--d-rise) var(--ease-ink);
+  }
+  html.has-js body:not([data-motion="off"]):not([data-frozen]) .ink-in.is-in {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+  }
+}
+
+/* ── 窄窗 ─────────────────────────────────────────── */
+@media (max-width: 760px) {
+  :root { --rail-w: 60px; --gap-rail: 18px; --fs-banner: 40px; }
+  .morning { grid-template-columns: 1fr; gap: 2.4rem; }
+  .slip { padding: 1.6rem 1.4rem; }
+}

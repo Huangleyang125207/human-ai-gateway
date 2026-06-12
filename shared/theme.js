@@ -25,7 +25,7 @@
     "history.html": "history-paper.html",
     "": "index-paper.html",            // 根路径 = index
   };
-  var PAPER_READY = [];  // P2 组装一页加一页(竖切 markup 等 cd 重发,见 spec Findings)
+  var PAPER_READY = ["day-paper.html"];  // P2 组装一页加一页
 
   function pageName() {
     var p = location.pathname.split("/").pop() || "";
