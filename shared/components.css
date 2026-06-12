@@ -1,0 +1,1900 @@
+/* ════════════════════════════════════════════════════════════════
+   gateway · components.css · v2
+   报头 / 晨课(widget 习语) / 时间轴 / 条目 / AI 批注 / 纸条 / 留言板
+   + 写操作习语:行内改稿 / 划掉收纸 / 拖图贴纸 / 晨课管理 / 落一笔
+   ----------------------------------------------------------------
+   规矩:本文件不出现任何裸色值,所有颜色/阴影/光晕取自 design-tokens.css
+   ----------------------------------------------------------------
+   widget 容器规范(给未来长出来的、我们想不到的 widget):
+   1. 竖排楷体小题 + 一根发丝线,立在内容左侧 —— 这是 widget 的
+      全部"边界",没有底色、没有圆角框、没有投影
+   2. 内容像排字一样直接落在纸上,与正文共用墨色与字阶
+   3. 任何 widget 都可被 @ 进对话;不画按钮,选中即引用
+   4. 管理态:竖题下浮一个楷体小字「理」,进入后可添行、划掉、换记号
+   ----------------------------------------------------------------
+   写操作习语(纸的做法,不是工具的做法):
+   · 改稿 —— 点进散文直接写;稿纸格浮现,页边竖落一个「改」,
+     收笔时「收墨」一闪,字落回纸上
+   · 划掉 —— 删除不是垃圾桶,是先用朱砂划一道(可撤回),
+     再「收起」让那段纸折叠离场
+   · 贴纸 —— 拖图进来:纸上先浮出一块裁好的位置;落下后
+     等它抠图(墨色未定的呼吸);好了就是一张白边贴纸
+   · 落一笔 —— 空白时段虚线处浮出「落一笔」,点下去长出新条目
+   ════════════════════════════════════════════════════════════════ */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scrollbar-color: var(--hairline-strong) transparent; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-song);
+  font-size: var(--fs-canon);
+  line-height: var(--leading);
+  font-kerning: normal;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: var(--cinnabar-wash);
+  color: var(--ink);
+}
+
+a { color: inherit; }
+
+/* ── 台灯 ─────────────────────────────────────────── */
+.lamp {
+  position: fixed; inset: 0; z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(120vh 85vh at 50% -12vh, var(--lamp-glow), transparent 72%);
+}
+.lamp::after {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(ellipse 90% 75% at 50% 36%,
+    transparent 52%, var(--vignette) 100%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html.has-js body:not([data-motion="off"]) .lamp {
+    animation: lamp-breath var(--d-breath) ease-in-out infinite;
+  }
+}
+@keyframes lamp-breath {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: var(--breath-dim, 0.82); }
+}
+
+/* 纸的颗粒 */
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: 4;
+  pointer-events: none;
+  opacity: var(--grain-o);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* 光标的气息 —— AI 在纸下呼吸,跟着手走 */
+.cursor-glow {
+  position: fixed; left: 0; top: 0; z-index: 0;
+  width: 640px; height: 640px;
+  margin: -320px 0 0 -320px;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--cursor-breath), transparent 70%);
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+html.has-js body:not([data-motion="off"]) .cursor-glow.awake { opacity: 1; }
+
+/* ── 页面骨架 ─────────────────────────────────────── */
+.sheet {
+  width: min(92vw, calc(var(--rail-w) + var(--gap-rail) + var(--col-w)));
+  margin: 0 auto;
+  padding: 9vh 0 18vh;
+  position: relative; z-index: 1;
+}
+
+/* ── 报头 ─────────────────────────────────────────── */
+.masthead { text-align: center; }
+.masthead-over {
+  font-size: var(--fs-note);
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: var(--ink-faint);
+  font-family: var(--font-song);
+}
+.masthead-date {
+  margin-top: 1.6rem;
+  font-size: var(--fs-banner);
+  font-weight: 900;
+  letter-spacing: 0.13em;
+  line-height: 1.2;
+  color: var(--ink);
+}
+.masthead-sub {
+  margin-top: 1.1rem;
+  font-size: var(--fs-small);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: var(--ink-soft);
+}
+.masthead-rule {
+  margin: 2.4rem auto 0;
+  width: 100%;
+  border-top: 1px solid var(--hairline-strong);
+  border-bottom: 1px solid var(--hairline);
+  height: 4px;
+}
+.masthead-rule-row { position: relative; }
+
+/* 压缩圆环:对话记忆的小指示,住在报头规线右端 */
+.memory-ring {
+  position: absolute; right: 0; top: 50%;
+  transform: translateY(-58%);
+  background: var(--paper);
+  padding: 0 0 0 12px;
+  border: none; cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  color: var(--ink-faint);
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+}
+.memory-ring svg { display: block; }
+.memory-ring .ring-track { stroke: var(--hairline-strong); }
+.memory-ring .ring-arc {
+  stroke: var(--cinnabar-soft);
+  transition: stroke-dashoffset 1.4s var(--ease-ink);
+}
+.memory-ring .ring-hint { opacity: 0; transition: opacity 0.5s ease; }
+.memory-ring:hover .ring-hint { opacity: 1; }
+.memory-ring .ring-done { display: none; }
+.memory-ring.compressed .ring-hint { display: none; }
+.memory-ring.compressed .ring-done { display: inline; opacity: 1; }
+
+/* 昼夜:住在规线左端,跟圆环对仗。点「昼」或「夜」定调,
+   再点一次当前的,回到跟随系统(两个字都半墨) */
+.mode-toggle {
+  position: absolute; left: 0; top: 50%;
+  transform: translateY(-58%);
+  background: var(--paper);
+  padding: 0 12px 0 0;
+  border: none; cursor: pointer;
+  display: flex; align-items: center; gap: 0.55em;
+  font-family: var(--font-kai);
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+.mode-toggle .mt-opt { transition: color 0.5s ease; }
+.mode-toggle .mt-dot { font-size: 9px; }
+.mode-toggle[data-mode="day"] .mt-day,
+.mode-toggle[data-mode="night"] .mt-night { color: var(--ink); }
+.mode-toggle:hover .mt-opt { color: var(--ink-soft); }
+.mode-toggle[data-mode="day"]:hover .mt-day,
+.mode-toggle[data-mode="night"]:hover .mt-night { color: var(--ink); }
+
+/* ── 晨课(widget 带) ─────────────────────────────── */
+.morning {
+  margin-top: 3.2rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3.5rem;
+}
+.widget {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 18px;
+  align-items: start;
+}
+.widget-side {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  border-left: 1px solid var(--hairline-strong);
+  padding-left: 12px;
+}
+.widget-label {
+  writing-mode: vertical-rl;
+  font-family: var(--font-kai);
+  font-size: var(--fs-small);
+  letter-spacing: 0.45em;
+  color: var(--ink-soft);
+  min-height: 5.2em;
+}
+.widget-manage {
+  writing-mode: vertical-rl;
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai);
+  font-size: 12px;
+  color: var(--cinnabar-soft);
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.widget:hover .widget-manage,
+.widget.managing .widget-manage { opacity: 0.75; }
+/* v1 兼容:label 直接作为 widget 子元素时自带发丝线 */
+.widget > .widget-label {
+  border-left: 1px solid var(--hairline-strong);
+  padding-left: 12px;
+}
+.widget-body { padding-top: 2px; }
+
+/* 八杯水 */
+.cups { display: flex; gap: 11px; padding-top: 6px; }
+.cup {
+  width: 23px; height: 23px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 52% 46% 50% 48%;
+  background: none; cursor: pointer;
+  position: relative;
+  transition: border-color 0.4s ease;
+}
+.cup:nth-child(2n) { border-radius: 47% 53% 45% 52%; }
+.cup::after {
+  content: ""; position: absolute; inset: 3px;
+  border-radius: inherit;
+  background: var(--cup-fill);
+  opacity: 0; transform: scale(0.4);
+  transition: opacity var(--d-ink) var(--ease-ink), transform var(--d-ink) var(--ease-ink);
+}
+.cup.full::after { opacity: 0.92; transform: scale(1); }
+.cup:hover { border-color: var(--ink-faint); }
+.cups-tally {
+  margin-top: 0.9rem;
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  display: flex; align-items: baseline; gap: 1em;
+}
+.cups-edit { display: none; gap: 0.8em; }
+.widget.managing .cups-edit { display: inline-flex; }
+.cups-edit button {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai); font-size: 12px;
+  color: var(--cinnabar-soft);
+}
+
+/* 补剂 */
+.meds { list-style: none; display: grid; gap: 0.55rem; }
+.med-row { display: flex; align-items: baseline; gap: 0.6em; }
+.med {
+  display: flex; align-items: baseline; gap: 0.7em;
+  background: none; border: none; cursor: pointer;
+  font: inherit; text-align: left;
+  font-size: 15px;
+  color: var(--ink-soft);
+  transition: color 0.5s ease, opacity 0.6s ease;
+}
+.med .marks { display: inline-flex; gap: 5px; transform: translateY(1px); }
+.med .mark {
+  width: 11px; height: 11px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 50%;
+  position: relative;
+  transition: border-radius 0.4s ease, transform 0.4s ease;
+}
+.med .mark[data-shape="square"]  { border-radius: 2px; }
+.med .mark[data-shape="diamond"] { border-radius: 2px; transform: rotate(45deg) scale(0.92); }
+.med .mark::after {
+  content: ""; position: absolute; inset: 1.5px;
+  border-radius: inherit;
+  background: var(--mark-fill);
+  opacity: 0; transform: scale(0.3);
+  transition: opacity var(--d-ink) var(--ease-ink), transform var(--d-ink) var(--ease-ink);
+}
+.med .mark.done::after { opacity: 0.9; transform: scale(1); }
+.med.alldone { color: var(--ink); }
+.med .brand { font-size: var(--fs-note); color: var(--ink-faint); }
+
+/* 晨课管理态:行尾浮「划」,列尾长出「添一行」的基线 */
+.med-x {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai); font-size: 12px;
+  color: var(--cinnabar-faint);
+  opacity: 0;
+  transition: opacity 0.4s ease, color 0.4s ease;
+}
+.widget.managing .med-row:hover .med-x { opacity: 1; }
+.med-x:hover { color: var(--cinnabar); }
+.med-row.struck .med {
+  opacity: 0.4;
+  text-decoration: line-through;
+  text-decoration-color: var(--cinnabar-soft);
+  text-decoration-thickness: 1px;
+}
+.med-add { display: none; }
+.widget.managing .med-add { display: block; }
+.med-add-line {
+  min-width: 11em;
+  padding: 0.1em 0.05em;
+  border-bottom: 1px solid var(--hairline);
+  font-family: var(--font-kai);
+  font-size: 14px;
+  color: var(--ink-soft);
+  outline: none;
+}
+.med-add-line:focus { border-color: var(--hairline-strong); }
+.med-add-line:empty::before { content: attr(data-placeholder); color: var(--ink-faint); }
+.widget.managing .med .mark { box-shadow: 0 0 0 3px var(--cinnabar-wash); cursor: pointer; }
+
+/* widget 生长暗示 —— 不是按钮,是一句话 */
+.morning-hint {
+  margin-top: 2.2rem;
+  text-align: center;
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+  letter-spacing: 0.14em;
+  color: var(--ink-faint);
+}
+
+/* ── 一天 · 时间轴 ────────────────────────────────── */
+.day { margin-top: 4.6rem; }
+.block,
+.gap {
+  display: grid;
+  grid-template-columns: var(--rail-w) 1fr;
+}
+.rail {
+  border-right: 1px solid var(--hairline);
+  padding-right: var(--gap-rail);
+  text-align: right;
+}
+.rail time {
+  display: block;
+  position: sticky; top: 28px;
+  font-family: var(--font-time);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--time-ink);
+  line-height: 1;
+  padding-top: 0.55em;
+}
+.rail time::after {
+  content: ""; position: absolute;
+  right: calc(-1 * var(--gap-rail) - 5px);
+  top: calc(0.55em + 0.5em);
+  width: 10px; height: 1px;
+  background: var(--hairline-strong);
+}
+.pieces {
+  padding-left: var(--gap-rail);
+  padding-bottom: var(--block-gap);
+  display: grid;
+  gap: var(--piece-gap);
+  max-width: var(--col-w);
+}
+
+/* 空白时段:轴变虚。悬停浮出「落一笔」 */
+.gap .rail { border-right: 1px dotted var(--hairline); }
+.gap-span {
+  padding: 0.6rem var(--gap-rail) 2.6rem;
+  font-size: var(--fs-note);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+  display: flex; align-items: baseline; gap: 1.4em;
+}
+.gap-add {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+  letter-spacing: 0.1em;
+  color: var(--cinnabar-soft);
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.gap:hover .gap-add, .gap-add:focus { opacity: 1; }
+
+/* ── 条目 ─────────────────────────────────────────── */
+.piece { position: relative; }
+.piece-tags {
+  font-size: var(--fs-note);
+  letter-spacing: 0.1em;
+  color: var(--tag-ink);
+  display: flex; gap: 1.1em;
+  margin-bottom: 0.45rem;
+}
+.piece-title {
+  font-size: var(--fs-title);
+  font-weight: 600;
+  line-height: 1.55;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  display: flex; align-items: baseline; gap: 0.55em;
+}
+/* @ai —— 不是按钮,是一粒会呼吸的朱点:它在读 */
+.ai-mark {
+  flex: none;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--cinnabar-faint);
+  transform: translateY(-3px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html.has-js body:not([data-motion="off"]) .ai-mark {
+    animation: ai-breath 7s ease-in-out infinite;
+  }
+}
+@keyframes ai-breath {
+  0%, 100% { background: var(--cinnabar-faint); }
+  50%      { background: var(--cinnabar-soft); }
+}
+.piece-body {
+  margin-top: 0.75rem;
+  display: flow-root; /* 普通流:贴纸 float 环绕正文;flow-root 防浮动溢出 */
+}
+.piece-body p + p { margin-top: 1em; }
+.piece-body p { text-wrap: pretty; }
+strong {
+  font-weight: 600;
+  color: var(--ink);
+  text-emphasis: filled dot var(--cinnabar-soft);
+  text-emphasis-position: over right;
+}
+
+/* 全天第一段的字头 */
+.dropcap::first-letter {
+  font-family: var(--font-kai);
+  font-size: 3.05em;
+  line-height: 1;
+  float: left;
+  padding: 0.08em 0.18em 0 0;
+  color: var(--ink);
+}
+
+/* ── 改稿(行内编辑) ──────────────────────────────
+   点进散文直接写。编辑中浮出稿纸格,页边竖落「改」;
+   收笔时页边「收墨」一闪——这是"已写回 md"的全部仪式 */
+.editable { cursor: text; }
+.editable[contenteditable="true"] {
+  outline: none;
+  caret-color: var(--cinnabar);
+  background-image: repeating-linear-gradient(to bottom,
+    transparent 0 calc(1lh - 1px), var(--hairline) calc(1lh - 1px) 1lh);
+}
+/* 空占位:新条目、添行等可编辑元素的淡字提示 */
+.editable:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink-faint);
+  font-weight: 400;
+}
+
+/* 整天未落笔时,唯一的一段长虚线——唯一的动作不藏在悬停里 */
+.gap-tall .rail { min-height: 26vh; }
+.gap-tall .gap-add { opacity: 0.85; }
+
+.piece-note {
+  position: absolute;
+  left: calc(-1 * var(--gap-rail));
+  width: var(--gap-rail);
+  top: 0.3em;
+  text-align: center;
+  writing-mode: vertical-rl;
+  font-family: var(--font-kai);
+  font-size: 12px;
+  letter-spacing: 0.25em;
+  color: var(--cinnabar-soft);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.piece.editing .piece-note { opacity: 0.9; }
+.piece.saved .piece-note { animation: note-fade 2.2s var(--ease-ink) forwards; }
+@keyframes note-fade {
+  0%   { opacity: 0; filter: blur(4px); }
+  18%  { opacity: 0.95; filter: blur(0); }
+  70%  { opacity: 0.95; }
+  100% { opacity: 0; }
+}
+
+/* ── 划掉 · 收纸(删除) ───────────────────────────
+   没有垃圾桶。第一步:朱砂划一道,还在纸上,可撤回;
+   第二步:「收起」,那段纸折叠离场 = md 里删去 */
+.strike-aff {
+  flex: none;
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai);
+  font-size: 13px;
+  color: var(--cinnabar-faint);
+  opacity: 0;
+  transform: translateY(-1px);
+  transition: opacity 0.5s ease, color 0.4s ease;
+}
+.piece:hover .strike-aff, .strike-aff:focus { opacity: 0.8; }
+.strike-aff:hover { color: var(--cinnabar); }
+.piece.struck .piece-title,
+.piece.struck .piece-body p {
+  text-decoration: line-through;
+  text-decoration-color: var(--cinnabar-soft);
+  text-decoration-thickness: 1px;
+}
+.piece.struck > *:not(.strike-actions) { opacity: 0.45; }
+.piece.struck .strike-aff { display: none; }
+.strike-actions {
+  display: none;
+  justify-content: flex-end; align-items: baseline; gap: 1.2em;
+  margin-top: 0.6rem;
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+}
+.piece.struck .strike-actions { display: flex; }
+.strike-actions button {
+  background: none; border: none; cursor: pointer;
+  font: inherit;
+  color: var(--cinnabar-soft);
+}
+.strike-actions button:hover { color: var(--cinnabar); }
+.piece.folding {
+  transform-origin: 50% 0;
+  transition: opacity 0.8s var(--ease-ink), transform 0.8s var(--ease-ink);
+  opacity: 0;
+  transform: rotateX(68deg) scaleY(0.55);
+}
+
+/* ── 贴纸(拖图 scrapbook) ────────────────────────
+   ① 拖入悬停:纸上浮出一块裁好的位置
+   ② 抠图等待:墨色未定,慢呼吸
+   ③ 落纸:白边贴纸,微歪,像手贴的 */
+.drop-spot {
+  position: absolute;
+  right: -6px; top: -4px;
+  width: 148px; height: 104px;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: 4px;
+  transform: rotate(2deg);
+  display: grid; place-items: center;
+  font-family: var(--font-kai);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+  background: var(--cinnabar-wash);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  z-index: 2;
+}
+.piece.dragover .drop-spot { opacity: 1; }
+.sticker {
+  float: right;
+  width: 138px;
+  margin: 0.2em 0 0.7em 1.2em;
+  border: 5px solid var(--sticker-edge);
+  border-radius: 3px;
+  box-shadow: var(--shadow-chip);
+  transform: rotate(2.2deg);
+  background: var(--paper-slip);
+  position: relative;
+}
+.sticker img, .sticker .sticker-ph { display: block; width: 100%; }
+.sticker .sticker-ph {
+  aspect-ratio: 4 / 3;
+  background: repeating-linear-gradient(45deg,
+    var(--cinnabar-wash) 0 8px, transparent 8px 16px);
+  display: grid; place-items: center;
+}
+.sticker .sticker-ph span {
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  text-align: center;
+  line-height: 1.7;
+  padding: 0 8px;
+}
+.sticker.processing img { filter: grayscale(0.75) blur(3px); }
+.sticker .sticker-wait {
+  position: absolute; inset: 0;
+  display: none; place-items: center;
+  font-family: var(--font-kai);
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  color: var(--ink);
+  text-shadow: 0 0 8px var(--paper);
+}
+.sticker.processing .sticker-wait { display: grid; }
+@media (prefers-reduced-motion: no-preference) {
+  html.has-js body:not([data-motion="off"]) .sticker.processing .sticker-wait {
+    animation: wait-breath 2.2s ease-in-out infinite;
+  }
+}
+@keyframes wait-breath {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+.sticker.landing { animation: sticker-land 0.7s var(--ease-ink); }
+@keyframes sticker-land {
+  0%   { transform: rotate(0deg) scale(1.06) translateY(-6px); box-shadow: var(--shadow-slip); }
+  100% { transform: rotate(2.2deg) scale(1) translateY(0); }
+}
+
+/* ── AI 批注(#commit)────────────────────────────── */
+.annot {
+  margin-top: 0.4rem;
+  padding-left: 1.6em;
+  font-family: var(--font-kai);
+  font-size: 15.5px;
+  line-height: var(--leading-kai);
+  color: var(--ink-kai);
+  text-wrap: pretty;
+}
+.annot-head {
+  display: flex; align-items: center; gap: 0.6em;
+  margin-bottom: 0.35rem;
+  font-size: var(--fs-note);
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+}
+.seal {
+  flex: none;
+  width: 17px; height: 17px;
+  display: inline-grid; place-items: center;
+  font-family: var(--font-kai);
+  font-size: 11px; line-height: 1;
+  color: var(--cinnabar);
+  border: 1px solid var(--cinnabar-faint);
+  border-radius: 2px;
+  transform: rotate(-2deg);
+  background: var(--cinnabar-wash);
+}
+
+/* ── 21:30 的纸条 ─────────────────────────────────── */
+.slip {
+  background:
+    linear-gradient(var(--slip-sheen), transparent 32%),
+    var(--paper-slip);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-slip);
+  padding: 2.1rem 2.4rem 1.8rem;
+  transform: rotate(-0.45deg);
+  font-family: var(--font-kai);
+  font-size: 16.5px;
+  line-height: var(--leading-kai);
+  color: var(--ink-kai);
+  max-width: 34em;
+}
+.slip p + p { margin-top: 0.9em; }
+.slip-sign {
+  margin-top: 1.4rem;
+  display: flex; justify-content: flex-end; align-items: center; gap: 0.7em;
+  font-size: var(--fs-small);
+  color: var(--ink-soft);
+}
+
+/* ── 留言板 · 回一句 ──────────────────────────────── */
+.composer {
+  margin-top: 0.4rem;
+  max-width: 34em;
+  display: flex; align-items: flex-end; gap: 1em;
+}
+.composer-input {
+  flex: 1;
+  min-height: 1.8em;
+  padding: 0.2em 0.1em;
+  border-bottom: 1px solid var(--hairline-strong);
+  font-family: var(--font-kai);
+  font-size: 16px;
+  line-height: 1.8;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.6s ease;
+}
+.composer-input:focus { border-color: var(--ink-faint); }
+.composer-input:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink-faint);
+}
+.composer-note {
+  margin-top: 0.8rem;
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+  letter-spacing: 0.08em;
+}
+
+/* 选中文字 → 引入对话(@引用 的入口) */
+.quote-chip {
+  position: absolute; z-index: 9;
+  display: flex; align-items: center; gap: 0.5em;
+  background: var(--paper-slip);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: var(--shadow-chip);
+  padding: 5px 12px;
+  font-family: var(--font-kai);
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--ink-soft);
+  cursor: pointer;
+  opacity: 0;
+  filter: blur(5px);
+  pointer-events: none;
+  transition: opacity 0.45s var(--ease-ink), filter 0.45s var(--ease-ink);
+}
+.quote-chip.show { opacity: 1; filter: blur(0); pointer-events: auto; }
+.quote-chip .chip-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--cinnabar-soft);
+}
+.quote-chip:hover { color: var(--ink); }
+
+/* ── 空白的一天 ───────────────────────────────────── */
+.blank-day {
+  margin-top: 5rem;
+  text-align: center;
+}
+.blank-ruler {
+  width: 1px;
+  height: 26vh;
+  margin: 0 auto;
+  background-image: linear-gradient(to bottom,
+    var(--hairline-strong) 0 4px, transparent 4px 12px);
+  background-size: 1px 12px;
+}
+.blank-invite {
+  margin-top: 3rem;
+  font-family: var(--font-kai);
+  font-size: 19px;
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+}
+.blank-start {
+  margin: 2.2rem auto 0;
+  display: block;
+  background: none; border: none; cursor: pointer;
+  border-bottom: 1px solid var(--hairline-strong);
+  padding: 0.3em 1.2em;
+  font-family: var(--font-kai);
+  font-size: 16px;
+  letter-spacing: 0.2em;
+  color: var(--cinnabar-soft);
+  transition: color 0.5s ease, border-color 0.5s ease;
+}
+.blank-start:hover { color: var(--cinnabar); border-color: var(--ink-faint); }
+.blank-whale {
+  margin-top: 4.5rem;
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+  letter-spacing: 0.14em;
+  color: var(--ink-faint);
+}
+
+/* ── 卷尾 ─────────────────────────────────────────── */
+.colophon {
+  margin-top: 7rem;
+  text-align: center;
+  font-size: var(--fs-note);
+  letter-spacing: 0.14em;
+  color: var(--ink-faint);
+  line-height: 2.2;
+}
+.colophon .fleuron {
+  display: block;
+  color: var(--cinnabar-faint);
+  font-size: 15px;
+  margin-bottom: 1.2rem;
+  letter-spacing: 0.6em;
+  text-indent: 0.6em;
+}
+.colophon a { text-decoration: none; border-bottom: 1px solid var(--hairline); }
+.colophon a:hover { color: var(--ink-soft); }
+
+/* ── 入场:墨迹落纸 ──────────────────────────────── */
+/* 无帧环境(打印、被节流的 iframe)被 JS 标上 data-frozen:
+   所有过渡掐断,直接以终态示人——否则半路冻住的 transition
+   会把 opacity 卡在 0 */
+body[data-frozen], body[data-frozen] * { transition: none !important; }
+@media (prefers-reduced-motion: no-preference) {
+  html.has-js body:not([data-motion="off"]):not([data-frozen]) .ink-in {
+    opacity: 0;
+    filter: blur(7px);
+    transform: translateY(7px);
+    transition:
+      opacity var(--d-rise) var(--ease-ink),
+      filter var(--d-ink) var(--ease-ink),
+      transform var(--d-rise) var(--ease-ink);
+  }
+  html.has-js body:not([data-motion="off"]):not([data-frozen]) .ink-in.is-in {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+  }
+}
+
+/* ── 窄窗 ─────────────────────────────────────────── */
+@media (max-width: 760px) {
+  :root { --rail-w: 60px; --gap-rail: 18px; --fs-banner: 40px; }
+  .morning { grid-template-columns: 1fr; gap: 2.4rem; }
+  .slip { padding: 1.6rem 1.4rem; }
+  .pulse-row { grid-template-columns: minmax(5em, 7em) 1fr auto; }
+  .pulse-spark { display: none; }
+  .day-row { grid-template-columns: 5.5em 1fr auto; gap: 1em; }
+}
+
+/* ════════════════════════════════════════════════════════════
+   v3 · 总览的器官 + 信笺流 + 通用态
+   每个组件头部附最小 HTML 片段,直接可用
+   ════════════════════════════════════════════════════════════ */
+
+/* ── 通用态:链接 / 选中 / focus ──────────────
+   · 键盘焦点 = 朱砂色的铅笔虚框,离字三步——不是蓝色 ring
+   · 被引进对话的句子用 <mark class="quoted">…</mark> 浅朱砂洗过
+   · 正文里的链接 <a class="ink-link"> = 发丝线下划,悬停才温;绝不变蓝 */
+:focus-visible {
+  outline: 1px dotted var(--cinnabar-faint);
+  outline-offset: 3px;
+}
+mark.quoted {
+  background: var(--cinnabar-wash);
+  color: inherit;
+}
+.ink-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--hairline-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.28em;
+  transition: text-decoration-color 0.4s ease, color 0.4s ease;
+}
+.ink-link:hover { text-decoration-color: var(--cinnabar-soft); }
+
+/* ── 栏目题 ───────────────────────────────
+   总览的器官之间不用卡片分区,用一行穿发丝线的小题。
+   <h2 class="organ-head">脉搏</h2> */
+.organ-head {
+  display: flex; align-items: center; gap: 1.8em;
+  font-size: var(--fs-note);
+  font-weight: 400;
+  letter-spacing: 0.46em;
+  text-indent: 0.46em;
+  color: var(--ink-faint);
+}
+.organ-head::before, .organ-head::after {
+  content: ""; flex: 1;
+  border-top: 1px solid var(--hairline);
+}
+
+/* ── 更新通知条 ─────────────────────────
+   纸做法:一条窄笺斜插在报头规线下,不是 banner。
+   「这就换上」朱砂;「先不」后整条折叠离场(复用 foldAway)。
+   <aside class="update-slip">
+     <p>新版已备好——搜索修复 + 首启提速。</p>
+     <button class="us-act" type="button">这就换上</button>
+     <button class="us-later" type="button">先不</button>
+   </aside> */
+.update-slip {
+  margin: 1.8rem auto 0;
+  width: fit-content; max-width: 100%;
+  display: flex; align-items: baseline; gap: 1.5em;
+  padding: 0.5em 1.4em;
+  background: linear-gradient(var(--slip-sheen), transparent 40%), var(--paper-slip);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-chip);
+  transform: rotate(-0.5deg);
+  font-family: var(--font-kai);
+  font-size: 13.5px;
+  color: var(--ink-soft);
+}
+.update-slip button {
+  background: none; border: none; cursor: pointer;
+  font: inherit; letter-spacing: 0.08em;
+  transition: color 0.4s ease;
+}
+.update-slip .us-act { color: var(--cinnabar-soft); }
+.update-slip .us-act:hover { color: var(--cinnabar); }
+.update-slip .us-later { color: var(--ink-faint); }
+.update-slip .us-later:hover { color: var(--ink-soft); }
+
+/* ── 今天的入口(总览主角) ─────────────────
+   整块是一个 <a>,点哪都进单日页。零态(今天还没起页)
+   同一个驻地换成 .blank-day 的邀请——「新建一天」不另设入口。
+   <a class="today" href="单日页.html">
+     <p class="today-kicker"><span>今日 · 写到 21:30</span>
+        <span class="kicker-slip"><i class="whale-dot"></i>鲸留了纸条</span></p>
+     <h2 class="today-lede">……</h2>
+     <p class="today-excerpt dropcap">……</p>
+     <p class="today-meta"><span>8:30 起笔 · 14 条 · 3 夹批</span>
+        <span class="today-go">展开这一天 ⟶</span></p>
+   </a> */
+.today {
+  display: block;
+  margin-top: 4.4rem;
+  text-decoration: none;
+  color: inherit;
+}
+.today-kicker {
+  display: flex; align-items: baseline; gap: 1.6em;
+  font-size: var(--fs-note);
+  letter-spacing: 0.22em;
+  color: var(--ink-faint);
+}
+.kicker-slip {
+  display: inline-flex; align-items: center; gap: 0.6em;
+  font-family: var(--font-kai);
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+}
+.whale-dot {
+  flex: none;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--cinnabar-faint);
+}
+.today-lede {
+  margin-top: 1rem;
+  font-size: var(--fs-lede);
+  font-weight: 600;
+  line-height: 1.55;
+  letter-spacing: 0.02em;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.32em;
+  transition: text-decoration-color 0.5s ease;
+}
+.today:hover .today-lede { text-decoration-color: var(--hairline-strong); }
+.today-excerpt {
+  margin-top: 1.1rem;
+  max-width: 36em;
+  text-wrap: pretty;
+}
+.today-meta {
+  margin-top: 1.3rem;
+  display: flex; align-items: baseline; gap: 1.6em;
+  font-size: var(--fs-small);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.today-go {
+  margin-left: auto;
+  font-family: var(--font-kai);
+  letter-spacing: 0.1em;
+  color: var(--cinnabar-soft);
+  transition: color 0.4s ease, transform 0.5s var(--ease-ink);
+}
+.today:hover .today-go { color: var(--cinnabar); transform: translateX(5px); }
+
+/* ── widget 拼装区(总览) ────────────────────
+   排布规则,不是位置表——widget 是长出来的:
+   ① 流向:像排字,左起向右,放不下就换行
+   ② 宽度由内容定(flex:0 1 auto),不拉伸、不对齐网格、不补位
+   ③ 呼吸固定:列距 4.8rem / 行距 3rem,不随数量变
+   ④ 新 widget 长出来 = append 到流尾,入场走 ink-in;
+      容器习语(竖题 + 发丝线)见 .widget,不另画边界
+   <section class="widget-flow">
+     <div class="widget">…</div><div class="widget">…</div>
+   </section> */
+.widget-flow {
+  margin-top: 3rem;
+  display: flex; flex-wrap: wrap;
+  column-gap: 4.8rem; row-gap: 3rem;
+  align-items: start;
+}
+.widget-flow > .widget { flex: 0 1 auto; min-width: 12em; }
+
+/* ── 项目 PULSE 行 ─────────────────────────
+   账本体例,禁卡片:名(宋体 600)· 一句状态(楷)·
+   unicode 火花 · 最近动过(右对齐)。今天动过的行 data-live。
+   <ul class="pulse">
+     <li class="pulse-row" data-live>
+       <span class="pulse-name">yanpai</span>
+       <span class="pulse-word">内测铺开,第一个报名</span>
+       <span class="pulse-spark">▂▃▂▅▃▇</span>
+       <span class="pulse-when">今天</span>
+     </li>
+   </ul> */
+.pulse { list-style: none; margin-top: 1.6rem; }
+.pulse-row {
+  display: grid;
+  grid-template-columns: minmax(6.5em, 8.5em) 1fr auto 4.5em;
+  gap: 1.6em;
+  align-items: baseline;
+  padding: 0.85em 0.2em;
+}
+.pulse-row + .pulse-row { border-top: 1px dotted var(--hairline); }
+.pulse-name { font-weight: 600; letter-spacing: 0.04em; font-size: 16px; }
+.pulse-word {
+  font-family: var(--font-kai);
+  font-size: 15px;
+  color: var(--ink-soft);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pulse-spark {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--ink-faint);
+}
+.pulse-when {
+  text-align: right;
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.pulse-row[data-live] .pulse-when { color: var(--cinnabar-soft); }
+
+/* ── 往日 · 天列表行 ───────────────────────
+   日期 · 一句摘 · 条数;鲸留过纸条的日子带一粒朱点。
+   <ol class="days-list">
+     <li><a class="day-row" href="…">
+       <time>六月十日</time>
+       <span class="day-gist">……</span>
+       <span class="day-counts">12 条 <i class="whale-dot" title="鲸留过纸条"></i></span>
+     </a></li>
+   </ol>
+   <p class="days-more"><a href="…">翻更早的 ⟶</a></p> */
+.days-list { list-style: none; margin-top: 1.2rem; }
+.day-row {
+  display: grid;
+  grid-template-columns: 6.5em 1fr auto;
+  gap: 1.6em;
+  align-items: baseline;
+  padding: 0.9em 0.2em;
+  text-decoration: none;
+  color: inherit;
+  border-bottom: 1px solid var(--hairline);
+}
+.day-row time {
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  transition: color 0.4s ease;
+}
+.day-gist {
+  font-size: 15.5px;
+  color: var(--ink-soft);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: color 0.4s ease;
+}
+.day-counts {
+  display: inline-flex; align-items: center; gap: 0.7em;
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.day-row:hover time, .day-row:hover .day-gist { color: var(--ink); }
+.days-more { margin-top: 1.5rem; text-align: right; }
+.days-more a {
+  font-family: var(--font-kai);
+  font-size: var(--fs-small);
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+  text-decoration: none;
+  transition: color 0.4s ease;
+}
+.days-more a:hover { color: var(--ink-soft); }
+
+/* ── 折页 · 侧栏对话的收起态 ──────────────────
+   隐喻:页边折着一道,翻开是夹在卷里的信笺。
+   收起 = 36px 折口贴右页边:未读朱点(data-unread 才呼吸) +
+   竖排「与鲸说话」+ 压缩圆环驻在折口底部(它是对话的器官)。
+   展开 = body[data-chat="open"]:信笺(.chatpane)从页边抽出来,
+   主纸向左让半个信笺宽——两张纸并排在同一张桌面,不是 drawer
+   盖纸;台灯不动,纸动,光不跟着走。
+   <button class="chatfold" type="button" data-unread aria-label="打开对话">
+     <i class="fold-dot"></i>
+     <span class="fold-label">与鲸说话</span>
+     <span class="memory-ring bare fold-ring">…svg…</span>
+   </button> */
+.chatfold {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 7;
+  width: var(--fold-w);
+  border: none; cursor: pointer;
+  border-left: 1px solid var(--hairline);
+  background: linear-gradient(to right, var(--paper), var(--paper-slip) 75%);
+  box-shadow: var(--shadow-fold);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 2.4rem 0 1.5rem;
+  gap: 1.3rem;
+  transition: transform var(--d-fold) var(--ease-ink);
+}
+body[data-chat="open"] .chatfold {
+  transform: translateX(calc(var(--fold-w) + 12px));
+}
+.fold-dot {
+  flex: none;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--cinnabar-faint);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html.has-js body:not([data-motion="off"]) .chatfold[data-unread] .fold-dot {
+    animation: ai-breath 7s ease-in-out infinite;
+  }
+}
+.chatfold:not([data-unread]) .fold-dot { opacity: 0.35; }
+.fold-label {
+  writing-mode: vertical-rl;
+  font-family: var(--font-kai);
+  font-size: 13px;
+  letter-spacing: 0.42em;
+  color: var(--ink-soft);
+  transition: color 0.4s ease;
+}
+.chatfold:hover .fold-label { color: var(--ink); }
+.fold-ring { margin-top: auto; }
+
+/* 压缩圆环的去报头变体:静态驻在折口 / 信笺头 */
+.memory-ring.bare {
+  position: static; transform: none;
+  background: none; padding: 0;
+}
+/* 收进匞子:弧(今天的话)被卷回去,心里凝一粒墨——
+   JS 加 .compressing,弧的 dashoffset 走到满,ring-core 随后重开。
+   svg 里加 <circle class="ring-core" cx="11" cy="11" r="3"> */
+.memory-ring .ring-core {
+  fill: var(--cinnabar-soft);
+  transform-origin: 50% 50%;
+  transform: scale(0);
+  transition: transform 0.9s var(--ease-ink) 0.55s;
+}
+.memory-ring.compressing .ring-core,
+.memory-ring.compressed .ring-core { transform: scale(1); }
+.memory-ring.compressing svg { animation: ring-swallow 1.4s var(--ease-ink); }
+@keyframes ring-swallow {
+  0%   { transform: scale(1); }
+  55%  { transform: scale(0.84); }
+  100% { transform: scale(1); }
+}
+
+/* ── 信笺(侧栏对话的展开态) ─────────────────
+   标准聊天工作台的纸化皮肤:线性消息流 + 底部输入。
+   <aside class="chatpane">
+     <header class="chatpane-head">
+       <span class="chatpane-title">信笺 · 与鲸</span>
+       <span class="memory-ring bare">…svg…</span>
+       <button class="chatpane-close" type="button">收页</button>
+     </header>
+     <div class="letters">…</div>
+     <footer class="chatpane-foot">…composer…</footer>
+   </aside> */
+.chatpane {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 8;
+  width: min(var(--chat-w), 94vw);
+  background: var(--paper-slip);
+  border-left: 1px solid var(--hairline);
+  box-shadow: var(--shadow-fold);
+  transform: translateX(calc(100% + 40px));
+  transition: transform var(--d-fold) var(--ease-ink);
+  display: flex; flex-direction: column;
+}
+body[data-chat="open"] .chatpane { transform: none; }
+.sheet { transition: transform var(--d-fold) var(--ease-ink); }
+body[data-chat="open"] .sheet {
+  transform: translateX(calc(var(--chat-w) * -0.45));
+}
+@media (max-width: 1180px) {
+  /* 窄桌面:主纸不让位,信笺盖在上层 */
+  body[data-chat="open"] .sheet { transform: none; }
+}
+.chatpane-head {
+  flex: none;
+  display: flex; align-items: center; gap: 1.2em;
+  padding: 1.3rem 1.6rem 1.1rem;
+  border-bottom: 1px solid var(--hairline);
+}
+.chatpane-title {
+  font-family: var(--font-kai);
+  font-size: var(--fs-small);
+  letter-spacing: 0.32em;
+  color: var(--ink-soft);
+}
+.chatpane-head .memory-ring { margin-left: auto; }
+.chatpane-close {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+  transition: color 0.4s ease;
+}
+.chatpane-close:hover { color: var(--ink); }
+.chatpane-foot {
+  flex: none;
+  padding: 1.1rem 1.6rem 1.3rem;
+  border-top: 1px solid var(--hairline);
+}
+.chatpane-foot .composer { margin-top: 0; }
+.chatpane-foot .composer-note { margin-top: 0.7rem; }
+
+/* ── 信笺消息流 ───────────────────────────
+   不是气泡——两种笔迹分作者:人写宋体靠右缩进,
+   AI 落文楷满宽;扫读靠字体、墨色、缩进三重区分。
+   <div class="letters">
+     <p class="letters-rule">六月十一日</p>
+     <div class="letter me">
+       <p class="letter-meta">14:02 · 我</p>
+       <div class="letter-body"><p>…</p></div>
+     </div>
+     <div class="letter ai">
+       <p class="letter-meta"><span class="seal">鲸</span>14:03 · 鲸</p>
+       <div class="letter-body">
+         <p class="letter-quote">「被引的那句」</p><p>…</p>
+       </div>
+     </div>
+     <div class="letter ai"><div class="letter-body">
+       <span class="ink-grind"><i></i><i></i><i></i></span>
+     </div></div>
+   </div> */
+.letters {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.8rem 1.6rem 1.2rem;
+  display: grid;
+  gap: 1.7rem;
+  align-content: start;
+}
+.letters-rule {
+  display: flex; align-items: center; gap: 1.4em;
+  font-size: 11.5px;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: var(--ink-faint);
+}
+.letters-rule::before, .letters-rule::after {
+  content: ""; flex: 1;
+  border-top: 1px solid var(--hairline);
+}
+.letter-meta {
+  display: flex; align-items: center; gap: 0.6em;
+  margin-bottom: 0.35rem;
+  font-size: var(--fs-note);
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.letter-meta .seal { width: 15px; height: 15px; font-size: 10px; }
+.letter-body {
+  font-size: 15px;
+  line-height: 1.95;
+  text-wrap: pretty;
+}
+.letter-body p + p { margin-top: 0.7em; }
+.letter.ai .letter-body {
+  font-family: var(--font-kai);
+  line-height: var(--leading-kai);
+  color: var(--ink-kai);
+}
+.letter.me { margin-left: 16%; }
+.letter.me .letter-meta { justify-content: flex-end; }
+.letter.me .letter-body { color: var(--ink); }
+.letter-quote {
+  margin-bottom: 0.55em;
+  padding: 0.05em 0 0.05em 0.9em;
+  border-left: 1px solid var(--hairline-strong);
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: var(--ink-soft);
+}
+
+/* ── 磨墨 · AI 落笔前的等待 ───────────────────
+   不转圈——三粒墨先后在纸上渗开又收住,像研墨的节奏。
+   抠图等待复用 .sticker.processing(灰+模糊+呼吸),同一墨迹方向。
+   <span class="ink-grind" aria-label="它在落笔前"><i></i><i></i><i></i></span> */
+.ink-grind {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 0.45em 0;
+}
+.ink-grind i {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--ink-faint);
+  opacity: 0.25;
+}
+@media (prefers-reduced-motion: no-preference) {
+  html.has-js body:not([data-motion="off"]) .ink-grind i {
+    animation: ink-grind 2.2s var(--ease-ink) infinite;
+  }
+}
+.ink-grind i:nth-child(2) { animation-delay: 0.35s; }
+.ink-grind i:nth-child(3) { animation-delay: 0.7s; }
+@keyframes ink-grind {
+  0%, 100% { opacity: 0.18; filter: blur(1.5px); transform: scale(0.8); }
+  35%      { opacity: 0.85; filter: blur(0);     transform: scale(1); }
+}
+
+/* ── 昼夜小印 ─────────────────────────────
+   一枚方印,印着当下的时辰;点一下,字化墨散去、另一面浮上来。
+   紧凑处(图记页、设置)用它;报头规线上仍用「昼·夜」双字态。
+   <button class="mode-seal" type="button" title="换一盏灯">
+     <span class="ms-char">夜</span>
+   </button> */
+.mode-seal {
+  width: 27px; height: 27px;
+  display: inline-grid; place-items: center;
+  border: 1px solid var(--cinnabar-faint);
+  border-radius: 3px;
+  background: var(--cinnabar-wash);
+  font-family: var(--font-kai);
+  font-size: 13px; line-height: 1;
+  color: var(--cinnabar);
+  cursor: pointer;
+  transform: rotate(-2deg);
+  transition: transform 0.6s var(--ease-ink);
+}
+.mode-seal:hover { transform: rotate(1deg); }
+.mode-seal .ms-char { transition: opacity 0.4s ease, filter 0.4s ease; }
+.mode-seal.flipping .ms-char { opacity: 0; filter: blur(4px); }
+
+/* ════════════════════════════════════════════════════════════════
+   v4 · 设置家族(市集)
+   规矩同前:零裸色值、双模式靠 token、动效尊重 reduced-motion。
+   每个组件头部附最小 HTML 片段。
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── 市集面板骨架 ────────────────────────────────────
+   设置不是一页 app,是另一册压在卷上:scrim 把桌面压暗,
+   面板是一大张纸(slip 语系)从桌沿浮起,微歪。
+   栏目页签用杂志目次的语言:楷体字一行排开,当前栏目顶一粒
+   着重号——没有底色块、没有滑动指示条,禁 SaaS tab bar。
+   开:body[data-fair="open"];关:「收起」、Esc、点 scrim。
+   <div class="fair-scrim"></div>
+   <section class="fair" role="dialog" aria-modal="true" aria-label="市集">
+     <header class="fair-head">
+       <h2 class="fair-title">市集</h2>
+       <nav class="fair-cols" aria-label="栏目">
+         <button class="fair-col" aria-current="true" type="button">市场</button>
+         <button class="fair-col" type="button">钥匙</button>
+         <button class="fair-col" type="button">数据</button>
+         <button class="fair-col" type="button">关于</button>
+       </nav>
+       <button class="fair-close" type="button">收起</button>
+     </header>
+     <div class="fair-page">…当前栏目…</div>
+   </section> */
+.fair-scrim {
+  position: fixed; inset: 0; z-index: 10;
+  background: var(--vignette);
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--d-fold) ease;
+}
+body[data-fair="open"] .fair-scrim { opacity: 1; pointer-events: auto; }
+.fair {
+  position: fixed; z-index: 11;
+  left: 50%; top: 5vh; bottom: 5vh;
+  width: min(92vw, 760px);
+  background:
+    linear-gradient(var(--slip-sheen), transparent 16%),
+    var(--paper-slip);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-slip);
+  display: flex; flex-direction: column;
+  opacity: 0; visibility: hidden;
+  transform: translateX(-50%) translateY(22px) rotate(-0.2deg);
+  transition:
+    opacity var(--d-fold) var(--ease-ink),
+    transform var(--d-fold) var(--ease-ink),
+    visibility 0s linear var(--d-fold);
+}
+body[data-fair="open"] .fair {
+  opacity: 1; visibility: visible;
+  transform: translateX(-50%) rotate(-0.2deg);
+  transition:
+    opacity var(--d-fold) var(--ease-ink),
+    transform var(--d-fold) var(--ease-ink);
+}
+.fair-head {
+  flex: none;
+  display: flex; align-items: baseline; gap: 2em;
+  padding: 1.8rem 2.6rem 1.2rem;
+  border-bottom: 1px solid var(--hairline);
+}
+.fair-title {
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: 0.3em;
+}
+.fair-cols { display: flex; gap: 2.1em; }
+.fair-col {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai);
+  font-size: 15px;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+  padding: 0.35em 0 0;
+  transition: color 0.45s ease;
+}
+.fair-col:hover { color: var(--ink-soft); }
+.fair-col[aria-current="true"] {
+  color: var(--ink);
+  text-emphasis: filled dot var(--cinnabar-soft);
+  text-emphasis-position: over right;
+}
+.fair-close {
+  margin-left: auto;
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+  transition: color 0.4s ease;
+}
+.fair-close:hover { color: var(--ink); }
+.fair-page { flex: 1; overflow-y: auto; padding: 1.6rem 2.6rem 2.8rem; }
+.fair-page .organ-head { margin: 2.6rem 0 0.4rem; }
+.fair-page .organ-head:first-child { margin-top: 0.8rem; }
+
+/* ── 钥匙行(双钥匙仪式的日常面) ─────────────────────
+   密钥输入是一条基线,不是输入框:役名 · 等宽字段 · 状态。
+   三态:data-state="empty"(楷体淡字占位)/ "set"(已配妥,
+   朱点 + 楷体小字)/ 编辑中(focus-within,基线加深)。
+   「显/隐」是行尾一个楷体小字,JS 翻 input type。
+   <div class="key-line" data-state="set">
+     <span class="key-name">阿里云 · 眼睛</span>
+     <span class="key-field">
+       <input class="key-input" type="password" value="…" />
+       <button class="key-eye" type="button">显</button>
+     </span>
+     <span class="key-state"><i class="whale-dot"></i>已配妥</span>
+   </div> */
+.key-line {
+  display: grid;
+  grid-template-columns: 9em minmax(0, 1fr) auto;
+  gap: 1.8em;
+  align-items: baseline;
+  padding: 0.85em 0.2em;
+}
+.key-line + .key-line { border-top: 1px dotted var(--hairline); }
+.key-name { font-size: 15px; color: var(--ink-soft); }
+.key-field {
+  display: flex; align-items: baseline; gap: 1em;
+  border-bottom: 1px solid var(--hairline);
+  transition: border-color 0.5s ease;
+}
+.key-line:focus-within .key-field { border-color: var(--hairline-strong); }
+.key-input {
+  flex: 1; min-width: 0;
+  background: none; border: none; outline: none;
+  padding: 0.15em 0.05em;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+.key-input::placeholder {
+  font-family: var(--font-kai);
+  font-size: 13.5px;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+}
+.key-eye {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai);
+  font-size: 12px;
+  color: var(--ink-faint);
+  transition: color 0.4s ease;
+}
+.key-eye:hover { color: var(--ink); }
+.key-state {
+  display: inline-flex; align-items: center; gap: 0.6em;
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+}
+.key-line[data-state="empty"] .key-state { visibility: hidden; }
+
+/* ── 模型档案行 ──────────────────────────────────────
+   名(宋 600)· 底址+型号(等宽,淡)· 钥匙尾号 · 三动作。
+   「试一试」的等待复用磨墨;成败落在 .probe-note:
+   data-probe="idle | probing | ok | fail"。
+   <div class="profile-row" data-probe="idle">
+     <span class="profile-name">说话的</span>
+     <span class="profile-addr">api.deepseek.com · deepseek-chat</span>
+     <span class="profile-tail">●● 4f2a</span>
+     <span class="profile-acts">
+       <button class="pa" data-act="try" type="button">试一试</button>
+       <button class="pa" data-act="save" type="button">存</button>
+       <button class="pa pa-del" data-act="del" type="button">删</button>
+     </span>
+     <span class="probe-note"></span>
+   </div> */
+.profile-row {
+  display: grid;
+  grid-template-columns: 6.5em minmax(0, 1fr) auto auto;
+  gap: 1.6em;
+  align-items: baseline;
+  padding: 0.85em 0.2em;
+}
+.profile-row + .profile-row { border-top: 1px dotted var(--hairline); }
+.profile-name { font-weight: 600; font-size: 15.5px; }
+.profile-addr {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  color: var(--ink-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.profile-tail {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.profile-acts { display: flex; gap: 1.3em; }
+.pa {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  transition: color 0.4s ease;
+}
+.pa:hover { color: var(--ink); }
+.pa[data-act="try"] { color: var(--cinnabar-soft); }
+.pa[data-act="try"]:hover { color: var(--cinnabar); }
+.pa-del:hover { color: var(--cinnabar); }
+.probe-note {
+  grid-column: 2 / -1;
+  display: none;
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+.profile-row[data-probe="probing"] .probe-note,
+.profile-row[data-probe="ok"] .probe-note,
+.profile-row[data-probe="fail"] .probe-note { display: flex; align-items: center; gap: 0.8em; }
+.profile-row[data-probe="ok"] .probe-note { color: var(--ink-soft); }
+.profile-row[data-probe="fail"] .probe-note { color: var(--cinnabar); }
+
+/* ── 开关与勾选 ──────────────────────────────────────
+   禁 iOS 拨杆。开关是一粒墨:空圈=歇,落墨=开(同补剂记号
+   的晕开节奏);勾选是方记号。状态字「开/歇」由 JS 随手换。
+   <div class="tick-row">
+     <button class="tick" aria-pressed="true" type="button"></button>
+     <span class="tick-name">21:30 留纸条</span>
+     <span class="tick-word">开</span>
+   </div>
+   方勾选:<button class="tick square" aria-pressed="false"></button> */
+.tick-row {
+  display: flex; align-items: baseline; gap: 1.1em;
+  padding: 0.6em 0.2em;
+}
+.tick-row + .tick-row { border-top: 1px dotted var(--hairline); }
+.tick {
+  flex: none;
+  width: 15px; height: 15px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 50%;
+  background: none; cursor: pointer;
+  position: relative;
+  transform: translateY(2px);
+  transition: border-color 0.4s ease;
+}
+.tick.square { border-radius: 2px; }
+.tick:hover { border-color: var(--ink-faint); }
+.tick::after {
+  content: ""; position: absolute; inset: 2.5px;
+  border-radius: inherit;
+  background: var(--mark-fill);
+  opacity: 0; transform: scale(0.3);
+  transition: opacity var(--d-ink) var(--ease-ink), transform var(--d-ink) var(--ease-ink);
+}
+.tick[aria-pressed="true"]::after { opacity: 0.9; transform: scale(1); }
+.tick-name { font-size: 15.5px; }
+.tick-note { font-family: var(--font-kai); font-size: 13px; color: var(--ink-faint); }
+.tick-word {
+  margin-left: auto;
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+}
+
+/* ── 同意书(云端遥测) ──────────────────────────────
+   撤回同意是合同动作,要有分量:不是关一个开关——
+   先朱砂划掉那行同意,再「真撤回」;落款换成撤回的日期。
+   data-state="given | revoking | revoked"。
+   <div class="consent" data-state="given">
+     <p class="consent-text">同意把匿名的故障与用量数据递回船坞,帮它看见远方的坑。</p>
+     <p class="consent-sign"><span class="seal">允</span>
+        <span class="consent-date">已签 · 二〇二六年五月十二日</span>
+        <button class="consent-revoke" type="button">撤回</button></p>
+     <p class="consent-confirm">撤回即刻生效,此前已递的不追回。
+        <button data-act="really" type="button">真撤回</button>
+        <button data-act="never" type="button">算了</button></p>
+   </div> */
+.consent { padding: 0.9em 0.2em; }
+.consent-text {
+  font-size: 15.5px;
+  line-height: 1.95;
+  max-width: 34em;
+  text-wrap: pretty;
+}
+.consent-sign {
+  margin-top: 0.7rem;
+  display: flex; align-items: center; gap: 0.9em;
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+  color: var(--ink-soft);
+}
+.consent-revoke {
+  background: none; border: none; cursor: pointer;
+  font: inherit;
+  color: var(--cinnabar-faint);
+  transition: color 0.4s ease;
+}
+.consent-revoke:hover { color: var(--cinnabar); }
+.consent[data-state="revoking"] .consent-text,
+.consent[data-state="revoked"] .consent-text {
+  text-decoration: line-through;
+  text-decoration-color: var(--cinnabar-soft);
+  text-decoration-thickness: 1px;
+}
+.consent[data-state="revoked"] .consent-text { opacity: 0.45; }
+.consent[data-state="revoked"] .consent-sign .seal { opacity: 0.3; }
+.consent[data-state="revoked"] .consent-revoke { display: none; }
+.consent-confirm {
+  display: none;
+  margin-top: 0.6rem;
+  align-items: baseline; gap: 1.4em;
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+}
+.consent[data-state="revoking"] .consent-confirm { display: flex; }
+.consent-confirm button {
+  background: none; border: none; cursor: pointer;
+  font: inherit;
+}
+.consent-confirm [data-act="really"] { color: var(--cinnabar-soft); }
+.consent-confirm [data-act="really"]:hover { color: var(--cinnabar); }
+.consent-confirm [data-act="never"] { color: var(--ink-faint); }
+.consent-confirm [data-act="never"]:hover { color: var(--ink-soft); }
+
+/* ── 动作行 ──────────────────────────────────────────
+   名 + 楷体小注 在左,动词在右。「检查更新」三态走 data-state:
+   idle(检查)/ checking(磨墨)/ latest(已是最新,淡)/
+   found(发现新版,朱)。危险动作延用「划掉·收纸」:
+   先朱砂划掉本行(可撤回),再「真删去」收纸离场。
+   <div class="act-row" data-state="idle">
+     <span><span class="act-name">检查更新</span>
+       <span class="act-note">现在是 卷四十一</span></span>
+     <span class="act-side">
+       <button class="act-go" type="button">检查</button>
+       <span class="act-state"></span></span>
+   </div>
+   危险行:<div class="act-row danger">… <button class="act-go">删</button>
+     <span class="strike-actions">已划掉
+       <button data-act="undo">撤回</button>
+       <button data-act="fold">真删去</button></span></div> */
+.act-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1.6em;
+  align-items: baseline;
+  padding: 0.85em 0.2em;
+}
+.act-row + .act-row { border-top: 1px dotted var(--hairline); }
+.act-name { font-size: 15.5px; }
+.act-note {
+  display: block;
+  font-family: var(--font-kai);
+  font-size: 13px;
+  color: var(--ink-faint);
+  margin-top: 0.15rem;
+}
+.act-side { display: flex; align-items: baseline; gap: 1.2em; }
+.act-go {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai);
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  color: var(--cinnabar-soft);
+  transition: color 0.4s ease;
+}
+.act-go:hover { color: var(--cinnabar); }
+.act-go.quiet { color: var(--ink-faint); }
+.act-go.quiet:hover { color: var(--ink-soft); }
+.act-state {
+  display: none;
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  align-items: center; gap: 0.8em;
+}
+.act-row[data-state="checking"] .act-state,
+.act-row[data-state="latest"] .act-state,
+.act-row[data-state="found"] .act-state { display: inline-flex; }
+.act-row[data-state="checking"] .act-go,
+.act-row[data-state="latest"] .act-go { display: none; }
+.act-row[data-state="found"] .act-state { color: var(--cinnabar-soft); }
+.act-row.struck .act-name {
+  text-decoration: line-through;
+  text-decoration-color: var(--cinnabar-soft);
+  text-decoration-thickness: 1px;
+  opacity: 0.5;
+}
+.act-row.struck .act-go { display: none; }
+.act-row .strike-actions { margin-top: 0; }
+.act-row.struck .strike-actions { display: flex; }
+
+/* ── 诊断行(给 tester 看的) ─────────────────────────
+   目录体例:键(楷)…点线引到…值(表格数字)+ 等第。
+   data-grade="ok | warn | bad" → 正常(淡)/ 降级(墨)/ 失败(朱)。
+   <div class="diag-row" data-grade="ok">
+     <span class="diag-key">time-block 注入</span>
+     <i class="diag-leader"></i>
+     <span class="diag-val">昨夜 23:04 跑过</span>
+     <span class="diag-grade">正常</span>
+   </div> */
+.diag { list-style: none; }
+.diag-row {
+  display: flex; align-items: baseline; gap: 1.1em;
+  padding: 0.5em 0.2em;
+}
+.diag-key {
+  font-family: var(--font-kai);
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.diag-leader {
+  flex: 1;
+  border-bottom: 1px dotted var(--hairline);
+  transform: translateY(-4px);
+}
+.diag-val {
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.diag-grade {
+  font-family: var(--font-kai);
+  font-size: var(--fs-note);
+  min-width: 2.5em;
+  text-align: right;
+}
+.diag-row[data-grade="ok"]   .diag-grade { color: var(--ink-faint); }
+.diag-row[data-grade="warn"] .diag-grade { color: var(--ink); }
+.diag-row[data-grade="bad"]  .diag-grade { color: var(--cinnabar); }
+
+/* ── 便签模态(通用 dialog) ──────────────────────────
+   一张便签压在纸上,不是居中白框:slip 语系、微歪、
+   略高于几何中心;scrim 同市集。历史恢复、更新询问都用它。
+   开合:.slipnote.show + .slipnote-scrim.show(或 JS 直接控)。
+   <div class="slipnote-scrim"></div>
+   <aside class="slipnote" role="dialog" aria-modal="true">
+     <p>把六月九日恢复到 21:14 的样子?现在的版本会先收进匣子。</p>
+     <p class="slipnote-acts">
+       <button class="sn-main" type="button">恢复</button>
+       <button class="sn-quiet" type="button">算了</button></p>
+   </aside> */
+.slipnote-scrim {
+  position: fixed; inset: 0; z-index: 12;
+  background: var(--vignette);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.5s ease;
+}
+.slipnote-scrim.show { opacity: 1; pointer-events: auto; }
+.slipnote {
+  position: fixed; z-index: 13;
+  left: 50%; top: 42%;
+  width: min(86vw, 26em);
+  padding: 1.8rem 2rem 1.5rem;
+  background:
+    linear-gradient(var(--slip-sheen), transparent 32%),
+    var(--paper-slip);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-slip);
+  font-family: var(--font-kai);
+  font-size: 15.5px;
+  line-height: var(--leading-kai);
+  color: var(--ink-kai);
+  text-wrap: pretty;
+  opacity: 0; visibility: hidden;
+  filter: blur(6px);
+  transform: translate(-50%, -46%) rotate(-0.8deg);
+  transition:
+    opacity 0.55s var(--ease-ink),
+    filter 0.55s var(--ease-ink),
+    transform 0.55s var(--ease-ink),
+    visibility 0s linear 0.55s;
+}
+.slipnote.show {
+  opacity: 1; visibility: visible;
+  filter: blur(0);
+  transform: translate(-50%, -50%) rotate(-0.8deg);
+  transition:
+    opacity 0.55s var(--ease-ink),
+    filter 0.55s var(--ease-ink),
+    transform 0.55s var(--ease-ink);
+}
+.slipnote-acts {
+  margin-top: 1.2rem;
+  display: flex; justify-content: flex-end; align-items: baseline; gap: 1.7em;
+  font-size: 14px;
+}
+.slipnote-acts button {
+  background: none; border: none; cursor: pointer;
+  font: inherit; letter-spacing: 0.1em;
+}
+.sn-main { color: var(--cinnabar-soft); }
+.sn-main:hover { color: var(--cinnabar); }
+.sn-quiet { color: var(--ink-faint); }
+.sn-quiet:hover { color: var(--ink-soft); }
+
+/* ── 轻提示(toast 的纸做法) ─────────────────────────
+   一小条纸从页脚浮上来,楷体一句,几秒自己退场。
+   AI 说的带朱点;系统说的不带。JS 控 .show。
+   <aside class="whisper" role="status">
+     <i class="whale-dot"></i><span>已夹进今天的 md。</span>
+   </aside> */
+.whisper {
+  position: fixed; z-index: 14;
+  left: 50%; bottom: 6vh;
+  display: flex; align-items: center; gap: 0.7em;
+  padding: 0.5em 1.3em;
+  background:
+    linear-gradient(var(--slip-sheen), transparent 40%),
+    var(--paper-slip);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-chip);
+  font-family: var(--font-kai);
+  font-size: 13.5px;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  pointer-events: none;
+  opacity: 0;
+  filter: blur(5px);
+  transform: translateX(-50%) rotate(-0.4deg);
+  transition:
+    opacity 0.5s var(--ease-ink),
+    filter 0.5s var(--ease-ink),
+    transform 0.5s var(--ease-ink);
+}
+.whisper.show {
+  opacity: 1;
+  filter: blur(0);
+  transform: translateX(-50%) translateY(-6px) rotate(-0.4deg);
+}
+
+/* ── 市场上架行 ──────────────────────────────────────
+   widget 浏览条目:名 · 一句话 · 装卸。已装的名前一粒墨;
+   「装上」朱、「卸下」淡——装是邀请,卸是放手。
+   <li class="stall-row" data-installed>
+     <span class="stall-name"><i class="stall-on"></i>八杯水</span>
+     <span class="stall-word">一排手捏的杯子,点一下注一杯墨</span>
+     <button class="stall-act" data-verb="remove" type="button">卸下</button>
+   </li> */
+.stall { list-style: none; }
+.stall-row {
+  display: grid;
+  grid-template-columns: 8em minmax(0, 1fr) auto;
+  gap: 1.6em;
+  align-items: baseline;
+  padding: 0.9em 0.2em;
+}
+.stall-row + .stall-row { border-top: 1px solid var(--hairline); }
+.stall-name {
+  display: inline-flex; align-items: center; gap: 0.7em;
+  font-weight: 600;
+  font-size: 15.5px;
+}
+.stall-on {
+  flex: none;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--mark-fill);
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.stall-row[data-installed] .stall-on { opacity: 0.9; }
+.stall-word {
+  font-family: var(--font-kai);
+  font-size: 14px;
+  color: var(--ink-soft);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.stall-act {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai);
+  font-size: 13.5px;
+  letter-spacing: 0.1em;
+  transition: color 0.4s ease;
+}
+.stall-act[data-verb="install"] { color: var(--cinnabar-soft); }
+.stall-act[data-verb="install"]:hover { color: var(--cinnabar); }
+.stall-act[data-verb="remove"] { color: var(--ink-faint); }
+.stall-act[data-verb="remove"]:hover { color: var(--ink-soft); }
+
+@media (max-width: 700px) {
+  .fair-head { flex-wrap: wrap; padding: 1.4rem 1.4rem 1rem; }
+  .fair-page { padding: 1.2rem 1.4rem 2rem; }
+  .key-line, .profile-row { grid-template-columns: 1fr; gap: 0.5em; }
+  .stall-row { grid-template-columns: 6.5em 1fr auto; gap: 1em; }
+}

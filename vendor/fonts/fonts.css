@@ -1,0 +1,9 @@
+/* vendor 锁版字体 — 新设计(design-tokens)专用,旧页面不引。
+   来源(npmmirror tarball,2026-06-12 锁定):
+   @fontsource/noto-serif-sc 5.2.8 (400/600/900, woff2-only)
+   lxgw-wenkai-webfont 1.7.0 (regular, woff2)
+   勿挂 CDN — 验收时 Google Fonts 真超时过(DESIGN_BRIEF 版本记录)。 */
+@import url("./noto-serif-sc/400.css");
+@import url("./noto-serif-sc/600.css");
+@import url("./noto-serif-sc/900.css");
+@import url("./lxgw-wenkai/lxgwwenkai-regular.css");

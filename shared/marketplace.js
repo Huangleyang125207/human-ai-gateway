@@ -253,8 +253,20 @@
 
   function renderKeys(cfg) {
     const body = document.getElementById("marketBody");
+    const themeNow = (window.gatewayTheme && window.gatewayTheme.get()) || "system";
     body.innerHTML = `
       <div class="market-hint">本地服务,key 仅落本机 config.json,不传任何第三方。任何输入框 paste 完点旁边按钮即可保存/测试。</div>
+
+      <section class="setup-section" id="skinSection">
+        <h3>皮肤</h3>
+        <div class="setup-howto setup-howto-secondary">日间是米黄的纸,夜间是台灯下的纸。跟系统 = 随 macOS/Windows 外观自动换。</div>
+        <div class="skin-row" role="radiogroup" aria-label="皮肤">
+          ${[["day","日间"],["night","夜间"],["system","跟系统"]].map(([v,label]) => `
+            <label class="skin-opt" style="margin-right:14px;cursor:pointer;">
+              <input type="radio" name="skinMode" value="${v}" ${themeNow===v?"checked":""}> ${label}
+            </label>`).join("")}
+        </div>
+      </section>
 
       <section class="setup-section setup-section-primary">
         <h3>① 说话的 · <span class="setup-role">DeepSeek 直连</span></h3>
@@ -313,6 +325,13 @@
           await saveSinglePartial({[k]: v});
           flashStatus(inp.closest(".key-row"), "✓ 已存");
         }
+      });
+    });
+
+    // 皮肤切换 — 真源 localStorage["gateway-theme"],theme.js 全站生效
+    [...body.querySelectorAll('input[name="skinMode"]')].forEach(r => {
+      r.addEventListener("change", () => {
+        if (window.gatewayTheme) window.gatewayTheme.set(r.value);
       });
     });
   }
