@@ -1,7 +1,11 @@
 /* gateway · 单日页 · 交互(vanilla)
-   方向:呼吸、墨迹晕开、纸页起身;绝不闪烁弹跳 */
-(function () {
+   方向:呼吸、墨迹晕开、纸页起身;绝不闪烁弹跳
+   P2b 起包成 window.paperInit():数据层(day-paper-data.js)渲染完 DOM 再调,
+   行为绑定才有东西可绑。打卡/水杯的真实写入也在 data 层,这里只管手感。 */
+window.paperInit = function () {
   "use strict";
+  if (window.paperInit._done) { return; }
+  window.paperInit._done = true;
   document.documentElement.classList.add("has-js");
 
   var motionOK = window.matchMedia("(prefers-reduced-motion: no-preference)").matches;
@@ -86,40 +90,6 @@
     }, { passive: true });
   }
 
-  /* ── 八杯水 ──────────────────────────────── */
-  var cupsWrap = document.getElementById("cups");
-  var tally = document.getElementById("cupsTally");
-  if (cupsWrap) {
-    var updateTally = function () {
-      var n = cupsWrap.querySelectorAll(".cup.full").length;
-      if (tally) {
-        tally.textContent = n + " / 8" + (n < 8 ? " · 宿醉的日子多喝两杯" : " · 喝满了");
-      }
-    };
-    cupsWrap.addEventListener("click", function (e) {
-      var cup = e.target.closest(".cup");
-      if (!cup) { return; }
-      cup.classList.toggle("full");
-      updateTally();
-    });
-  }
-
-  /* ── 补剂:点一下落一粒墨 ────────────────── */
-  Array.prototype.forEach.call(document.querySelectorAll(".med"), function (med) {
-    med.addEventListener("click", function () {
-      var marks = med.querySelectorAll(".mark");
-      var next = med.querySelector(".mark:not(.done)");
-      if (next) {
-        next.classList.add("done");
-      } else {
-        marks.forEach ? marks.forEach(function (m) { m.classList.remove("done"); })
-          : Array.prototype.forEach.call(marks, function (m) { m.classList.remove("done"); });
-      }
-      var all = med.querySelectorAll(".mark.done").length === marks.length;
-      med.classList.toggle("alldone", all);
-    });
-  });
-
   /* ── 压缩圆环 ────────────────────────────── */
   var ring = document.getElementById("memoryRing");
   var arc = document.getElementById("ringArc");
@@ -189,16 +159,4 @@
     });
   }
 
-  /* ── 回一句 ──────────────────────────────── */
-  if (composer && note) {
-    composer.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        if (composer.textContent.trim()) {
-          note.textContent = "已夹进今天的 md。明早它会读到。";
-          composer.blur();
-        }
-      }
-    });
-  }
-})();
+};

@@ -71,14 +71,17 @@
     catch (e) { return "classic"; }
   }
 
-  function navigateForSkin(skin) {
+  function navigateForSkin(skin, onLoad) {
     var name = pageName();
+    var carry = location.search + location.hash;  // ?date= 等参数跟着走
     if (skin === "paper" && !isPaperPage(name)) {
       var twin = TWINS[name];
-      if (twin && PAPER_READY.indexOf(twin) >= 0) { location.href = "./" + twin; return true; }
+      if (twin && PAPER_READY.indexOf(twin) >= 0) { location.href = "./" + twin + carry; return true; }
     }
-    if (skin === "classic" && isPaperPage(name)) {
-      location.href = "./" + classicTwin(name);
+    // paper→classic 只在显式切换/跨页同步时跳;进页(onLoad)不弹——
+    // 直接打开 paper 页是用户意图,默认皮肤不该把人请出去(headless/分享链接同理)。
+    if (!onLoad && skin === "classic" && isPaperPage(name)) {
+      location.href = "./" + classicTwin(name) + carry;
       return true;
     }
     return false;
@@ -102,8 +105,8 @@
   });
 
   applyTheme(readTheme());
-  // 进页路由:皮肤与当前页面族不符 → 跳孪生页(paper 没就位则留守 classic)
-  navigateForSkin(readSkin());
+  // 进页路由:skin=paper 且当前在 classic → 跳孪生页;反向进页不弹(见上)
+  navigateForSkin(readSkin(), true);
 
   window.gatewayTheme = { get: readTheme, set: setTheme, apply: applyTheme, KEY: THEME_KEY };
   window.gatewaySkin = {

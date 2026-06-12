@@ -8906,9 +8906,10 @@ def journal_tag_stats(limit: int = 5):
 @app.post("/api/journal/insert-block")
 async def journal_insert_block(req: Request):
     """加新条目到今天(或指定日期)的 md 中。
-    body: {date?, time: HH:MM, tag?: "工作", title?: "..."}
+    body: {date?, time: HH:MM, tag?: "工作", title?: "...", body?: "正文 md"}
     - 时间块不存在 → 新建
     - 已存在 → append 一个新 H2 到该块下(支持同时间多条目)
+    body 直通 _insert_block(paper 版 composer「回一句」真落 md 走这里)。
     """
     body = await req.json()
     date_arg = (body.get("date") or "").strip()
@@ -8930,7 +8931,8 @@ async def journal_insert_block(req: Request):
         raise HTTPException(404, "no journal file for that date")
 
     # HTTP endpoint = user 自己点 UI 加 entry → 标 @user(authorship boundary 用)
-    result = _insert_block(f, time_str, tag=tag, title=title, author="user")
+    body_md = (body.get("body") or "").strip()
+    result = _insert_block(f, time_str, tag=tag, title=title, author="user", body=body_md)
     if "error" in result:
         return JSONResponse(status_code=400, content=result)
     return result
