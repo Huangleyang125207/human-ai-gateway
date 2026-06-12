@@ -254,13 +254,22 @@
   function renderKeys(cfg) {
     const body = document.getElementById("marketBody");
     const themeNow = (window.gatewayTheme && window.gatewayTheme.get()) || "system";
+    const skinNow = (window.gatewaySkin && window.gatewaySkin.get()) || "classic";
     body.innerHTML = `
       <div class="market-hint">本地服务,key 仅落本机 config.json,不传任何第三方。任何输入框 paste 完点旁边按钮即可保存/测试。</div>
 
       <section class="setup-section" id="skinSection">
         <h3>皮肤</h3>
-        <div class="setup-howto setup-howto-secondary">日间是米黄的纸,夜间是台灯下的纸。跟系统 = 随 macOS/Windows 外观自动换。</div>
+        <div class="setup-howto setup-howto-secondary">两套前端整体切换。新版还在逐页组装:组好的页面进新版,没组好的自动留在现版。</div>
         <div class="skin-row" role="radiogroup" aria-label="皮肤">
+          ${[["classic","现版 · 私印小报"],["paper","新版 · 纸与灯"]].map(([v,label]) => `
+            <label class="skin-opt" style="margin-right:14px;cursor:pointer;">
+              <input type="radio" name="skinKind" value="${v}" ${skinNow===v?"checked":""}> ${label}
+            </label>`).join("")}
+        </div>
+        <div class="skin-row skin-theme-row" role="radiogroup" aria-label="新版日夜"
+             style="margin-top:8px;${skinNow==="paper"?"":"display:none;"}">
+          <span style="opacity:.6;margin-right:10px;">新版的纸色:</span>
           ${[["day","日间"],["night","夜间"],["system","跟系统"]].map(([v,label]) => `
             <label class="skin-opt" style="margin-right:14px;cursor:pointer;">
               <input type="radio" name="skinMode" value="${v}" ${themeNow===v?"checked":""}> ${label}
@@ -328,7 +337,14 @@
       });
     });
 
-    // 皮肤切换 — 真源 localStorage["gateway-theme"],theme.js 全站生效
+    // 皮肤切换(两层) — skin 真源 gateway-skin,日夜真源 gateway-theme(theme.js)
+    [...body.querySelectorAll('input[name="skinKind"]')].forEach(r => {
+      r.addEventListener("change", () => {
+        const themeRow = body.querySelector(".skin-theme-row");
+        if (themeRow) themeRow.style.display = r.value === "paper" ? "" : "none";
+        if (window.gatewaySkin) window.gatewaySkin.set(r.value);
+      });
+    });
     [...body.querySelectorAll('input[name="skinMode"]')].forEach(r => {
       r.addEventListener("change", () => {
         if (window.gatewayTheme) window.gatewayTheme.set(r.value);
