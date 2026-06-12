@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>总览 · gateway · 排版稿</title>
+<!--
+  ════════════════════════════════════════════════════════
+  gateway · 总览 · 排版稿(定版面,不接数据)
+  ────────────────────────────────────────────────────────
+  · 字体只写字体名(--font-song/--font-kai),不挂任何 CDN,vendor 在 repo 侧
+  · 排版只出夜间版;日间整页靠 token 切(语义写在 design-tokens.css:
+    夜=台灯,昼=天光——同一个 .lamp,两套变量)
+  · 版面器官,自上而下:
+    报头(品牌刊名 + 今天日期 + aura)
+    └ 更新通知条:窄笺斜插在规线下,读完可折叠离场
+    今天的入口(主角):整块即 <a>,kicker/lede/摘要/meta 四行
+    晨课 · widget 拼装区:定的是排布规则(flex 流、内容定宽、
+      固定列距行距),不是为补剂/八杯水画位置——见 components.css 注释
+    脉搏:项目状态行,账本体例,禁卡片
+    往日:天列表行,进历史页
+  · 侧栏对话 = 页边折着的一道(.chatfold):未读朱点 + 竖排题 +
+    压缩圆环驻地(folding 底部)。点开,信笺(.chatpane)从页边抽出,
+    主纸向左让半个信笺宽——台灯不动,纸动
+  · 新建一天的入口不另设:它是「今天的入口」的零态(空白态那版可见)
+  · 两个状态:body[data-state="filled" | "first"],左上角样张切换
+    (评审用,vendor 时整段删)
+  ════════════════════════════════════════════════════════
+-->
+<link rel="stylesheet" href="design-tokens.css" />
+<link rel="stylesheet" href="components.css" />
+<style>
+  /* ── 本页排版稿专用(状态切换 + 评审件,vendor 时酌情删) ── */
+  body[data-state="filled"] [data-only="first"],
+  body[data-state="first"] [data-only="filled"] { display: none !important; }
+
+  a.blank-start { text-decoration: none; width: fit-content; }
+
+  .proof-toggle {
+    position: fixed; left: 16px; top: 14px; z-index: 9;
+    display: flex; align-items: baseline; gap: 1em;
+    font-family: var(--font-kai);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    color: var(--ink-faint);
+    opacity: 0.55;
+    transition: opacity 0.4s ease;
+  }
+  .proof-toggle:hover { opacity: 1; }
+  .proof-toggle button {
+    background: none; border: none; cursor: pointer;
+    font: inherit; color: inherit; letter-spacing: inherit;
+    padding: 0;
+  }
+  .proof-toggle button[aria-pressed="true"] { color: var(--cinnabar-soft); }
+</style>
+</head>
+<body data-state="filled" data-screen-label="总览">
+
+<div class="lamp" aria-hidden="true"></div>
+<div class="cursor-glow" aria-hidden="true"></div>
+
+<!-- 评审用:样张切换(vendor 时删) -->
+<div class="proof-toggle" aria-label="样张切换">
+  <span>样张</span>
+  <button type="button" data-proof="filled" aria-pressed="true">有一天</button>
+  <span>·</span>
+  <button type="button" data-proof="first" aria-pressed="false">第一次打开</button>
+</div>
+
+<div class="sheet">
+
+  <!-- ── 报头:刊名 + 今天日期 + 那口呼吸 ───────── -->
+  <header class="masthead">
+    <p class="masthead-over ink-in" data-delay="0">人与 AI 共写的一卷</p>
+    <h1 class="masthead-date ink-in" data-delay="150" style="letter-spacing: 0.3em; text-indent: 0.3em;">GATEWAY</h1>
+    <p class="masthead-sub ink-in" data-delay="350" data-only="filled">二〇二六年六月十一日 丙午 · 星期四 · 卷四十一</p>
+    <p class="masthead-sub ink-in" data-delay="350" data-only="first">二〇二六年六月十一日 丙午 · 星期四 · 第一卷</p>
+    <div class="masthead-rule-row ink-in" data-delay="550">
+      <div class="masthead-rule"></div>
+      <button class="mode-toggle" id="modeToggle" data-mode="system" type="button" title="点「昼」或「夜」定调;再点一次当前的,回到跟随系统">
+        <span class="mt-opt mt-day">昼</span><span class="mt-dot">·</span><span class="mt-opt mt-night">夜</span>
+      </button>
+    </div>
+    <!-- 更新通知条:窄笺斜插在规线下 -->
+    <aside class="update-slip ink-in" data-delay="700" data-only="filled" id="updateSlip">
+      <p>新版已备好——搜索修复 + 首启提速。</p>
+      <button class="us-act" type="button">这就换上</button>
+      <button class="us-later" type="button">先不</button>
+    </aside>
+  </header>
+
+  <!-- ── 今天的入口(主角) ───────────────────── -->
+  <a class="today ink-in" data-delay="850" data-only="filled" href="单日页 v2.html" data-screen-label="今天的入口">
+    <p class="today-kicker"><span>今日 · 写到 21:30</span><span class="kicker-slip"><i class="whale-dot"></i>鲸留了纸条</span></p>
+    <h2 class="today-lede">第一个内测报名出现了</h2>
+    <p class="today-excerpt dropcap">出门见人之前的一天:揪出搜索一直挂的真因——一个解析库漏打进了安装包;自更新还没修,先让它可观测;晚上,召集发出去当晚就有人接龙。</p>
+    <p class="today-meta"><span>8:30 起笔 · 16 条 · 3 夹批</span><span class="today-go">展开这一天 ⟶</span></p>
+  </a>
+
+  <!-- ── 空白的第一次打开:新建一天的入口住在主角的位置 ── -->
+  <section class="blank-day" data-only="first" data-screen-label="空白首屏">
+    <div class="blank-ruler"></div>
+    <p class="blank-invite">这一卷还没有第一页。</p>
+    <a class="blank-start" href="单日页·空白态.html">为今天起一页</a>
+    <p class="blank-whale">页边折着的那一条,是鲸在等你说话。<br />两把钥匙都配好了——它看得见,也会说话。</p>
+  </section>
+
+  <!-- ── 晨课 · widget 拼装区(排布规则见 components.css) ── -->
+  <section data-only="filled" data-screen-label="widget 拼装区">
+    <h2 class="organ-head ink-in" style="margin-top: 4.8rem;">晨课</h2>
+    <div class="widget-flow ink-in">
+      <div class="widget" data-widget="补剂">
+        <div class="widget-side"><h3 class="widget-label">补剂打卡</h3></div>
+        <ul class="widget-body meds">
+          <li class="med-row"><button class="med alldone" type="button"><span class="marks"><span class="mark done"></span><span class="mark done"></span></span>鱼油 <span class="brand">Swisse</span></button></li>
+          <li class="med-row"><button class="med alldone" type="button"><span class="marks"><span class="mark done"></span></span>肌酸</button></li>
+          <li class="med-row"><button class="med" type="button"><span class="marks"><span class="mark"></span></span>苏糖酸镁</button></li>
+          <li class="med-row"><button class="med" type="button"><span class="marks"><span class="mark"></span></span>维生素 D3+K2 <span class="brand">gloryfeel</span></button></li>
+          <li class="med-row"><button class="med" type="button"><span class="marks"><span class="mark"></span></span>南非醉茄 KSM-66 <span class="brand">Nature Love</span></button></li>
+        </ul>
+      </div>
+      <div class="widget" data-widget="八杯水">
+        <div class="widget-side"><h3 class="widget-label">八杯水</h3></div>
+        <div class="widget-body">
+          <div class="cups" id="cups">
+            <button class="cup full" type="button" aria-label="第 1 杯"></button>
+            <button class="cup full" type="button" aria-label="第 2 杯"></button>
+            <button class="cup full" type="button" aria-label="第 3 杯"></button>
+            <button class="cup full" type="button" aria-label="第 4 杯"></button>
+            <button class="cup full" type="button" aria-label="第 5 杯"></button>
+            <button class="cup full" type="button" aria-label="第 6 杯"></button>
+            <button class="cup" type="button" aria-label="第 7 杯"></button>
+            <button class="cup" type="button" aria-label="第 8 杯"></button>
+          </div>
+          <p class="cups-tally"><span id="cupsTally">6 / 8 · 宿醉的日子多喝两杯</span></p>
+        </div>
+      </div>
+    </div>
+    <p class="morning-hint ink-in">想多记一件事?跟它说一句,它会替你在这里裁一个栏目。</p>
+  </section>
+
+  <!-- ── 脉搏:项目状态行,禁卡片 ─────────────── -->
+  <section data-only="filled" data-screen-label="项目脉搏">
+    <h2 class="organ-head ink-in" style="margin-top: 4.8rem;">脉搏</h2>
+    <ul class="pulse ink-in">
+      <li class="pulse-row" data-live>
+        <span class="pulse-name">yanpai</span>
+        <span class="pulse-word">内测在小红书铺开,第一个报名接龙</span>
+        <span class="pulse-spark">▂▃▃▅▆▇</span>
+        <span class="pulse-when">今天</span>
+      </li>
+      <li class="pulse-row" data-live>
+        <span class="pulse-name">连载 · 小鲸鱼</span>
+        <span class="pulse-word">第二话定稿,封面从此单算一道工序</span>
+        <span class="pulse-spark">▁▄▂▆▃▅</span>
+        <span class="pulse-when">今天</span>
+      </li>
+      <li class="pulse-row">
+        <span class="pulse-name">A 股复盘</span>
+        <span class="pulse-word">信号面板蛰伏,等季报季</span>
+        <span class="pulse-spark">▅▃▂▂▁▁</span>
+        <span class="pulse-when">六月五日</span>
+      </li>
+      <li class="pulse-row">
+        <span class="pulse-name">桌宠</span>
+        <span class="pulse-word">外壳打样在路上</span>
+        <span class="pulse-spark">▂▁▁▂▁▁</span>
+        <span class="pulse-when">五月廿九</span>
+      </li>
+    </ul>
+  </section>
+
+  <!-- ── 往日:天列表行,进历史页 ─────────────── -->
+  <section data-only="filled" data-screen-label="往日翻阅">
+    <h2 class="organ-head ink-in" style="margin-top: 4.8rem;">往日</h2>
+    <ol class="days-list ink-in">
+      <li><a class="day-row" href="单日页 v2.html">
+        <time>六月十日</time>
+        <span class="day-gist">第二话被打回两次,封面才是广告位</span>
+        <span class="day-counts">12 条 <i class="whale-dot" title="鲸留过纸条"></i></span>
+      </a></li>
+      <li><a class="day-row" href="单日页 v2.html">
+        <time>六月九日</time>
+        <span class="day-gist">双钥匙仪式跑通:百炼装眼,DeepSeek 说话</span>
+        <span class="day-counts">9 条 <i class="whale-dot" title="鲸留过纸条"></i></span>
+      </a></li>
+      <li><a class="day-row" href="单日页 v2.html">
+        <time>六月八日</time>
+        <span class="day-gist">自更新黑盒立案,先让它可见</span>
+        <span class="day-counts">7 条</span>
+      </a></li>
+      <li><a class="day-row" href="单日页 v2.html">
+        <time>六月七日</time>
+        <span class="day-gist">风控评估:免费 + 无站外链接 = 低风险盘</span>
+        <span class="day-counts">8 条 <i class="whale-dot" title="鲸留过纸条"></i></span>
+      </a></li>
+      <li><a class="day-row" href="单日页 v2.html">
+        <time>六月六日</time>
+        <span class="day-gist">漫画第一话上线,534 个赞砸出定位</span>
+        <span class="day-counts">10 条 <i class="whale-dot" title="鲸留过纸条"></i></span>
+      </a></li>
+    </ol>
+    <p class="days-more"><a href="单日页 v2.html">翻更早的 ⟶</a></p>
+  </section>
+
+  <!-- ── 卷尾 ─────────────────────────────────── -->
+  <footer class="colophon ink-in">
+    <span class="fleuron">❦</span>
+    <p data-only="filled">md 是真相,这一页是它的热镜像</p>
+    <p data-only="filled"><a href="单日页 v2.html">今天的全文</a> · <a href="icons.html">图记</a></p>
+    <p data-only="first">md 是真相,这一页是它的热镜像</p>
+    <p data-only="first">写下第一句,这里就开始长</p>
+  </footer>
+
+</div>
+
+<!-- ── 折页:侧栏对话的收起态 ──────────────────── -->
+<button class="chatfold" id="chatFold" type="button" data-unread aria-label="打开对话" title="与鲸说话">
+  <i class="fold-dot"></i>
+  <span class="fold-label">与鲸说话</span>
+  <span class="memory-ring bare fold-ring" aria-hidden="true">
+    <svg width="20" height="20" viewBox="0 0 22 22">
+      <circle class="ring-track" cx="11" cy="11" r="8.5" fill="none" stroke-width="1.4"></circle>
+      <circle class="ring-arc" cx="11" cy="11" r="8.5" fill="none" stroke-width="1.4"
+              stroke-dasharray="53.4" stroke-dashoffset="22" stroke-linecap="round"
+              transform="rotate(-90 11 11)"></circle>
+      <circle class="ring-core" cx="11" cy="11" r="3"></circle>
+    </svg>
+  </span>
+</button>
+
+<!-- ── 信笺:侧栏对话的展开态(标准聊天工作台的纸化皮肤) ── -->
+<aside class="chatpane" id="chatPane" aria-label="与鲸的对话" data-screen-label="信笺对话">
+  <header class="chatpane-head">
+    <span class="chatpane-title">信笺 · 与鲸</span>
+    <button class="memory-ring bare" id="paneRing" type="button" title="今天的对话写满约六成,点一下把记忆压进快照">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+        <circle class="ring-track" cx="11" cy="11" r="8.5" fill="none" stroke-width="1.4"></circle>
+        <circle class="ring-arc" id="paneArc" cx="11" cy="11" r="8.5" fill="none" stroke-width="1.4"
+                stroke-dasharray="53.4" stroke-dashoffset="22" stroke-linecap="round"
+                transform="rotate(-90 11 11)"></circle>
+        <circle class="ring-core" cx="11" cy="11" r="3"></circle>
+      </svg>
+    </button>
+    <button class="chatpane-close" id="chatClose" type="button">收页</button>
+  </header>
+
+  <div class="letters" id="letters">
+    <p class="letters-rule" data-only="filled">六月十一日</p>
+    <div class="letter me" data-only="filled">
+      <p class="letter-meta">14:02 · 我</p>
+      <div class="letter-body"><p>下午的复盘帮我并成一条,重点留封面那课。</p></div>
+    </div>
+    <div class="letter ai" data-only="filled">
+      <p class="letter-meta"><span class="seal">鲸</span>14:03 · 鲸</p>
+      <div class="letter-body">
+        <p class="letter-quote">「往群里发过一条转写过的下载链接……已撤」</p>
+        <p>并进 13:30 那条了。链接这件事我标成了 lesson——收费、托管钥匙、批量群发三条线,我会一直盯着。</p>
+      </div>
+    </div>
+    <div class="letter ai" data-only="filled">
+      <p class="letter-meta"><span class="seal">鲸</span>21:30 · 鲸 · 今日纸条</p>
+      <div class="letter-body"><p>纸条留在今天的 21:30 了。三件看不见的事变成了看得见的——都不是新功能,都是灯。早点睡。</p></div>
+    </div>
+    <div class="letter me" data-only="filled">
+      <p class="letter-meta">22:41 · 我</p>
+      <div class="letter-body"><p>明天第一个装机的,提醒我链接不打头阵。</p></div>
+    </div>
+    <div class="letter ai" data-only="filled">
+      <p class="letter-meta"><span class="seal">鲸</span>它在落笔</p>
+      <div class="letter-body"><span class="ink-grind" aria-label="它在落笔前"><i></i><i></i><i></i></span></div>
+    </div>
+
+    <p class="letters-rule" data-only="first">起卷</p>
+    <div class="letter ai" data-only="first">
+      <p class="letter-meta"><span class="seal">鲸</span>刚刚 · 鲸</p>
+      <div class="letter-body">
+        <p>你好,我住进来了。阿里云是我的眼睛,DeepSeek 是我说话的声音——两把钥匙都配好了。</p>
+        <p>今天发生什么了?一句也行,我从那一句开始认识你。</p>
+      </div>
+    </div>
+  </div>
+
+  <footer class="chatpane-foot">
+    <div class="composer">
+      <div class="composer-input" id="paneComposer" contenteditable="true" data-placeholder="说一句……" role="textbox" aria-label="对鲸说话"></div>
+    </div>
+    <p class="composer-note" id="paneNote">选中正文任何一句,可以引到这里说。</p>
+  </footer>
+</aside>
+
+<button class="quote-chip" id="quoteChip" type="button"><span class="chip-dot"></span>引入对话</button>
+
+<script src="总览排版.js"></script>
+</body>
+</html>

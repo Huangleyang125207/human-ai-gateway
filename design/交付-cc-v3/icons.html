@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>图记 · gateway</title>
+<!--
+  ════════════════════════════════════════════════════════
+  gateway · 图记(icons.html)
+  每一枚小件的纸做法,独立 CSS/SVG + 动效,点它看它动。
+  · 全部颜色取自 design-tokens.css,昼夜两版只换墨色——
+    用规线左端「昼·夜」或 ⑤ 那枚小印当场验证
+  · 所有动效尊重 prefers-reduced-motion(由 components.css 统一闸)
+  · 等待态禁 spinner:磨墨三点(AI 落笔前)与抠图呼吸(灰+糊+慢闪)
+    都是"墨迹未定"方向
+  · 新增禁 FAB:落一笔 / 添一行 / 裁一栏 / 起一页,全是纸上长出来的
+  ════════════════════════════════════════════════════════
+-->
+<link rel="stylesheet" href="design-tokens.css" />
+<link rel="stylesheet" href="components.css" />
+<style>
+  /* ── 本页样张排版(specimen 脚手架,非组件) ── */
+  .sheet { width: min(92vw, 700px); }
+  .spec {
+    border-top: 1px solid var(--hairline);
+    padding: 2.6rem 0;
+    display: grid;
+    grid-template-columns: 12em 1fr;
+    gap: 2.6em;
+    align-items: start;
+  }
+  .spec:first-of-type { border-top: none; }
+  .spec-head h2 {
+    font-size: var(--fs-canon);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    line-height: 1.6;
+  }
+  .spec-head .spec-no {
+    display: block;
+    font-size: var(--fs-note);
+    font-weight: 400;
+    letter-spacing: 0.3em;
+    color: var(--cinnabar-faint);
+    margin-bottom: 0.4rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .spec-head p {
+    margin-top: 0.7rem;
+    font-family: var(--font-kai);
+    font-size: 13px;
+    line-height: 1.9;
+    color: var(--ink-soft);
+    text-wrap: pretty;
+  }
+  .spec-stage { padding-top: 0.4rem; min-width: 0; }
+  .spec-row {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 2.2em; row-gap: 1.4em;
+  }
+  .spec-cap {
+    font-size: var(--fs-note);
+    color: var(--ink-faint);
+    letter-spacing: 0.08em;
+  }
+  .spec-redo {
+    background: none; border: none; cursor: pointer;
+    font-family: var(--font-kai); font-size: 12px;
+    letter-spacing: 0.1em;
+    color: var(--ink-faint);
+    transition: color 0.4s ease;
+  }
+  .spec-redo:hover { color: var(--cinnabar-soft); }
+  /* 样张里的迷你 widget 骨架(未知 widget 的占位内容) */
+  .ghost-lines { display: grid; gap: 0.7em; padding-top: 4px; }
+  .ghost-lines i {
+    height: 1px; background: var(--hairline-strong);
+    width: 11em;
+  }
+  .ghost-lines i:nth-child(2) { width: 8.5em; }
+  .ghost-lines i:nth-child(3) { width: 9.5em; opacity: 0.6; }
+  /* 裁一栏:hint → 基线输入 → 长出骨架 */
+  .tailor-line { cursor: pointer; transition: color 0.4s ease; }
+  .tailor-line:hover { color: var(--ink-soft); }
+  .tailor-input { display: none; }
+  .tailoring .tailor-line { display: none; }
+  .tailoring .tailor-input { display: block; }
+  @media (max-width: 700px) {
+    .spec { grid-template-columns: 1fr; gap: 1.2em; }
+  }
+</style>
+</head>
+<body data-screen-label="图记">
+
+<div class="lamp" aria-hidden="true"></div>
+
+<div class="sheet">
+
+  <header class="masthead">
+    <p class="masthead-over">GATEWAY · 小件的纸做法</p>
+    <h1 class="masthead-date" style="font-size: 44px;">图记</h1>
+    <p class="masthead-sub">每一枚都点得动 · 昼夜两版只换墨色</p>
+    <div class="masthead-rule-row">
+      <div class="masthead-rule"></div>
+      <button class="mode-toggle" id="modeToggle" data-mode="system" type="button" title="点「昼」或「夜」定调;再点一次当前的,回到跟随系统">
+        <span class="mt-opt mt-day">昼</span><span class="mt-dot">·</span><span class="mt-opt mt-night">夜</span>
+      </button>
+    </div>
+  </header>
+
+  <main style="margin-top: 3.6rem;">
+
+    <!-- ① 补剂墨点 -->
+    <section class="spec" data-screen-label="补剂墨点">
+      <header class="spec-head">
+        <h2><span class="spec-no">壹</span>补剂打卡墨点</h2>
+        <p>点下去,一粒墨在圈里晕开;再点收回。记号有圆、方、菱三形,管理态里点记号换形。日间版墨色换棕,晕开节奏不变。</p>
+      </header>
+      <div class="spec-stage">
+        <div class="spec-row">
+          <ul class="meds" style="min-width: 16em;">
+            <li class="med-row"><button class="med" type="button"><span class="marks"><span class="mark"></span><span class="mark"></span></span>鱼油 <span class="brand">一日两粒</span></button></li>
+            <li class="med-row"><button class="med" type="button"><span class="marks"><span class="mark" data-shape="square"></span></span>肌酸</button></li>
+            <li class="med-row"><button class="med" type="button"><span class="marks"><span class="mark" data-shape="diamond"></span></span>苏糖酸镁</button></li>
+          </ul>
+          <span class="spec-cap">圆 · 方 · 菱</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ② 八杯水 -->
+    <section class="spec" data-screen-label="八杯水">
+      <header class="spec-head">
+        <h2><span class="spec-no">贰</span>八杯水</h2>
+        <p>手捏的杯口,八只各歪各的。空杯只有发丝边;点一下,墨从杯心注满。灰→墨,不用蓝色的水。</p>
+      </header>
+      <div class="spec-stage">
+        <div class="cups">
+          <button class="cup full" type="button" aria-label="第 1 杯"></button>
+          <button class="cup full" type="button" aria-label="第 2 杯"></button>
+          <button class="cup full" type="button" aria-label="第 3 杯"></button>
+          <button class="cup" type="button" aria-label="第 4 杯"></button>
+          <button class="cup" type="button" aria-label="第 5 杯"></button>
+          <button class="cup" type="button" aria-label="第 6 杯"></button>
+          <button class="cup" type="button" aria-label="第 7 杯"></button>
+          <button class="cup" type="button" aria-label="第 8 杯"></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ③ 压缩圆环 -->
+    <section class="spec" data-screen-label="压缩圆环">
+      <header class="spec-head">
+        <h2><span class="spec-no">叁</span>压缩圆环</h2>
+        <p>对话长度的小指示:弧是今天说过的话。点一下「收进匣子」——弧被卷回去,心里凝一粒朱砂,那粒就是快照。驻地:折页底部、信笺头。</p>
+      </header>
+      <div class="spec-stage">
+        <div class="spec-row">
+          <button class="memory-ring bare" id="specRing" type="button" title="点一下,收进匣子">
+            <svg width="30" height="30" viewBox="0 0 22 22" aria-hidden="true">
+              <circle class="ring-track" cx="11" cy="11" r="8.5" fill="none" stroke-width="1.4"></circle>
+              <circle class="ring-arc" id="specArc" cx="11" cy="11" r="8.5" fill="none" stroke-width="1.4"
+                      stroke-dasharray="53.4" stroke-dashoffset="18" stroke-linecap="round"
+                      transform="rotate(-90 11 11)"></circle>
+              <circle class="ring-core" cx="11" cy="11" r="3"></circle>
+            </svg>
+            <span class="ring-hint">收进匣子</span>
+            <span class="ring-done">已收进快照</span>
+          </button>
+          <button class="spec-redo" id="specRingRedo" type="button">再来一遍</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ④ widget 题签 -->
+    <section class="spec" data-screen-label="widget 题签">
+      <header class="spec-head">
+        <h2><span class="spec-no">肆</span>竖排题签 + 发丝线</h2>
+        <p>未知 widget 的全部边界:一根发丝线立在左侧,楷体竖题挂在线上。没有底色、圆角框、投影。悬停浮出「理」,是管理态的门。</p>
+      </header>
+      <div class="spec-stage">
+        <div class="widget" data-widget="未知">
+          <div class="widget-side">
+            <h3 class="widget-label">随便什么</h3>
+            <button class="widget-manage" type="button" title="管理态的门">理</button>
+          </div>
+          <div class="widget-body">
+            <div class="ghost-lines" aria-label="未来内容的占位"><i></i><i></i><i></i></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ⑤ 昼夜小印 -->
+    <section class="spec" data-screen-label="昼夜小印">
+      <header class="spec-head">
+        <h2><span class="spec-no">伍</span>日/夜切换的小印</h2>
+        <p>一枚方印,印着当下的时辰。点一下,字化墨散去、另一面浮上来——整页随之换灯。紧凑处用印;报头规线上仍用「昼·夜」双字态。</p>
+      </header>
+      <div class="spec-stage">
+        <div class="spec-row">
+          <button class="mode-seal" id="modeSeal" type="button" title="换一盏灯">
+            <span class="ms-char" id="msChar">夜</span>
+          </button>
+          <span class="spec-cap" id="msCap">现在是夜——台灯。点印换天光。</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ⑥ 朱砂三件 -->
+    <section class="spec" data-screen-label="朱砂三件">
+      <header class="spec-head">
+        <h2><span class="spec-no">陆</span>朱砂三件</h2>
+        <p>@ai 呼吸点:它在读,七秒一息,不是通知灯。「批」字小印:夹批的署名。「鲸」落款印:21:30 纸条的收笔。一页一两处朱,过则失贵。</p>
+      </header>
+      <div class="spec-stage">
+        <div class="spec-row">
+          <span style="display: inline-flex; align-items: center; gap: 0.8em;">
+            <span class="ai-mark" style="transform: none;"></span>
+            <span class="spec-cap">@ai 呼吸点</span>
+          </span>
+          <span style="display: inline-flex; align-items: center; gap: 0.8em;">
+            <span class="seal">批</span>
+            <span class="spec-cap">夹批小印</span>
+          </span>
+          <span style="display: inline-flex; align-items: center; gap: 0.8em;">
+            <span style="font-family: var(--font-kai); font-size: 14px; color: var(--ink-soft);">—— 鲸 留</span>
+            <span class="seal">鲸</span>
+            <span class="spec-cap">落款印</span>
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ⑦ 等待态 -->
+    <section class="spec" data-screen-label="等待态">
+      <header class="spec-head">
+        <h2><span class="spec-no">柒</span>等待态 · 磨墨</h2>
+        <p>禁 spinner。AI 落笔前:三粒墨先后渗开又收住,研墨的节奏。抠图处理中:贴纸先灰着、糊着、慢慢呼吸——墨色未定,点贴纸重演一遍落纸。</p>
+      </header>
+      <div class="spec-stage">
+        <div class="spec-row">
+          <span style="display: inline-flex; align-items: center; gap: 1em;">
+            <span class="ink-grind" aria-label="它在落笔前"><i></i><i></i><i></i></span>
+            <span class="spec-cap">AI 落笔前</span>
+          </span>
+          <figure class="sticker processing" id="specSticker" style="float: none; margin: 0; cursor: pointer;" title="点一下,重演抠图→落纸">
+            <div class="sticker-ph"><span>拖进来的图<br />先在这里抠</span></div>
+            <div class="sticker-wait">正在抠图……</div>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ⑧ 新增的纸做法 -->
+    <section class="spec" data-screen-label="新增的纸做法">
+      <header class="spec-head">
+        <h2><span class="spec-no">捌</span>新增的纸做法</h2>
+        <p>禁 FAB 悬浮球。加条目 = 空白时段的「落一笔」;加一行 = 列尾长出的基线;加 widget = 跟它说一句,它替你裁一栏;第一页 = 「为今天起一页」。</p>
+      </header>
+      <div class="spec-stage" style="display: grid; gap: 1.8rem;">
+        <div class="gap" style="display: grid; grid-template-columns: 76px 1fr;">
+          <div class="rail" style="border-right: 1px dotted var(--hairline); padding-right: 18px;"></div>
+          <p class="gap-span" style="padding: 0.2rem 18px 0.2rem;"><span>11:30 ⋯⋯ 13:00</span><button class="gap-add" type="button" style="opacity: 0.85;">落一笔</button></p>
+        </div>
+        <div class="med-add" style="display: block;">
+          <div class="med-add-line" contenteditable="true" data-placeholder="添一行……"></div>
+        </div>
+        <div id="tailor">
+          <p class="morning-hint tailor-line" style="margin-top: 0; text-align: left;" title="点一句话,开始裁栏">想多记一件事?跟它说一句,它会替你在这里裁一个栏目。</p>
+          <div class="tailor-input">
+            <div class="med-add-line" id="tailorLine" contenteditable="true" data-placeholder="比如:帮我记每天的心情……" style="min-width: 16em;"></div>
+          </div>
+          <div id="tailorGrown"></div>
+        </div>
+        <a class="blank-start" href="单日页·空白态.html" style="margin: 0; display: inline-block; width: fit-content; text-decoration: none;">为今天起一页</a>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="colophon">
+    <span class="fleuron">❦</span>
+    <p>颜色全部取自 design-tokens.css · 组件本体在 components.css</p>
+    <p><a href="总览排版.html">总览排版稿</a> · <a href="单日页 v2.html">单日页竖切</a></p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+  document.documentElement.classList.add("has-js");
+  var motionOK = window.matchMedia("(prefers-reduced-motion: no-preference)").matches;
+  function motionOn() { return motionOK && document.body.dataset.motion !== "off"; }
+
+  /* ── 昼夜(同一把钥匙) ── */
+  var THEME_KEY = "gateway-theme";
+  var modeToggle = document.getElementById("modeToggle");
+  var msChar = document.getElementById("msChar");
+  var msCap = document.getElementById("msCap");
+  function currentMode() {
+    var t = document.documentElement.getAttribute("data-theme");
+    if (t === "day" || t === "night") { return t; }
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "day" : "night";
+  }
+  function paintSeal() {
+    if (!msChar) { return; }
+    var m = currentMode();
+    msChar.textContent = m === "day" ? "昼" : "夜";
+    if (msCap) {
+      msCap.textContent = m === "day"
+        ? "现在是昼——天光。点印换台灯。"
+        : "现在是夜——台灯。点印换天光。";
+    }
+  }
+  function applyTheme(mode) {
+    if (mode === "day" || mode === "night") {
+      document.documentElement.setAttribute("data-theme", mode);
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+      mode = "system";
+    }
+    if (modeToggle) { modeToggle.setAttribute("data-mode", mode); }
+    paintSeal();
+  }
+  function setTheme(mode) {
+    try {
+      if (mode === "day" || mode === "night") { window.localStorage.setItem(THEME_KEY, mode); }
+      else { window.localStorage.removeItem(THEME_KEY); }
+    } catch (e) {}
+    applyTheme(mode);
+  }
+  var saved = null;
+  try { saved = window.localStorage.getItem(THEME_KEY); } catch (e) {}
+  applyTheme(saved);
+  if (modeToggle) {
+    modeToggle.addEventListener("click", function (e) {
+      var cur = modeToggle.getAttribute("data-mode");
+      if (e.target.closest(".mt-day")) { setTheme(cur === "day" ? "system" : "day"); }
+      else if (e.target.closest(".mt-night")) { setTheme(cur === "night" ? "system" : "night"); }
+    });
+  }
+
+  /* ⑤ 昼夜小印:字化墨散去,另一面浮上来 */
+  var seal = document.getElementById("modeSeal");
+  if (seal) {
+    seal.addEventListener("click", function () {
+      var next = currentMode() === "day" ? "night" : "day";
+      if (!motionOn()) { setTheme(next); return; }
+      seal.classList.add("flipping");
+      window.setTimeout(function () {
+        setTheme(next);
+        seal.classList.remove("flipping");
+      }, 420);
+    });
+  }
+
+  /* ① 补剂墨点 */
+  document.addEventListener("click", function (e) {
+    var med = e.target.closest(".med");
+    if (!med) { return; }
+    var marks = med.querySelectorAll(".mark");
+    var next = med.querySelector(".mark:not(.done)");
+    if (next) { next.classList.add("done"); }
+    else { marks.forEach(function (m) { m.classList.remove("done"); }); }
+    med.classList.toggle("alldone",
+      med.querySelectorAll(".mark.done").length === marks.length);
+  });
+
+  /* ② 八杯水 */
+  document.addEventListener("click", function (e) {
+    var cup = e.target.closest(".cup");
+    if (cup) { cup.classList.toggle("full"); }
+  });
+
+  /* ③ 压缩圆环:收进匣子 / 再来一遍 */
+  var ring = document.getElementById("specRing");
+  var arc = document.getElementById("specArc");
+  var redo = document.getElementById("specRingRedo");
+  if (ring && arc) {
+    ring.addEventListener("click", function () {
+      if (ring.classList.contains("compressed") || ring.classList.contains("compressing")) { return; }
+      ring.classList.add("compressing");
+      arc.style.strokeDashoffset = "53.4";
+      window.setTimeout(function () {
+        ring.classList.remove("compressing");
+        ring.classList.add("compressed");
+      }, motionOn() ? 1450 : 0);
+    });
+  }
+  if (redo && ring && arc) {
+    redo.addEventListener("click", function () {
+      ring.classList.remove("compressed", "compressing");
+      arc.style.transition = "none";
+      arc.style.strokeDashoffset = "18";
+      void arc.getBoundingClientRect();
+      arc.style.transition = "";
+    });
+  }
+
+  /* ⑦ 抠图等待:点贴纸重演 处理中→落纸 */
+  var sticker = document.getElementById("specSticker");
+  if (sticker) {
+    var replay = function () {
+      sticker.classList.remove("landing");
+      sticker.classList.add("processing");
+      window.setTimeout(function () {
+        sticker.classList.remove("processing");
+        sticker.classList.add("landing");
+        window.setTimeout(function () { sticker.classList.remove("landing"); }, 750);
+      }, motionOn() ? 1800 : 50);
+    };
+    sticker.addEventListener("click", replay);
+    window.setTimeout(replay, 1200);
+  }
+
+  /* ⑧ 裁一栏:hint → 基线输入 → 长出题签骨架 */
+  var tailor = document.getElementById("tailor");
+  var tailorLine = document.getElementById("tailorLine");
+  var grown = document.getElementById("tailorGrown");
+  if (tailor && tailorLine && grown) {
+    tailor.querySelector(".tailor-line").addEventListener("click", function () {
+      tailor.classList.add("tailoring");
+      tailorLine.focus();
+    });
+    tailorLine.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") { return; }
+      e.preventDefault();
+      var ask = tailorLine.textContent.trim();
+      if (!ask) { return; }
+      tailorLine.textContent = "";
+      tailor.classList.remove("tailoring");
+      var name = ask.replace(/^帮我记|^记/, "").replace(/每天的?|的/g, "").trim().slice(0, 4) || "新栏";
+      grown.innerHTML =
+        "<div class=\"widget ink-in\" style=\"margin-top: 1.4rem;\">" +
+        "<div class=\"widget-side\"><h3 class=\"widget-label\"></h3></div>" +
+        "<div class=\"widget-body\"><div class=\"ghost-lines\"><i></i><i></i></div></div></div>";
+      grown.querySelector(".widget-label").textContent = name;
+      var w = grown.querySelector(".ink-in");
+      window.requestAnimationFrame(function () {
+        window.requestAnimationFrame(function () {
+          if (w) { w.classList.add("is-in"); }
+        });
+      });
+      /* 无帧环境保险:rAF 不跳就直接以终态示人 */
+      window.setTimeout(function () {
+        if (w && !w.classList.contains("is-in")) {
+          w.style.transition = "none";
+          w.classList.add("is-in");
+        }
+      }, 400);
+    });
+  }
+})();
+</script>
+</body>
+</html>
