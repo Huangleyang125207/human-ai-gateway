@@ -376,6 +376,28 @@
     });
   }
 
+  /* ── 翻日:跳到存在的相邻日(跳过空缺),走 URL reload 保 STATE 干净 ── */
+  function wireDayFlip() {
+    var prev = $("flipPrev"), next = $("flipNext");
+    if (!prev || !next) return;
+    fetch("/api/journal/days").then(function (r) { return r.json(); }).then(function (d) {
+      var dates = (d.days || []).map(function (x) { return x.date; }).sort();
+      var today = new Date().toISOString().slice(0, 10);
+      if (dates.indexOf(today) < 0) dates.push(today);   // 今天即便没文件也可达
+      dates.sort();
+      var cur = STATE.date || today;
+      var i = dates.indexOf(cur);
+      function link(el, date, label) {
+        if (!date) { el.hidden = true; return; }
+        el.hidden = false;
+        el.textContent = label;
+        el.setAttribute("href", "./day-paper.html" + (date === today ? "" : "?date=" + date));
+      }
+      link(prev, i > 0 ? dates[i - 1] : null, "‹ 前一日");
+      link(next, i >= 0 && i < dates.length - 1 ? dates[i + 1] : null, "后一日 ›");
+    }).catch(function () {});
+  }
+
   /* ── 昼夜小印:报头快翻日/夜(跟设置的三态共用 gateway-theme 真源) ── */
   function wireModeSeal() {
     var seal = $("modeSeal");
@@ -425,5 +447,5 @@
       $("mhDate").textContent = "纸还没铺开";
       $("mhSub").textContent = "数据没接上,稍后再来";
     })
-    .then(function () { wireModeSeal(); window.paperInit && window.paperInit(); });
+    .then(function () { wireModeSeal(); wireDayFlip(); window.paperInit && window.paperInit(); });
 })();

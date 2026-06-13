@@ -8,6 +8,21 @@
 <script src="./shared/theme.js?v=20260612b" defer></script>
 <link rel="stylesheet" href="./shared/design-tokens.css" />
 <link rel="stylesheet" href="./shared/components.css" />
+<style>
+  /* 翻日:报头下一行,安静的纸习语(非 cd reference 件,页内作用域) */
+  .day-flip {
+    display: flex; justify-content: center; align-items: baseline; gap: 1.6em;
+    margin-top: 0.7rem;
+    font-family: var(--font-kai); font-size: 13px; letter-spacing: 0.14em;
+  }
+  .day-flip a {
+    color: var(--ink-faint); text-decoration: none; cursor: pointer;
+    transition: color 0.4s ease;
+  }
+  .day-flip a:hover { color: var(--cinnabar-soft); }
+  .day-flip .flip-list { color: var(--ink-soft); }
+  .day-flip a[hidden] { display: none; }
+</style>
 </head>
 <body data-screen-label="单日页">
 
@@ -37,6 +52,11 @@
         <span class="ms-char">夜</span>
       </button>
     </div>
+    <nav class="day-flip" id="dayFlip" aria-label="翻日">
+      <a class="flip-prev" id="flipPrev" rel="prev" hidden>‹ 前一日</a>
+      <a class="flip-list" href="./index-paper.html">往日</a>
+      <a class="flip-next" id="flipNext" rel="next" hidden>后一日 ›</a>
+    </nav>
   </header>
 
   <!-- ── 晨课:widget 带(容器习语:竖排楷体小题 + 发丝线) ── -->
