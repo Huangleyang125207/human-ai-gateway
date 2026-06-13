@@ -1,0 +1,12 @@
+{
+  "appId": "com.humanai.gateway",
+  "appName": "Gateway",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "iosScheme": "gateway"
+  },
+  "ios": {
+    "contentInset": "always"
+  }
+}

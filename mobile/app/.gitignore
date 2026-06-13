@@ -1,0 +1,11 @@
+# Capacitor 工程的构建产物 / 生成物,不进 repo
+# 注意:gitignore 行内 # 不是注释,注释必须独占一行
+node_modules/
+# www/ 由 build-web.sh 每次重新组装
+www/
+*.log
+# 原生工程:cap add 生成,体积大;Capacitor 官方建议提交,MVP 阶段先忽略保持 repo 轻
+ios/
+android/
+.gradle/
+DerivedData/

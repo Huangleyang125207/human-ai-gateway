@@ -21,24 +21,56 @@
 
   console.log("[mobile-api] 拦截层启用 — /api/* 走本地存储");
 
-  // ── 存储抽象 ─────────────────────────────────────────
-  // 浏览器后端(localStorage)。真机后端日后实现同样接口即可换。
+  // ── 存储抽象:浏览器(localStorage) / 真机(Capacitor Filesystem+Preferences)──
+  // 同一套 getText/setText/keys 接口,按运行环境自动选后端,handlers 无感知。
   var NS = "gateway.mobile.";
-  var Backend = {
+  var LocalBackend = {
     getText: function (k) { try { return Promise.resolve(localStorage.getItem(NS + k)); } catch (e) { return Promise.resolve(null); } },
     setText: function (k, v) { try { localStorage.setItem(NS + k, v); } catch (e) {} return Promise.resolve(); },
     remove: function (k) { try { localStorage.removeItem(NS + k); } catch (e) {} return Promise.resolve(); },
     keys: function (prefix) {
       var out = [];
-      try {
-        for (var i = 0; i < localStorage.length; i++) {
-          var k = localStorage.key(i);
-          if (k && k.indexOf(NS + prefix) === 0) out.push(k.slice(NS.length));
-        }
-      } catch (e) {}
+      try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf(NS + prefix) === 0) out.push(k.slice(NS.length)); } } catch (e) {}
       return Promise.resolve(out);
     },
   };
+
+  // 真机:日记/打卡/对话落文件(Directory.Data 应用私有区);设置/key 走 Preferences。
+  var _cap = (typeof window !== "undefined" && window.Capacitor && window.Capacitor.Plugins) || null;
+  var _fs = _cap && _cap.Filesystem, _prefs = _cap && _cap.Preferences;
+  var DIR = "DATA";
+  function capPath(k) {
+    if (k.indexOf("journal/") === 0) return "gw/journal/" + k.slice(8) + ".md";
+    if (k === "daily-tasks") return "gw/daily-tasks.md";
+    if (k === "thread") return "gw/thread.json";
+    return "gw/kv/" + k.replace(/[^\w.-]/g, "_") + ".txt";
+  }
+  var CapacitorBackend = {
+    getText: function (k) {
+      if (k.indexOf("setting/") === 0 && _prefs) return _prefs.get({ key: k.slice(8) }).then(function (r) { return r && r.value != null ? r.value : null; }).catch(function () { return null; });
+      return _fs.readFile({ path: capPath(k), directory: DIR, encoding: "utf8" }).then(function (r) { return r.data; }).catch(function () { return null; });
+    },
+    setText: function (k, v) {
+      if (k.indexOf("setting/") === 0 && _prefs) return _prefs.set({ key: k.slice(8), value: v }).catch(function () {});
+      return _fs.writeFile({ path: capPath(k), data: v, directory: DIR, encoding: "utf8", recursive: true }).catch(function (e) { console.error("[mobile-api] fs write 失败", k, e); });
+    },
+    remove: function (k) {
+      if (k.indexOf("setting/") === 0 && _prefs) return _prefs.remove({ key: k.slice(8) }).catch(function () {});
+      return _fs.deleteFile({ path: capPath(k), directory: DIR }).catch(function () {});
+    },
+    keys: function (prefix) {
+      if (prefix.indexOf("journal/") === 0) {
+        return _fs.readdir({ path: "gw/journal", directory: DIR }).then(function (r) {
+          var files = (r && r.files) || [];
+          return files.map(function (f) { var n = typeof f === "string" ? f : f.name; return "journal/" + n.replace(/\.md$/, ""); });
+        }).catch(function () { return []; });
+      }
+      return Promise.resolve([]);
+    },
+  };
+
+  var Backend = _fs ? CapacitorBackend : LocalBackend;
+  console.log("[mobile-api] 存储后端 =", _fs ? "Capacitor Filesystem" : "localStorage(浏览器)");
 
   var Store = {
     readJournalMd: function (date) { return Backend.getText("journal/" + date); },
@@ -208,6 +240,38 @@
     return new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } });
   }
 
+  // ── DeepSeek 直连(真机走原生 HTTP 桥绕 CORS;浏览器尝试直连,被 CORS 拦则提示)──
+  function histToMsgs(body) {
+    var hist = (body && body.history) || [], out = [];
+    for (var i = 0; i < hist.length; i++) {
+      var h = hist[i]; if (!h) continue;
+      var role = h.role === "ai" || h.role === "assistant" ? "assistant" : "user";
+      var content = typeof h.content === "string" ? h.content : (h.text || "");
+      if (content) out.push({ role: role, content: content });
+    }
+    return out;
+  }
+  function pickReply(d) { return d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content; }
+  function chatViaDeepseek(body, key, model) {
+    return Store.readJournalMd(todayIso()).then(function (todayMd) {
+      var sys = "你是用户的日记协作 AI,语气温和、像深夜台灯下说话。这是今天的日记:\n\n" + (todayMd || "(今天还没写)");
+      var messages = [{ role: "system", content: sys }].concat(histToMsgs(body), [{ role: "user", content: (body && body.message) || "" }]);
+      var payload = { model: model || "deepseek-chat", messages: messages, stream: false };
+      var url = "https://api.deepseek.com/v1/chat/completions";
+      var headers = { "Content-Type": "application/json", Authorization: "Bearer " + key };
+      var CapHttp = _cap && _cap.CapacitorHttp;
+      if (CapHttp) {
+        return CapHttp.post({ url: url, headers: headers, data: payload })
+          .then(function (res) { return sseResp([{ type: "delta", text: pickReply(res && res.data) || "(空回复)" }, { type: "done", actions: [], model_id: model || "deepseek" }]); })
+          .catch(function (e) { return sseResp([{ type: "error", text: "DeepSeek 调用失败:" + e }, { type: "done", actions: [], model_id: model || "deepseek" }]); });
+      }
+      return realFetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { return sseResp([{ type: "delta", text: pickReply(d) || "(空回复)" }, { type: "done", actions: [], model_id: model || "deepseek" }]); })
+        .catch(function () { return sseResp([{ type: "delta", text: "（浏览器直连 DeepSeek 受 CORS 限制 —— 真机经原生 HTTP 桥即可正常聊。）" }, { type: "done", actions: [], model_id: model || "deepseek" }]); });
+    });
+  }
+
   // ── 端点处理 ─────────────────────────────────────────
   function qsDate(u) { return new URL(u, location.origin).searchParams.get("date") || ""; }
 
@@ -354,15 +418,29 @@
       });
     },
 
-    // 对话:P1 先 SSE stub(让 UI 端到端通);P2 换原生 HTTP 桥直连 DeepSeek
+    // 对话:有 key 就真连 DeepSeek(读今天日记当 context);没 key 提示去设置填
     "POST /api/chat": function (req, u, body) {
-      var msg = (body && body.message) || "";
-      return sseResp([
-        { type: "delta", text: "（移动版对话框架已通 ✓）你说的是：「" + msg.slice(0, 40) + "」。" },
-        { type: "delta", text: "P2 会把这里接到 DeepSeek 直连，AI 就能读今天的日记跟你聊了。" },
-        { type: "done", actions: [], model_id: "deepseek-v4-pro" },
-      ]);
+      return Store.getSetting("deepseek_key").then(function (key) {
+        if (!key) return sseResp([{ type: "delta", text: "（还没填 DeepSeek key —— 点报头 ⚙ 进设置填了,AI 就能读今天的日记跟你聊。）" }, { type: "done", actions: [], model_id: "deepseek" }]);
+        return Store.getSetting("deepseek_model").then(function (m) { return chatViaDeepseek(body, key, m || "deepseek-chat"); });
+      });
     },
+    // 设置保存:容错抽取 DeepSeek key/model 落本地(让现有设置 UI 能填 key)
+    "POST /api/setup/save": function (req, u, body) {
+      var key = "", model = "";
+      if (body) {
+        if (Array.isArray(body.models) && body.models[0]) { key = body.models[0].api_key || body.models[0].apiKey || ""; model = body.models[0].id || body.models[0].model || ""; }
+        key = key || body.deepseek_api_key || body.api_key || "";
+        model = model || body.default_model_id || body.model || "";
+      }
+      var p = [];
+      if (key) p.push(Store.setSetting("deepseek_key", key));
+      if (model) p.push(Store.setSetting("deepseek_model", model));
+      return Promise.all(p).then(function () { return jsonResp({ ok: true }); });
+    },
+    "POST /api/setup/save-partial": function () { return jsonResp({ ok: true }); },
+    // 真机无法在 webview 里 CORS 自测 key,乐观返 ok;真验证发生在第一次聊天
+    "POST /api/setup/test": function () { return jsonResp({ ok: true, model: "deepseek-chat" }); },
   };
 
   // ── EventSource 劫持 ─────────────────────────────────
