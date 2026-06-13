@@ -31,8 +31,10 @@
 <link rel="stylesheet" href="./shared/design-tokens.css" />
 <link rel="stylesheet" href="./shared/components.css" />
 <link rel="stylesheet" href="./shared/thread-paper.css?v=20260613a" />
-<script>/* thread.js 用 gatewayToast 反馈上传/抠图;paper 没装 toast → 走 alert 兜底前先垫一个静默 shim */
-  window.gatewayToast = window.gatewayToast || function (m) { try { console.log("[toast]", m); } catch (e) {} };</script>
+<link rel="stylesheet" href="./shared/marketplace-paper.css?v=20260613a" />
+<script>/* thread.js / marketplace.js 在 paper 没装 toast/dialog → 垫静默 shim,缺它们时优雅降级 */
+  window.gatewayToast = window.gatewayToast || function (m) { try { console.log("[toast]", m); } catch (e) {} };
+  window.gatewayAlert = window.gatewayAlert || function (m) { try { window.alert(m); } catch (e) {} };</script>
 <style>
   /* ── 本页排版稿专用(状态切换 + 评审件,vendor 时酌情删) ── */
   body[data-state="filled"] [data-only="first"],
@@ -82,6 +84,7 @@
     <p class="masthead-sub ink-in" data-delay="350" data-only="first">二〇二六年六月十一日 丙午 · 星期四 · 第一卷</p>
     <div class="masthead-rule-row ink-in" data-delay="550">
       <div class="masthead-rule"></div>
+      <button class="paper-settings-btn" id="marketBtn" type="button" title="设置 · 钥匙 · 皮肤" aria-label="设置">⚙</button>
       <button class="mode-toggle" id="modeToggle" data-mode="system" type="button" title="点「昼」或「夜」定调;再点一次当前的,回到跟随系统">
         <span class="mt-opt mt-day">昼</span><span class="mt-dot">·</span><span class="mt-opt mt-night">夜</span>
       </button>
@@ -267,6 +270,8 @@
 <!-- 对话:thread.js 原件(streaming + past_boards 红线在此,不动);scroll-drag 供 resizer -->
 <script src="./shared/scroll-drag.js?v=20260517e" defer></script>
 <script src="./shared/thread.js?v=20260603urlstrip" defer></script>
+<!-- 设置:marketplace.js 原件(钥匙保存/模型测试/consent/检查更新/widget 全现成),纸衣走 marketplace-paper.css -->
+<script src="./shared/marketplace.js?v=20260613a" defer></script>
 <a href="#" onclick="window.gatewaySkin&&window.gatewaySkin.set('classic');return false;" style="position:fixed;right:16px;bottom:14px;font-family:var(--font-kai);font-size:12.5px;color:var(--ink-soft,#888);text-decoration:none;letter-spacing:.14em;opacity:.62;z-index:60;border-bottom:1px solid var(--hairline-strong,#ccc);" title="切回标准版">切回标准版</a>
 </body>
 </html>

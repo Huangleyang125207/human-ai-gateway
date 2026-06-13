@@ -1,0 +1,209 @@
+/* marketplace-paper.css — 纸与灯皮肤下,给 marketplace.js 的 overlay(原件不动)穿纸衣。
+ * marketplace.js 全部逻辑(钥匙保存/模型试一试/consent/检查更新/widget 装卸)零改动,
+ * 这里只重定义它那套 market-*/setup-*/key-*/km-*/consent- 类的样子 → paper 市集。
+ * classic 的 marketplace css(style.css)不在 paper 加载,这是 paper 唯一来源。
+ * 视觉对标 设置样张:纸面覆层、栏目页签、钥匙行、模型档案、同意书、皮肤行,禁卡片禁 SaaS 盒子。
+ */
+
+/* ── 覆层 + 纸面板 ─────────────────────────────────── */
+.market-overlay {
+  position: fixed; inset: 0; z-index: 80;
+  display: grid; place-items: center;
+  background: rgba(28, 22, 16, 0.34);   /* 暖墨 scrim,不用 color-mix(老 WebView 不支持) */
+  backdrop-filter: blur(2px);
+  animation: mk-fade 0.4s var(--ease-ink, ease);
+}
+@keyframes mk-fade { from { opacity: 0; } to { opacity: 1; } }
+.market-panel {
+  width: min(680px, 92vw); max-height: 88vh;
+  display: flex; flex-direction: column;
+  background:
+    linear-gradient(var(--slip-sheen, rgba(255,255,255,0.04)), transparent 22%),
+    var(--paper);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 5px;
+  box-shadow: var(--shadow-slip, 0 18px 50px rgba(0,0,0,0.22));
+  color: var(--ink);
+}
+
+/* ── 报头:市集 + 收 ───────────────────────────────── */
+.market-head {
+  flex: none; display: flex; align-items: baseline; justify-content: space-between;
+  padding: 1.1rem 1.4rem 0.7rem;
+}
+.market-title {
+  font-family: var(--font-kai); font-size: 20px;
+  letter-spacing: 0.28em; color: var(--ink);
+}
+.market-title::before { content: "市 · "; color: var(--cinnabar-soft); }
+.market-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 20px; line-height: 1; color: var(--ink-faint);
+}
+.market-close:hover { color: var(--ink); }
+
+/* ── 栏目页签:杂志的横排,不是 tab bar ───────────────── */
+.market-tabs {
+  flex: none; display: flex; gap: 1.5em;
+  padding: 0 1.4rem 0.6rem;
+  border-bottom: 1px solid var(--hairline);
+}
+.market-tab {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai); font-size: 14.5px;
+  letter-spacing: 0.12em; color: var(--ink-faint);
+  padding: 0.2em 0.1em; position: relative;
+}
+.market-tab.on { color: var(--ink); }
+.market-tab.on::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -0.6rem;
+  height: 1px; background: var(--cinnabar-soft);
+}
+
+/* ── 正文滚动区 ───────────────────────────────────── */
+.market-body {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 1.2rem 1.4rem 1.6rem;
+  font-size: 14px; line-height: 1.7;
+  scrollbar-color: var(--hairline-strong) transparent;
+}
+.market-loading, .market-empty {
+  text-align: center; color: var(--ink-faint);
+  font-family: var(--font-kai); margin: 2.5rem 0;
+}
+.market-hint {
+  font-family: var(--font-kai); font-size: 12.5px;
+  color: var(--ink-soft); background: var(--cinnabar-wash);
+  border-left: 2px solid var(--cinnabar-faint);
+  padding: 0.5em 0.9em; margin-bottom: 1.4rem; border-radius: 0 3px 3px 0;
+}
+
+/* ── 章节 ─────────────────────────────────────────── */
+.setup-section, .market-section { margin-bottom: 2rem; }
+.setup-section h3, .market-section h3 {
+  font-family: var(--font-kai); font-size: 15px; font-weight: 600;
+  letter-spacing: 0.1em; color: var(--ink);
+  margin-bottom: 0.6rem;
+  border-bottom: 1px solid var(--hairline); padding-bottom: 0.3rem;
+}
+.setup-role { color: var(--cinnabar-soft); font-weight: normal; font-size: 13px; }
+.setup-howto {
+  font-size: 13px; line-height: 1.85; color: var(--ink-soft);
+  margin-bottom: 0.9rem;
+}
+.setup-howto ol { margin: 0.4em 0 0 1.2em; }
+.setup-howto li { margin-bottom: 0.25em; }
+.setup-howto a { color: var(--cinnabar); }
+.setup-howto-secondary { color: var(--ink-faint); }
+.setup-details summary {
+  cursor: pointer; font-family: var(--font-kai);
+  color: var(--ink-soft); font-size: 13.5px; padding: 0.3em 0;
+}
+
+/* ── 钥匙行 ───────────────────────────────────────── */
+.key-row { display: flex; align-items: center; gap: 0.7em; margin: 0.5rem 0; }
+.key-label {
+  flex: none; width: 8.5em;
+  font-family: var(--font-kai); font-size: 13px; color: var(--ink-soft);
+}
+.key-input {
+  flex: 1; font-family: ui-monospace, monospace; font-size: 12.5px;
+  color: var(--ink); background: var(--paper-slip, transparent);
+  border: none; border-bottom: 1px solid var(--hairline-strong);
+  padding: 0.35em 0.2em;
+}
+.key-input:focus { outline: none; border-bottom-color: var(--cinnabar-soft); }
+.key-status { flex: none; font-size: 12px; color: var(--cinnabar-soft); min-width: 3em; }
+
+/* ── 模型档案行 ───────────────────────────────────── */
+.key-model-head {
+  display: flex; align-items: baseline; gap: 0.5em;
+  font-family: var(--font-kai); color: var(--ink); margin-top: 0.8rem;
+}
+.km-label, .km-base, .km-model, .km-key {
+  font-family: ui-monospace, monospace; font-size: 12px;
+  color: var(--ink); background: transparent;
+  border: none; border-bottom: 1px solid var(--hairline);
+  padding: 0.25em 0.2em; margin: 0.15rem 0;
+}
+.km-label:focus, .km-base:focus, .km-model:focus, .km-key:focus {
+  outline: none; border-bottom-color: var(--cinnabar-soft);
+}
+.key-model-actions { display: flex; gap: 1.1em; margin-top: 0.4rem; }
+.km-test, .km-save, .km-del, .key-add-btn, .tm-saved-msg {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai); font-size: 13px;
+  letter-spacing: 0.08em; color: var(--cinnabar-soft);
+  padding: 0;
+}
+.km-test:hover, .km-save:hover, .key-add-btn:hover { color: var(--cinnabar); }
+.km-del { color: var(--ink-faint); }
+.km-del:hover { color: var(--cinnabar); }
+.key-add-btn {
+  margin-top: 0.6rem; border-bottom: 1px solid var(--hairline-strong);
+  padding-bottom: 1px;
+}
+.tm-saved-msg { color: var(--ink-faint); cursor: default; }
+
+/* ── 皮肤行(昨天加的) ─────────────────────────────── */
+.skin-row { display: flex; flex-wrap: wrap; align-items: center; margin: 0.5rem 0; }
+.skin-opt {
+  font-family: var(--font-kai); font-size: 13.5px; color: var(--ink-soft);
+  display: inline-flex; align-items: center; gap: 0.35em;
+}
+.skin-opt input { accent-color: var(--cinnabar); }
+
+/* ── 开关(consent / widget) ──────────────────────── */
+.market-toggle {
+  position: relative; width: 38px; height: 20px; flex: none;
+  border: 1px solid var(--hairline-strong); border-radius: 11px;
+  background: transparent; cursor: pointer;
+}
+.market-toggle-slider {
+  position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: var(--ink-faint);
+  transition: transform 0.3s var(--ease-ink), background 0.3s;
+}
+.market-toggle.on { border-color: var(--cinnabar-soft); }
+.market-toggle.on .market-toggle-slider { transform: translateX(18px); background: var(--cinnabar); }
+.consent-meta { font-size: 12px; color: var(--ink-faint); margin-top: 0.4em; }
+.consent-meta-k { color: var(--ink-soft); }
+
+/* ── 插件市场:行,不是卡片 ─────────────────────────── */
+.market-cat-label {
+  font-family: var(--font-kai); font-size: 12.5px; color: var(--ink-faint);
+  letter-spacing: 0.15em; margin: 1.3rem 0 0.5rem;
+}
+.market-card {
+  display: flex; align-items: baseline; gap: 0.8em;
+  padding: 0.7rem 0; border-bottom: 1px solid var(--hairline);
+}
+.market-card-main { flex: 1; }
+.market-card-title { font-family: var(--font-kai); font-size: 14.5px; color: var(--ink); }
+.market-card-desc { font-size: 12.5px; color: var(--ink-soft); margin-top: 0.2em; }
+.market-card-meta { font-size: 11.5px; color: var(--ink-faint); }
+.market-card-action {
+  flex: none; background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai); font-size: 13px; color: var(--cinnabar-soft);
+}
+.market-card-action:hover { color: var(--cinnabar); }
+.market-tag-default, .market-tag-wip {
+  font-size: 11px; color: var(--ink-faint);
+  border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 0 0.4em; margin-left: 0.4em;
+}
+
+/* ── 报头那枚 ⚙ 设置入口 ──────────────────────────── */
+.paper-settings-btn {
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer;
+  font-size: 15px; color: var(--ink-faint); padding: 0 0.3em;
+  transition: color 0.4s ease, transform 0.4s ease;
+}
+.paper-settings-btn:hover { color: var(--cinnabar-soft); transform: translateY(-50%) rotate(35deg); }
+.masthead-rule-row { position: relative; }
+
+@media (prefers-reduced-motion: reduce) {
+  .market-overlay { animation: none; }
+  .market-toggle-slider { transition: none; }
+}
