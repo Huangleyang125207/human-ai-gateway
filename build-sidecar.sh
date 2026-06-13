@@ -20,6 +20,7 @@ echo "-> sidecar target triple: $TRIPLE"
 ADDS=(
   --add-data "index.html:." --add-data "day.html:." --add-data "reset.html:."
   --add-data "history.html:." --add-data "consent.html:."
+  --add-data "day-paper.html:." --add-data "index-paper.html:."
   --add-data "shared:shared" --add-data "widgets:widgets" --add-data "vendor:vendor"
   --add-data "brand:brand" --add-data "protocols:protocols"
   --add-data ".gateway-config.example.json:."

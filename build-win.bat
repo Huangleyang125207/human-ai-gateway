@@ -67,6 +67,8 @@ if exist "%ICO%" set "ICON_FLAG=--icon %ICO%"
     --add-data "reset.html;." ^
     --add-data "history.html;." ^
     --add-data "consent.html;." ^
+    --add-data "day-paper.html;." ^
+    --add-data "index-paper.html;." ^
     --add-data "shared;shared" ^
     --add-data "widgets;widgets" ^
     --add-data "vendor;vendor" ^
