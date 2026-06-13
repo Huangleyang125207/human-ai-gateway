@@ -1,31 +1,28 @@
 #!/usr/bin/env bash
-# 组装移动端 web bundle:只把 webview 需要的静态文件拷进 app/www/。
-# Capacitor sync 时会把 www/ 整个塞进原生工程 —— 所以绝不能让 server.py /
-# .venv / .git / dist 之类进来(那会让 app 膨胀几百 MB)。
-#
-# 用法:bash mobile/build-web.sh   (或在 app/ 里 npm run build:web)
+# 组装移动端 web bundle → app/www/。入口 = 移动原生前端 mobile/m/。
+# Capacitor sync 时把 www/ 整个塞进原生工程,所以只带 webview 要的文件。
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"     # gateway/mobile
 GW="$(cd "$HERE/.." && pwd)"              # gateway 根
 WWW="$HERE/app/www"
 
 rm -rf "$WWW"
-mkdir -p "$WWW/mobile"
+mkdir -p "$WWW/shared" "$WWW/vendor"
 
-# 入口页 + 核心前端资源(与桌面同一份,零分叉)
-cp "$GW/index.html"            "$WWW/index.html"
-cp -R "$GW/shared"             "$WWW/shared"
-cp -R "$GW/vendor"             "$WWW/vendor"
-cp -R "$GW/brand"              "$WWW/brand"
-cp "$GW/mobile/mobile-api.js"  "$WWW/mobile/mobile-api.js"
+# 入口:移动原生 index.html 扁平到 www 根,相对路径重写(../ → ./)
+sed -e 's#\.\./mobile-api\.js#./mobile-api.js#g' \
+    -e 's#\.\./\.\./shared/#./shared/#g' \
+    -e 's#\.\./\.\./vendor/#./vendor/#g' \
+    "$GW/mobile/m/index.html" > "$WWW/index.html"
+cp "$GW/mobile/m/mobile.css"   "$WWW/mobile.css"
+cp "$GW/mobile/m/mobile.js"    "$WWW/mobile.js"
+cp "$GW/mobile/mobile-api.js"  "$WWW/mobile-api.js"
 
-# 本地后端拦截层在真机靠 Capacitor 注入的 window.Capacitor 自动启用,
-# 无需 ?mobile=1;桌面仍惰性。
+# 渲染器 + 设计 token(纸系)。字体走系统 CJK 衬线(iOS Songti/Kaiti),不带 webfont/CDN。
+cp "$GW/shared/md.js"             "$WWW/shared/md.js"
+cp "$GW/shared/design-tokens.css" "$WWW/shared/design-tokens.css"
+cp "$GW/vendor/marked.min.js"     "$WWW/vendor/marked.min.js"
+cp "$GW/vendor/dompurify.min.js"  "$WWW/vendor/dompurify.min.js"
 
-# 去掉 Google Fonts CDN(render-blocking,离线/代理下拖白屏)。
-# 移动端回落系统 CJK 衬线(iOS Songti/PingFang、Android 思源),符合"无 CDN"DNA。
-# 桌面 index.html 原件不动,只动 bundle 副本。
-sed -i '' '/googleapis\.com/d; /gstatic\.com/d' "$WWW/index.html"
-
-echo "[build-web] bundle 就绪 → $WWW (已去 Google Fonts CDN)"
+echo "[build-web] 移动原生 bundle 就绪 → $WWW"
 du -sh "$WWW" 2>/dev/null || true
