@@ -13,6 +13,7 @@
 
   // ── 守卫:是否启用拦截 ───────────────────────────────
   var ENABLED =
+    (typeof window !== "undefined" && window.__GATEWAY_MOBILE__ === true) ||
     (typeof window !== "undefined" && window.Capacitor !== undefined) ||
     /[?&]mobile=1\b/.test(location.search) ||
     (function () { try { return localStorage.getItem("__gateway_mobile__") === "1"; } catch (e) { return false; } })();
@@ -328,6 +329,10 @@
     },
     "POST /api/journal/new-day": function (req, u, body) {
       var date = (body && body.date) || todayIso();
+      var nd = new Date(); var tm = new Date(nd.getFullYear(), nd.getMonth(), nd.getDate() + 1);
+      var tmw = tm.getFullYear() + "-" + pad2(tm.getMonth() + 1) + "-" + pad2(tm.getDate());
+      // 跟 PC 一致:最多建到明天(+1),再远拒
+      if (date > tmw) return jsonResp({ ok: false, error: "最多创建到明天" });
       return Store.readJournalMd(date).then(function (md) {
         if (md !== null) return jsonResp({ ok: true, created: false, file: isoToStem(date) + ".md", message: "已存在" });
         return Store.writeJournalMd(date, emptyDayMd()).then(function () {
