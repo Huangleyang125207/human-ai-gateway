@@ -1,0 +1,190 @@
+/* thread-paper.css — 纸与灯皮肤下,给 thread.js 的 DOM(原件不动)穿纸衣。
+ * 双 register 原则:布局沿用成熟聊天习语(折页→面板、输入框在底、线性滚动、流式),
+ * 只换纸色 + 两种笔迹(人宋体 / AI 文楷),不强行信笺化、不做气泡。
+ * classic 的 thread css(style.css monolith)不在 paper 加载,这里是 paper 唯一来源。
+ * 选择器全部 scope 在 .thread 下,绝不外溢污染单日/总览正文。
+ */
+
+/* ── 折页:页边一道(收起态) ───────────────────────── */
+.thread {
+  position: fixed; top: 0; right: 0; height: 100vh; z-index: 40;
+  width: min(var(--chat-w, 380px), 92vw);
+  transform: translateX(calc(100% - var(--fold-w, 38px)));
+  transition: transform var(--d-fold, 0.5s) var(--ease-ink, ease);
+  background:
+    linear-gradient(var(--slip-sheen, rgba(255,255,255,0.04)), transparent 30%),
+    var(--paper-slip, var(--paper));
+  border-left: 1px solid var(--hairline-strong);
+  box-shadow: var(--shadow-fold, -8px 0 30px rgba(0,0,0,0.12));
+  display: flex; flex-direction: column;
+}
+.thread.on { transform: translateX(0); }
+
+.thread-resizer {
+  position: absolute; left: -3px; top: 0; width: 6px; height: 100%;
+  cursor: ew-resize; z-index: 2;
+}
+
+/* 折页 tab:竖排「与鲸说话」,贴在面板左缘外 */
+.thread-tab {
+  position: absolute; left: 0; top: 46%;
+  transform: translateX(-100%);
+  width: var(--fold-w, 38px); padding: 1.1em 0;
+  display: flex; flex-direction: column; align-items: center; gap: 0.7em;
+  background: var(--paper-slip, var(--paper));
+  border: 1px solid var(--hairline-strong); border-right: none;
+  border-radius: 5px 0 0 5px;
+  cursor: pointer; user-select: none;
+}
+.thread-tab .tab-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--cinnabar);
+}
+.thread-tab .tab-label {
+  writing-mode: vertical-rl;
+  font-family: var(--font-kai); font-size: 13px;
+  letter-spacing: 0.2em; color: var(--ink-soft);
+}
+.thread.on .thread-tab { opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+
+/* ── 报头:标题 / 视图签 / 模型 / 关 ─────────────────── */
+.thread-head {
+  display: flex; align-items: center; gap: 0.7em;
+  padding: 0.8rem 1rem 0.6rem; flex: none;
+  border-bottom: 1px solid var(--hairline);
+  font-family: var(--font-kai);
+}
+.thread-view-tabs { display: flex; gap: 0.4em; margin-right: auto; }
+.tvt {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-kai); font-size: 14px;
+  letter-spacing: 0.1em; color: var(--ink-faint);
+  padding: 0.2em 0.1em; position: relative;
+}
+.tvt.on { color: var(--ink); }
+.tvt.on::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -3px;
+  height: 1px; background: var(--cinnabar-soft);
+}
+.tvt-dot {
+  display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--cinnabar); margin-left: 3px; vertical-align: middle;
+}
+.thread-model {
+  font-family: var(--font-kai); font-size: 12px;
+  color: var(--ink-soft); background: transparent;
+  border: 1px solid var(--hairline); border-radius: 3px;
+  padding: 1px 4px; max-width: 110px;
+}
+.thread-status { font-size: 11px; color: var(--ink-faint); }
+.thread-reset { color: var(--ink-faint); text-decoration: none; font-size: 15px; }
+.thread-reset:hover { color: var(--cinnabar-soft); }
+.thread-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 19px; line-height: 1; color: var(--ink-faint);
+}
+.thread-close:hover { color: var(--ink); }
+
+/* ── 视图切换 ─────────────────────────────────────── */
+.thread-view { display: none; flex: 1; min-height: 0; flex-direction: column; }
+.thread-view.on { display: flex; }
+
+/* ── 消息流 ───────────────────────────────────────── */
+.thread-stream {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 1.1rem 1.15rem 0.5rem;
+  scrollbar-color: var(--hairline-strong) transparent;
+}
+.t-msg { margin-bottom: 1.5rem; }
+.t-msg .who {
+  display: block; font-family: var(--font-kai);
+  font-size: 11px; letter-spacing: 0.18em;
+  color: var(--ink-faint); margin-bottom: 0.3em;
+}
+.t-msg.user .who { color: var(--cinnabar-soft); }
+.t-msg .body {
+  font-size: 14.5px; line-height: 1.85;
+  color: var(--ink); white-space: normal; word-break: break-word;
+}
+/* 两位作者,两种笔迹:人宋体(印刷) / AI 文楷(手迹) */
+.t-msg.user .body { font-family: var(--font-song); }
+.t-msg.ai .body { font-family: var(--font-kai); color: var(--ink-kai, var(--ink)); }
+.t-msg .body p { margin: 0 0 0.5em; }
+.t-msg .body p:last-child { margin-bottom: 0; }
+.t-msg .body a { color: var(--cinnabar); }
+.t-msg .body img { max-width: 100%; border-radius: 3px; margin: 0.3em 0; }
+.t-msg .body pre {
+  background: var(--cinnabar-wash); padding: 0.7em; border-radius: 4px;
+  overflow-x: auto; font-size: 12.5px;
+}
+
+.t-action {
+  text-align: center; font-family: var(--font-kai);
+  font-size: 12px; color: var(--ink-faint);
+  letter-spacing: 0.1em; margin: 0.8rem 0;
+}
+
+/* AI 在想:磨墨般的等待 */
+.t-processing {
+  display: flex; align-items: center; gap: 0.6em;
+  margin-bottom: 1.3rem;
+}
+.t-processing-logo { width: 22px; height: 22px; opacity: 0.8; }
+.t-processing-text {
+  font-family: var(--font-kai); font-size: 13px;
+  letter-spacing: 0.12em; color: var(--ink-soft);
+}
+
+/* ── pending 引用 ─────────────────────────────────── */
+.thread-pending { padding: 0 1.15rem; display: flex; flex-wrap: wrap; gap: 0.4em; }
+.thread-pending:empty { display: none; }
+.pending-ref {
+  font-family: var(--font-kai); font-size: 12px;
+  color: var(--ink-soft); background: var(--cinnabar-wash);
+  border: 1px solid var(--hairline); border-radius: 3px;
+  padding: 0.15em 0.6em; display: inline-flex; align-items: center; gap: 0.3em;
+}
+
+/* ── 输入行 ───────────────────────────────────────── */
+.thread-input-row {
+  flex: none; display: flex; align-items: flex-end; gap: 0.4em;
+  padding: 0.6rem 0.9rem 0.9rem;
+  border-top: 1px solid var(--hairline);
+}
+.thread-attach {
+  background: none; border: none; cursor: pointer;
+  font-size: 16px; opacity: 0.6; padding: 0.2em;
+}
+.thread-attach:hover { opacity: 1; }
+.thread-input {
+  flex: 1; resize: none; max-height: 40vh;
+  font-family: var(--font-song); font-size: 14.5px; line-height: 1.7;
+  color: var(--ink); background: transparent;
+  border: 1px solid var(--hairline); border-radius: 4px;
+  padding: 0.5em 0.7em;
+}
+.thread-input:focus { outline: none; border-color: var(--cinnabar-faint); }
+.thread-input::placeholder { color: var(--ink-faint); }
+.thread-hint {
+  position: absolute; right: 1.1rem; bottom: 0.2rem;
+  display: flex; gap: 0.5em; pointer-events: none;
+  font-family: var(--font-kai); font-size: 10px; color: var(--ink-faint);
+}
+
+/* ── 留言板视图 ───────────────────────────────────── */
+.board-view { padding: 0; }
+.board-content { flex: 1; overflow-y: auto; padding: 1.1rem 1.15rem; }
+.board-content .board-empty {
+  text-align: center; color: var(--ink-faint);
+  font-family: var(--font-kai); font-size: 13px; margin-top: 3rem;
+}
+
+/* 主纸让位:面板展开时总览往左挪半个面板宽(宽屏才让,窄屏盖上层) */
+@media (min-width: 1180px) {
+  body.thread-open .page,
+  body.thread-open .sheet { transition: transform var(--d-fold, 0.5s) var(--ease-ink, ease); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread { transition: none; }
+}

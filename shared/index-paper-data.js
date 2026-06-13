@@ -156,16 +156,8 @@
     paint();
   }
 
-  /* ── 对话折页:暂回落标准版(thread 在那) ── */
-  function wireChatFold() {
-    var fold = $("chatFold");
-    if (!fold) return;
-    fold.setAttribute("title", "对话暂在标准版 · 点此切过去说话");
-    fold.addEventListener("click", function (e) {
-      e.preventDefault();
-      if (window.gatewaySkin) window.gatewaySkin.set("classic");
-    });
-  }
+  /* ── 对话:thread.js 自绑(折页/面板/流式/留言板),这里不接管。留空占位 ── */
+  function wireChatFold() { /* thread.js 接管 #thread / #threadTab,无需在此 wire */ }
 
   /* ── 启动 ── */
   fetch("/api/journal/today").then(function (r) { return r.json(); }).then(function (payload) {

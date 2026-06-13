@@ -30,6 +30,9 @@
 <script src="./shared/theme.js?v=20260612b" defer></script>
 <link rel="stylesheet" href="./shared/design-tokens.css" />
 <link rel="stylesheet" href="./shared/components.css" />
+<link rel="stylesheet" href="./shared/thread-paper.css?v=20260613a" />
+<script>/* thread.js 用 gatewayToast 反馈上传/抠图;paper 没装 toast → 走 alert 兜底前先垫一个静默 shim */
+  window.gatewayToast = window.gatewayToast || function (m) { try { console.log("[toast]", m); } catch (e) {} };</script>
 <style>
   /* ── 本页排版稿专用(状态切换 + 评审件,vendor 时酌情删) ── */
   body[data-state="filled"] [data-only="first"],
@@ -216,81 +219,43 @@
 
 </div>
 
-<!-- ── 折页:侧栏对话的收起态 ──────────────────── -->
-<button class="chatfold" id="chatFold" type="button" data-unread aria-label="打开对话" title="与鲸说话">
-  <i class="fold-dot"></i>
-  <span class="fold-label">与鲸说话</span>
-  <span class="memory-ring bare fold-ring" aria-hidden="true">
-    <svg width="20" height="20" viewBox="0 0 22 22">
-      <circle class="ring-track" cx="11" cy="11" r="8.5" fill="none" stroke-width="1.4"></circle>
-      <circle class="ring-arc" cx="11" cy="11" r="8.5" fill="none" stroke-width="1.4"
-              stroke-dasharray="53.4" stroke-dashoffset="22" stroke-linecap="round"
-              transform="rotate(-90 11 11)"></circle>
-      <circle class="ring-core" cx="11" cy="11" r="3"></circle>
-    </svg>
-  </span>
-</button>
-
-<!-- ── 信笺:侧栏对话的展开态(标准聊天工作台的纸化皮肤) ── -->
-<aside class="chatpane" id="chatPane" aria-label="与鲸的对话" data-screen-label="信笺对话">
-  <header class="chatpane-head">
-    <span class="chatpane-title">信笺 · 与鲸</span>
-    <button class="memory-ring bare" id="paneRing" type="button" title="今天的对话写满约六成,点一下把记忆压进快照">
-      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-        <circle class="ring-track" cx="11" cy="11" r="8.5" fill="none" stroke-width="1.4"></circle>
-        <circle class="ring-arc" id="paneArc" cx="11" cy="11" r="8.5" fill="none" stroke-width="1.4"
-                stroke-dasharray="53.4" stroke-dashoffset="22" stroke-linecap="round"
-                transform="rotate(-90 11 11)"></circle>
-        <circle class="ring-core" cx="11" cy="11" r="3"></circle>
-      </svg>
-    </button>
-    <button class="chatpane-close" id="chatClose" type="button">收页</button>
+<!-- ── 对话:thread.js 原件驱动(脚手架 ID 同 classic),纸衣走 thread-paper.css ──
+     双 register:折页→面板、输入框在底、流式、留言板视图全沿用成熟习语;
+     只换纸色 + 人宋体/AI 文楷。streaming + past_boards 红线全在 thread.js,不动。 -->
+<!-- thread.js 无 guard 绑 #threadToggleTop;paper 主开口是折页 tab,这里隐藏占位防 null 崩 -->
+<button id="threadToggleTop" hidden aria-hidden="true"></button>
+<aside class="thread" id="thread" aria-hidden="true">
+  <div class="thread-resizer" id="threadResizer" aria-label="拖拽改宽度" title="拖拽改宽度"></div>
+  <div class="thread-tab" id="threadTab" role="button" aria-label="与鲸说话">
+    <span class="tab-dot"></span>
+    <span class="tab-label">与鲸说话</span>
+  </div>
+  <header class="thread-head">
+    <div class="thread-view-tabs" role="tablist">
+      <button class="tvt on" data-view="chat" id="tvtChat">对话</button>
+      <button class="tvt" data-view="board" id="tvtBoard">留言板<span class="tvt-dot" id="tvtBoardDot" hidden></span></button>
+    </div>
+    <select class="thread-model" id="threadModel" aria-label="切换模型" title="切换模型"><option value="">⋯</option></select>
+    <span class="thread-status" id="threadStatus">⋯</span>
+    <a class="thread-reset" href="./reset.html" title="清空聊天记录">⟲</a>
+    <button class="thread-close" id="threadClose" aria-label="收页">×</button>
   </header>
-
-  <div class="letters" id="letters">
-    <p class="letters-rule" data-only="filled">六月十一日</p>
-    <div class="letter me" data-only="filled">
-      <p class="letter-meta">14:02 · 我</p>
-      <div class="letter-body"><p>下午的复盘帮我并成一条,重点留封面那课。</p></div>
-    </div>
-    <div class="letter ai" data-only="filled">
-      <p class="letter-meta"><span class="seal">鲸</span>14:03 · 鲸</p>
-      <div class="letter-body">
-        <p class="letter-quote">「往群里发过一条转写过的下载链接……已撤」</p>
-        <p>并进 13:30 那条了。链接这件事我标成了 lesson——收费、托管钥匙、批量群发三条线,我会一直盯着。</p>
-      </div>
-    </div>
-    <div class="letter ai" data-only="filled">
-      <p class="letter-meta"><span class="seal">鲸</span>21:30 · 鲸 · 今日纸条</p>
-      <div class="letter-body"><p>纸条留在今天的 21:30 了。三件看不见的事变成了看得见的——都不是新功能,都是灯。早点睡。</p></div>
-    </div>
-    <div class="letter me" data-only="filled">
-      <p class="letter-meta">22:41 · 我</p>
-      <div class="letter-body"><p>明天第一个装机的,提醒我链接不打头阵。</p></div>
-    </div>
-    <div class="letter ai" data-only="filled">
-      <p class="letter-meta"><span class="seal">鲸</span>它在落笔</p>
-      <div class="letter-body"><span class="ink-grind" aria-label="它在落笔前"><i></i><i></i><i></i></span></div>
-    </div>
-
-    <p class="letters-rule" data-only="first">起卷</p>
-    <div class="letter ai" data-only="first">
-      <p class="letter-meta"><span class="seal">鲸</span>刚刚 · 鲸</p>
-      <div class="letter-body">
-        <p>你好,我住进来了。阿里云是我的眼睛,DeepSeek 是我说话的声音——两把钥匙都配好了。</p>
-        <p>今天发生什么了?一句也行,我从那一句开始认识你。</p>
-      </div>
+  <div class="thread-view chat-view on" id="chatView">
+    <div class="thread-stream" id="threadStream"></div>
+    <div class="thread-pending" id="threadPending"></div>
+    <div class="thread-input-row">
+      <button class="thread-attach" id="threadAttachBtn" aria-label="上传图片" title="上传图片(也可粘贴/拖入)">📎</button>
+      <input type="file" id="threadFileInput" accept="image/*" multiple hidden>
+      <textarea class="thread-input" id="threadInput" rows="1" placeholder="跟它说点什么⋯  ⏎ 发送 · shift+⏎ 换行"></textarea>
+      <div class="thread-hint"><span id="threadHintLeft">点页面上任意东西 → 带进对话</span><span>⏎</span></div>
     </div>
   </div>
-
-  <footer class="chatpane-foot">
-    <div class="composer">
-      <div class="composer-input" id="paneComposer" contenteditable="true" data-placeholder="说一句……" role="textbox" aria-label="对鲸说话"></div>
-    </div>
-    <p class="composer-note" id="paneNote">选中正文任何一句,可以引到这里说。</p>
-  </footer>
+  <div class="thread-view board-view" id="boardView">
+    <div class="board-content" id="boardContent"><div class="board-empty">载入中⋯</div></div>
+  </div>
 </aside>
 
+<div class="img-lightbox" id="imgLightbox" hidden></div>
 <button class="quote-chip" id="quoteChip" type="button"><span class="chip-dot"></span>引入对话</button>
 
 
@@ -299,6 +264,9 @@
 <script src="./vendor/dompurify.min.js" defer></script>
 <script src="./shared/md.js?v=20260612a" defer></script>
 <script src="./shared/index-paper-data.js?v=20260613a" defer></script>
+<!-- 对话:thread.js 原件(streaming + past_boards 红线在此,不动);scroll-drag 供 resizer -->
+<script src="./shared/scroll-drag.js?v=20260517e" defer></script>
+<script src="./shared/thread.js?v=20260603urlstrip" defer></script>
 <a href="#" onclick="window.gatewaySkin&&window.gatewaySkin.set('classic');return false;" style="position:fixed;right:16px;bottom:14px;font-family:var(--font-kai);font-size:12.5px;color:var(--ink-soft,#888);text-decoration:none;letter-spacing:.14em;opacity:.62;z-index:60;border-bottom:1px solid var(--hairline-strong,#ccc);" title="切回标准版">切回标准版</a>
 </body>
 </html>
