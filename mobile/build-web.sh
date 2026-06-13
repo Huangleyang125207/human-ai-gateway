@@ -18,9 +18,9 @@ cp "$GW/mobile/m/mobile.css"   "$WWW/mobile.css"
 cp "$GW/mobile/m/mobile.js"    "$WWW/mobile.js"
 cp "$GW/mobile/mobile-api.js"  "$WWW/mobile-api.js"
 
-# 渲染器 + 设计 token(纸系)。字体走系统 CJK 衬线(iOS Songti/Kaiti),不带 webfont/CDN。
+# 渲染器 + 字体走系统 CJK 衬线(iOS Songti/Kaiti),不带 webfont/CDN。
+# classic 调色板内联在 mobile.css(不再带 design-tokens.css——那是另一套 paper)。
 cp "$GW/shared/md.js"             "$WWW/shared/md.js"
-cp "$GW/shared/design-tokens.css" "$WWW/shared/design-tokens.css"
 cp "$GW/vendor/marked.min.js"     "$WWW/vendor/marked.min.js"
 cp "$GW/vendor/dompurify.min.js"  "$WWW/vendor/dompurify.min.js"
 
