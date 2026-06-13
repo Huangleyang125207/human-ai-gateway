@@ -309,6 +309,8 @@
     "GET /api/user-widgets": function () { return jsonResp({ active: [] }); },
     "GET /api/water-cup": function () { return jsonResp({ image_url: null }); },
     "GET /api/journal/tag-stats": function () { return jsonResp({ tags: [] }); },
+    // 移动端无 vault 文件漂移概念;返 0 漂移,vault-audit.js 据此不弹横幅
+    "GET /api/vault/audit": function () { return jsonResp({ total_drift: 0, image_recoverable: [], image_orphans: [], meta_orphans: [], aggregate_broken_links: [] }); },
 
     "GET /api/journal/days": function () {
       return Store.listJournalDates().then(function (dates) {

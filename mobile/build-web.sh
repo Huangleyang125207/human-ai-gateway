@@ -22,5 +22,10 @@ cp "$GW/mobile/mobile-api.js"  "$WWW/mobile/mobile-api.js"
 # 本地后端拦截层在真机靠 Capacitor 注入的 window.Capacitor 自动启用,
 # 无需 ?mobile=1;桌面仍惰性。
 
-echo "[build-web] bundle 就绪 → $WWW"
+# 去掉 Google Fonts CDN(render-blocking,离线/代理下拖白屏)。
+# 移动端回落系统 CJK 衬线(iOS Songti/PingFang、Android 思源),符合"无 CDN"DNA。
+# 桌面 index.html 原件不动,只动 bundle 副本。
+sed -i '' '/googleapis\.com/d; /gstatic\.com/d' "$WWW/index.html"
+
+echo "[build-web] bundle 就绪 → $WWW (已去 Google Fonts CDN)"
 du -sh "$WWW" 2>/dev/null || true
