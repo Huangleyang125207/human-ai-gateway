@@ -85,7 +85,8 @@
     var tags = (h2.tags || []).filter(function (t) { return t !== "commit"; });
     var editable = STATE.writable;
     var html = '<article class="piece" data-bi="' + bi + '" data-pi="' + pi + '">';
-    if (editable) html += '<div class="drop-spot" aria-hidden="true">拖图贴这儿</div>';
+    // 拖图贴纸暂缓:走 AI 中介(对话流接好后,文档级拖图→thread→place_scrapbook_image),
+    // 不在此另造直连模型。drop-spot 待对话流落地后再启。
     if (tags.length) {
       html += '<p class="piece-tags">' + tags.map(function (t) { return "<span>#" + esc(t) + "</span>"; }).join("") + "</p>";
     }
