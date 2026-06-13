@@ -376,6 +376,43 @@
     });
   }
 
+  /* ── 贴纸渲染层:把持久化的 scrapbook item 按 anchor_time 浮进对应块 ──
+   * 创建走总览 thread 的 AI 中介(place_scrapbook_image);这里只渲染 + 移除。
+   * anchor_time 作语义挂点(挂哪条),不当像素定位用(守 5.19 红线)。 */
+  function renderStickers() {
+    if (!STATE.date && !DATE) return;
+    var date = STATE.date || DATE;
+    fetch("/api/scrapbook?date=" + encodeURIComponent(date)).then(function (r) { return r.json(); }).then(function (d) {
+      (d.items || []).forEach(function (it) {
+        if (!it.src) return;
+        var t = (it.anchor_time || "").replace(/^(\d):/, "0$1:");   // 9:00 → 09:00
+        var sec = t ? document.querySelector('.block[data-time="' + t + '"]') : null;
+        if (!sec) sec = document.querySelector(".block:last-of-type");   // 没锚就挂末块
+        if (!sec) return;
+        var piece = sec.querySelector(".piece");
+        if (!piece || piece.querySelector('.sticker[data-id="' + it.id + '"]')) return;
+        var fig = document.createElement("div");
+        fig.className = "sticker landing";
+        fig.setAttribute("data-id", it.id || "");
+        fig.title = "双击取下";
+        fig.innerHTML = '<img src="' + esc(it.src) + '" alt="贴纸">';
+        piece.insertBefore(fig, piece.firstChild);
+        fig.addEventListener("dblclick", function () { removeSticker(date, it.id, fig); });
+      });
+    }).catch(function () {});
+  }
+  function removeSticker(date, id, fig) {
+    fig.classList.add("folding");
+    fetch("/api/scrapbook/delete", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: date, id: id }),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d && (d.error || d.detail)) { whisper("取不下来 — " + (d.error || d.detail)); fig.classList.remove("folding"); return; }
+      setTimeout(function () { fig.parentNode && fig.parentNode.removeChild(fig); }, 600);
+      whisper("取下了一张贴纸");
+    }).catch(function (e) { whisper("取不下来 — " + e.message); fig.classList.remove("folding"); });
+  }
+
   /* ── 翻日:跳到存在的相邻日(跳过空缺),走 URL reload 保 STATE 干净 ── */
   function wireDayFlip() {
     var prev = $("flipPrev"), next = $("flipNext");
@@ -447,5 +484,5 @@
       $("mhDate").textContent = "纸还没铺开";
       $("mhSub").textContent = "数据没接上,稍后再来";
     })
-    .then(function () { wireModeSeal(); wireDayFlip(); window.paperInit && window.paperInit(); });
+    .then(function () { wireModeSeal(); wireDayFlip(); renderStickers(); window.paperInit && window.paperInit(); });
 })();
