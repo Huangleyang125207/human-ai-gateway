@@ -33,6 +33,9 @@
         <span class="ring-hint">把今天的对话压进快照</span>
         <span class="ring-done">已收进快照</span>
       </button>
+      <button class="mode-seal" id="modeSeal" type="button" title="换一盏灯">
+        <span class="ms-char">夜</span>
+      </button>
     </div>
   </header>
 
@@ -54,12 +57,14 @@
 
 <button class="quote-chip" id="quoteChip" type="button"><span class="chip-dot"></span>引入对话</button>
 
+<aside class="whisper" id="whisper" role="status" aria-live="polite"><i class="whale-dot"></i><span id="whisperText"></span></aside>
+
 <script src="./shared/day-paper.js"></script>
 <script src="./vendor/marked.min.js"></script>
 <script src="./vendor/dompurify.min.js"></script>
 <script src="./shared/md.js?v=20260612a"></script>
 <script src="./shared/day-paper-data.js?v=20260612a"></script>
 
-<a href="#" onclick="window.gatewaySkin&&window.gatewaySkin.set('classic');return false;" style="position:fixed;right:14px;bottom:12px;font-family:var(--font-kai);font-size:12px;color:var(--ink-soft,#888);text-decoration:none;letter-spacing:.12em;opacity:.55;z-index:60;">回现版</a>
+<a href="#" id="toClassic" onclick="window.gatewaySkin&&window.gatewaySkin.set('classic');return false;" style="position:fixed;right:16px;bottom:14px;font-family:var(--font-kai);font-size:12.5px;color:var(--ink-soft,#888);text-decoration:none;letter-spacing:.14em;opacity:.62;z-index:60;border-bottom:1px solid var(--hairline-strong,#ccc);padding-bottom:1px;" title="这套皮肤不合口味?切回标准版">切回标准版</a>
 </body>
 </html>

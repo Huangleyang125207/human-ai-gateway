@@ -15,6 +15,22 @@
   var DATE = (qs.get("date") || "").trim();   // 空 = 今天
   var $ = function (id) { return document.getElementById(id); };
 
+  // 可变数据模型:渲染后留着,写操作改它再 reconstruct→patch(防多 piece 块互相覆盖)。
+  var STATE = { date: "", file: "", blocks: [], writable: true };
+
+  /* ── 轻提示(whisper):AI 说带朱点,系统说不带 ── */
+  var whisperT = null;
+  function whisper(text, ai) {
+    var w = $("whisper"), t = $("whisperText");
+    if (!w || !t) return;
+    t.textContent = text;
+    var dot = w.querySelector(".whale-dot");   // AI 说带朱点,系统说不带
+    if (dot) dot.style.display = ai ? "" : "none";
+    w.classList.add("show");
+    if (whisperT) clearTimeout(whisperT);
+    whisperT = setTimeout(function () { w.classList.remove("show"); }, 2600);
+  }
+
   function esc(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -64,10 +80,12 @@
     return { author: "", text: String(line || "").replace(/^-?\s*#commit\s*/, "").trim() };
   }
 
-  function pieceHtml(h2, withDropcap) {
+  function pieceHtml(h2, bi, pi, withDropcap) {
     var a = authorOf(h2.title);
     var tags = (h2.tags || []).filter(function (t) { return t !== "commit"; });
-    var html = '<article class="piece">';
+    var editable = STATE.writable;
+    var html = '<article class="piece" data-bi="' + bi + '" data-pi="' + pi + '">';
+    if (editable) html += '<div class="drop-spot" aria-hidden="true">拖图贴这儿</div>';
     if (tags.length) {
       html += '<p class="piece-tags">' + tags.map(function (t) { return "<span>#" + esc(t) + "</span>"; }).join("") + "</p>";
     }
@@ -75,17 +93,21 @@
       html += '<h3 class="piece-title">' + esc(a.title) +
         (a.author === "ai" ? '<span class="ai-mark" title="@ai 在读"></span>' : "") + "</h3>";
     }
-    if (h2.body) {
-      var bodyHtml = md(h2.body);
-      if (withDropcap) bodyHtml = bodyHtml.replace("<p>", '<p class="dropcap">');
-      html += '<div class="piece-body">' + bodyHtml + "</div>";
-    }
+    var bodyHtml = h2.body ? md(h2.body) : "";
+    if (withDropcap && bodyHtml) bodyHtml = bodyHtml.replace("<p>", '<p class="dropcap">');
+    html += '<div class="piece-body' + (editable ? " editable" : "") + '"' +
+      (editable ? ' data-placeholder="点一下,在纸上改 ……"' : "") + ">" + bodyHtml + "</div>";
     (h2.commits || []).forEach(function (c) {
       var pc = parseCommit(c);
       html += '<aside class="annot ink-in"><p class="annot-head"><span class="seal">批</span>' +
         esc(pc.author || "ai") + ' · #commit</p><p>' + esc(pc.text) + "</p></aside>";
     });
-    return html + "</article>";
+    if (editable) {
+      html += '<button class="strike-aff" type="button" title="划掉这一段">划</button>' +
+        '<p class="strike-actions"><button class="strike-undo" type="button">还原</button>' +
+        '<button class="strike-go" type="button">收起 · 删去</button></p>';
+    }
+    return html + '<p class="piece-note" aria-hidden="true"></p></article>';
   }
 
   function gapHtml(fromMin, toMinV) {
@@ -97,6 +119,7 @@
   function renderDay(payload) {
     var main = $("dayMain");
     var blocks = payload.blocks || [];
+    STATE.blocks = blocks;            // 留作写操作的真源模型
     if (!blocks.length) {
       main.innerHTML =
         '<div class="blank-day ink-in"><div class="blank-ruler"></div>' +
@@ -105,20 +128,122 @@
       return;
     }
     var html = "", firstPiece = true, prevEnd = null;
-    blocks.forEach(function (b) {
+    blocks.forEach(function (b, bi) {
       var t = toMin(b.time);
       if (prevEnd !== null && t - prevEnd > 30) html += gapHtml(prevEnd + 30, t - 30 >= prevEnd + 30 ? t - 30 : t);
       prevEnd = t;
-      html += '<section class="block ink-in" data-time="' + esc(b.time) + '">' +
+      html += '<section class="block ink-in" data-time="' + esc(b.time) + '" data-bi="' + bi + '">' +
         '<div class="rail"><time datetime="' + esc(b.time) + '">' + esc(b.time.replace(/^0/, "")) + "</time></div>" +
         '<div class="pieces">';
-      (b.h2 || []).forEach(function (h) {
-        html += pieceHtml(h, firstPiece && !!h.body);
+      (b.h2 || []).forEach(function (h, pi) {
+        html += pieceHtml(h, bi, pi, firstPiece && !!h.body);
         if (h.body) firstPiece = false;
       });
       html += "</div></section>";
     });
     main.innerHTML = html;
+    if (STATE.writable) wireWrites();
+  }
+
+  /* ── 写操作:行内编辑 + 划掉收纸删除(事件委托) ── */
+  function reconstructBlockMd(b) {
+    var lines = [];
+    (b.h2 || []).forEach(function (h) {
+      var tagStr = (h.tags || []).map(function (t) { return "#" + t; }).join(" ");
+      lines.push(("## " + (tagStr ? tagStr + " " : "") + (h.title || "")).trim());
+      lines.push("");
+      if (h.body) lines.push(h.body);
+      if (h.commits && h.commits.length) {
+        lines.push("");
+        h.commits.forEach(function (c) { lines.push(c); });
+      }
+      lines.push("");
+    });
+    return lines.join("\n").replace(/\s+$/, "");
+  }
+
+  function saveBlock(bi) {
+    var b = STATE.blocks[bi];
+    if (!b) return Promise.resolve();
+    var payload = { time: b.time, new_md: reconstructBlockMd(b) };
+    if (STATE.date) payload.date = STATE.date;
+    return fetch("/api/journal/patch", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d && d.error) { whisper("没存上 — " + d.error); return false; }
+      whisper("已写回 " + b.time + " 的纸");
+      return true;
+    }).catch(function (e) { whisper("没存上 — " + e.message); return false; });
+  }
+
+  function hOf(art) {
+    var b = STATE.blocks[+art.dataset.bi];
+    return b && b.h2 ? b.h2[+art.dataset.pi] : null;
+  }
+
+  function deleteBlockAt(bi, sec) {
+    var b = STATE.blocks[bi];
+    if (!b) return;
+    var payload = { time: b.time };
+    if (STATE.date) payload.date = STATE.date;
+    fetch("/api/journal/delete-block", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d && (d.error || d.detail)) { whisper("删除失败 — " + (d.error || d.detail)); sec.style.display = ""; return; }
+      sec.parentNode && sec.parentNode.removeChild(sec);
+      whisper("收起了 " + b.time + " 的纸");
+    }).catch(function (e) { whisper("删除失败 — " + e.message); sec.style.display = ""; });
+  }
+
+  function wireWrites() {
+    var main = $("dayMain");
+
+    // 行内编辑:点 .editable → contenteditable;blur 写回(只在变了时)
+    main.addEventListener("click", function (e) {
+      var ed = e.target.closest(".editable");
+      if (!ed || ed.isContentEditable) return;
+      var art = ed.closest(".piece");
+      if (art.classList.contains("struck")) return;
+      var h = hOf(art);
+      if (!h) return;
+      ed.dataset.raw = h.body || "";
+      ed.textContent = h.body || "";
+      ed.contentEditable = "true";
+      art.classList.add("editing");
+      ed.focus();
+    });
+    main.addEventListener("blur", function (e) {
+      var ed = e.target.closest && e.target.closest(".editable");
+      if (!ed || !ed.isContentEditable) return;
+      var art = ed.closest(".piece"), h = hOf(art);
+      ed.contentEditable = "false";
+      art.classList.remove("editing");
+      var next = ed.textContent.replace(/ /g, " ").trim();
+      if (h && next !== (ed.dataset.raw || "")) {
+        h.body = next;
+        ed.innerHTML = next ? md(next) : "";
+        art.classList.add("saved");
+        setTimeout(function () { art.classList.remove("saved"); }, 2300);
+        saveBlock(+art.dataset.bi);
+      } else {
+        ed.innerHTML = h && h.body ? md(h.body) : "";
+      }
+    }, true);
+
+    // 划掉 · 收纸:strike-aff → struck;还原 / 收起删去
+    main.addEventListener("click", function (e) {
+      var art = e.target.closest(".piece");
+      if (!art) return;
+      if (e.target.closest(".strike-aff")) { art.classList.add("struck"); return; }
+      if (e.target.closest(".strike-undo")) { art.classList.remove("struck"); return; }
+      if (e.target.closest(".strike-go")) {
+        var sec = art.closest(".block");
+        art.classList.add("folding");
+        setTimeout(function () { deleteBlockAt(+sec.dataset.bi, sec); }, 700);
+      }
+    });
   }
 
   /* ── 21:30 纸条 + 回一句(返 Promise,启动序列等它) ── */
@@ -250,15 +375,44 @@
     });
   }
 
+  /* ── 昼夜小印:报头快翻日/夜(跟设置的三态共用 gateway-theme 真源) ── */
+  function wireModeSeal() {
+    var seal = $("modeSeal");
+    if (!seal || !window.gatewayTheme) return;
+    function paint() {
+      // 当前生效的明暗(system 态读系统)→ 印上显示"另一面"可切到的灯
+      var cur = document.documentElement.getAttribute("data-theme");
+      if (!cur) cur = window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day";
+      var ch = seal.querySelector(".ms-char");
+      if (ch) ch.textContent = cur === "night" ? "昼" : "夜";  // 印面是"去往的那盏灯"
+      seal.dataset.cur = cur;
+    }
+    seal.addEventListener("click", function () {
+      var cur = seal.dataset.cur === "night" ? "night" : "day";
+      seal.classList.add("flipping");
+      setTimeout(function () {
+        window.gatewayTheme.set(cur === "night" ? "day" : "night");
+        paint();
+        seal.classList.remove("flipping");
+      }, 200);
+    });
+    window.addEventListener("gateway-theme-change", paint);
+    paint();
+  }
+
   /* ── 启动:三路数据齐 → DOM 定型 → 才起动画/行为(paperInit) ── */
   fetch("/api/journal/today" + (DATE ? "?date=" + DATE : ""))
     .then(function (r) { return r.json(); })
     .then(function (payload) {
       var jobs = [];
+      STATE.writable = true;   // 单日页散文随时可改(跟 classic 一致,patch 端点 date-aware)
       if (payload.error) {
-        mastheadFor(DATE || new Date().toISOString().slice(0, 10), "");
+        STATE.date = DATE || new Date().toISOString().slice(0, 10);
+        mastheadFor(STATE.date, "");
         renderDay({ blocks: [] });
       } else {
+        STATE.date = DATE || payload.date;
+        STATE.file = payload.file;
         mastheadFor(payload.date, payload.file);
         renderDay(payload);
         jobs.push(renderSlip(payload.date, !DATE || payload.date === new Date().toISOString().slice(0, 10)));
@@ -270,5 +424,5 @@
       $("mhDate").textContent = "纸还没铺开";
       $("mhSub").textContent = "数据没接上,稍后再来";
     })
-    .then(function () { window.paperInit && window.paperInit(); });
+    .then(function () { wireModeSeal(); window.paperInit && window.paperInit(); });
 })();
