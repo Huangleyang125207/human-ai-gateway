@@ -17,6 +17,10 @@
 `~/human-ai-dev/gateway/` = viewer / server / UI 的代码本体。
 所有数据(日记 / 聚合 / PULSE 真源 / 设计 brief)在 `~/agents创作平台/`。
 
+> **加新前端皮肤(page-family skin,复用引擎只换皮)→ 看一眼就会做:**
+> `~/agents创作平台/agents/human-ai-schedule/SKIN_WORKFLOW.md`
+> 参考实物:`*-paper.html` + `shared/{theme,*-paper}.{js,css}`(纸与灯皮肤,6.13 落地)
+
 ```
 gateway/                ← 本目录
 ├── server.py
