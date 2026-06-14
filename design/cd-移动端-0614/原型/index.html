@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gateway · 口袋版 — 移动端原型</title>
+<link rel="stylesheet" href="mobile-tokens.css">
+<style>
+  html, body { margin: 0; background: #e6e3dc; }
+  .stage {
+    min-height: 100vh; padding: 40px 40px 80px;
+    font-family: -apple-system, system-ui, "PingFang SC", sans-serif;
+    color: #3a342c;
+    background:
+      radial-gradient(120vw 60vh at 50% -10%, rgba(233,199,180,0.22), transparent 60%),
+      #e6e3dc;
+  }
+  .hero { max-width: 940px; margin: 0 auto 30px; }
+  .hero-kicker { font: 11px/1 -apple-system, system-ui; letter-spacing: 0.22em; text-transform: uppercase; color: #a89c84; }
+  .hero h1 { font: 500 38px/1.15 "Songti SC", "Noto Serif SC", Georgia, serif; color: #3a342c; margin: 12px 0 6px; letter-spacing: 0.01em; }
+  .hero .sub { font: 16px/1.7 "Songti SC", "Noto Serif SC", serif; color: #5a4f42; max-width: 64ch; }
+  .reason {
+    max-width: 940px; margin: 0 auto 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  }
+  .reason .card {
+    background: rgba(251,246,236,0.7); border: 1px solid rgba(58,52,44,0.1); border-radius: 14px; padding: 16px 18px;
+  }
+  .reason .card h3 { font: 500 13.5px -apple-system, system-ui; letter-spacing: 0.04em; color: #3a342c; margin: 0 0 6px; }
+  .reason .card p { font: 13px/1.6 "Songti SC", serif; color: #5a4f42; margin: 0; }
+  .reason .card b { color: #b4731e; font-weight: 500; }
+
+  .controls {
+    max-width: 940px; margin: 0 auto 30px; display: flex; flex-wrap: wrap; gap: 20px; align-items: center;
+    padding: 16px 20px; background: rgba(251,246,236,0.7); border: 1px solid rgba(58,52,44,0.1); border-radius: 14px;
+  }
+  .ctl-group { display: flex; align-items: center; gap: 12px; }
+  .ctl-lab { font: 11px -apple-system, system-ui; letter-spacing: 0.1em; text-transform: uppercase; color: #857a68; }
+  .seg { display: inline-flex; gap: 2px; background: rgba(58,52,44,0.06); padding: 3px; border-radius: 10px; }
+  .seg button {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    font: 13px -apple-system, system-ui; color: #857a68; padding: 7px 14px; border-radius: 7px; transition: all 0.18s;
+  }
+  .seg button.on { background: #fefaf2; color: #3a342c; box-shadow: 0 1px 3px rgba(58,52,44,0.1); font-weight: 500; }
+  .cheats { display: flex; flex-wrap: wrap; gap: 8px; }
+  .cheat { font: 12px -apple-system, system-ui; color: #5a4f42; background: rgba(233,199,180,0.3); border-radius: 999px; padding: 5px 12px; }
+  .cheat b { color: #b4731e; font-weight: 600; }
+
+  .devices { display: flex; gap: 56px; justify-content: center; align-items: flex-start; flex-wrap: wrap; }
+  .dev-col { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  .dev-name { font: 12px -apple-system, system-ui; letter-spacing: 0.14em; text-transform: uppercase; color: #857a68; }
+  .dev-name b { color: #3a342c; font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="frames/ios-frame.jsx"></script>
+<script type="text/babel" src="frames/android-frame.jsx"></script>
+<script type="text/babel" src="gw-data.jsx"></script>
+<script type="text/babel" src="gw-journal.jsx"></script>
+<script type="text/babel" src="gw-card-editor.jsx"></script>
+<script type="text/babel" src="gw-chat.jsx"></script>
+<script type="text/babel" src="gw-menu.jsx"></script>
+<script type="text/babel" src="gw-app.jsx"></script>
+
+<script type="text/babel">
+const { useState } = React;
+
+const VARIANTS = [
+  { id: 'sheet', label: '底部 sheet' },
+  { id: 'full', label: '全屏信笺' },
+  { id: 'note', label: '居中便签' },
+];
+
+function Canvas() {
+  const [variant, setVariant] = useState('sheet');
+  return (
+    <div className="stage">
+      <div className="hero">
+        <div className="hero-kicker">Gateway · 移动端 · classic 私印小报</div>
+        <h1>把那本安静的纸杂志，翻成单手能用的口袋版</h1>
+        <p className="sub">熟悉的手机交互骨架里，装的还是那张纸、那盏深夜的灯。两个壳一套设计，手势真的跑得起来——在下面任意一台上滑、点、长按试试。</p>
+      </div>
+
+      <div className="reason">
+        <div className="card">
+          <h3>我守住的</h3>
+          <p>色板只用 <b>classic</b>（米黄 + 4 粉彩 + 金棕），笔迹即身份：人用<b>宋体</b>、AI 用<b>文楷</b>。字体全走系统 CJK，<b>零 CDN</b>。</p>
+        </div>
+        <div className="card">
+          <h3>我重做的</h3>
+          <p>只有两样——<b>触屏手势</b>与 <b>UI 呈现</b>。hover→长按、垃圾桶→左滑、右键→拉进对话；顶栏下滑收起让位内容。</p>
+        </div>
+        <div className="card">
+          <h3>我大胆的地方</h3>
+          <p>日期带做成<b>报头式</b>大字母 + 渐隐胶片；+ 卡片当主角，三种弹出形态可切换；磨墨等待用墨迹晕开，不用 spinner。</p>
+        </div>
+      </div>
+
+      <div className="controls">
+        <div className="ctl-group">
+          <span className="ctl-lab">+ 卡片编辑器</span>
+          <div className="seg">
+            {VARIANTS.map((v) => (
+              <button key={v.id} className={variant === v.id ? 'on' : ''} onClick={() => setVariant(v.id)}>{v.label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="cheats">
+          <span className="cheat">滑<b>日期带</b>到「明天」建新天</span>
+          <span className="cheat">条目<b>左滑</b>删除</span>
+          <span className="cheat"><b>长按</b>条目拉进对话</span>
+          <span className="cheat">点 <b>+</b> 写卡片</span>
+          <span className="cheat">「对话」发消息看<b>磨墨</b></span>
+        </div>
+      </div>
+
+      <div className="devices">
+        <div className="dev-col">
+          <div className="dev-name">iPhone · <b>iOS</b></div>
+          <IOSDevice>
+            <GatewayApp platform="ios" safeTop={56} safeBot={28} cardVariant={variant} />
+          </IOSDevice>
+        </div>
+        <div className="dev-col">
+          <div className="dev-name">Pixel · <b>Android</b></div>
+          <AndroidDevice>
+            <GatewayApp platform="android" safeTop={6} safeBot={6} cardVariant={variant} />
+          </AndroidDevice>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Canvas />);
+</script>
+</body>
+</html>
