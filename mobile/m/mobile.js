@@ -1,203 +1,490 @@
-// 移动原生壳逻辑。数据全走 /api/*(被 mobile-api.js shim 本地服务)。
+// 移动原生壳逻辑 · cd 设计组装为 vanilla,接 shim 真数据(/api/* + gatewayMd)。
 (function () {
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
-  function api(path, opts) { return fetch(path, opts).then(function (r) { return r.json(); }); }
+  function api(p, o) { return fetch(p, o).then(function (r) { return r.json(); }); }
   function md(s) { return window.gatewayMd ? window.gatewayMd(s || "") : (s || ""); }
+  function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+  function esc(s) { return (s || "").replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
+
+  // ── 内联图标(取自 cd gw-data.jsx)──
+  var I = {
+    burger: '<svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M3 6h16M3 11h16M3 16h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+    plus: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 4v16M4 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+    send: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 10l14-6-6 14-2.2-5.8L3 10z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+    attach: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M14 6.5l-6 6a2.2 2.2 0 003.1 3.1l6.2-6.2a4 4 0 00-5.7-5.7L5.4 9.2a5.8 5.8 0 008.2 8.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+    chev: '<svg width="8" height="14" viewBox="0 0 8 14" fill="none"><path d="M1 1l6 6-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    settings: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.4"/><path d="M10 1.5v2M10 16.5v2M18.5 10h-2M3.5 10h-2M16 4l-1.4 1.4M5.4 14.6L4 16M16 16l-1.4-1.4M5.4 5.4L4 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+    aggregate: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M5 10h10M7 15h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+    widget: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="3" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.3"/><rect x="11" y="3" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.3"/><rect x="3" y="11" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.3"/><rect x="11" y="11" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.3"/></svg>',
+    history: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 5v5l3 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.5 10a6.5 6.5 0 106.5-6.5A6.5 6.5 0 004 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M2.5 4v3h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    about: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.3"/><path d="M10 9v4.5M10 6.4v.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+    back: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4l-6 6 6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+  var MENU = [
+    { id: "settings", glyph: I.settings, label: "设置", desc: "钥匙 · 模型 · 皮肤" },
+    { id: "aggregate", glyph: I.aggregate, label: "聚合页", desc: "按 #标签 横切" },
+    { id: "widget", glyph: I.widget, label: "小组件", desc: "打卡 · 八杯水 · 脉搏" },
+    { id: "history", glyph: I.history, label: "历史", desc: "往日翻阅" },
+    { id: "about", glyph: I.about, label: "关于", desc: "Gateway · 私印小报" }
+  ];
 
   // ── 日期工具 ──
   function pad(n) { return (n < 10 ? "0" : "") + n; }
   function todayIso() { var d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
   function isoAdd(iso, n) { var p = iso.split("-"); var d = new Date(+p[0], +p[1] - 1, +p[2] + n); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
-  function md_(iso) { var p = iso.split("-"); return +p[1] + "/" + +p[2]; }
-  var WK = ["日", "一", "二", "三", "四", "五", "六"];
-  function wk(iso) { var p = iso.split("-"); return "周" + WK[new Date(+p[0], +p[1] - 1, +p[2]).getDay()]; }
+  var DOW = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+  var MOY = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  function dparts(iso) { var p = iso.split("-"); var d = new Date(+p[0], +p[1] - 1, +p[2]); return { num: +p[2], dow: DOW[d.getDay()], mo: MOY[+p[1] - 1] }; }
 
   var TODAY = todayIso();
-  var state = { date: TODAY, view: "journal" };
+  var state = { tab: "journal", date: TODAY, days: [], readonly: false, thread: [], filled: 0, undo: null, undoTimer: null, hintTimer: null };
 
-  // ── 日期渐变滑动条 ──
-  function renderDateStrip() {
+  // ── 轻提示 ──
+  function flash(msg) {
+    var t = $("toasts");
+    var old = t.querySelector(".gw-hint-toast"); if (old) old.remove();
+    var h = el("div", "gw-hint-toast", esc(msg)); t.appendChild(h);
+    requestAnimationFrame(function () { h.classList.add("on"); });
+    clearTimeout(state.hintTimer);
+    state.hintTimer = setTimeout(function () { h.classList.remove("on"); setTimeout(function () { h.remove(); }, 400); }, 2200);
+  }
+
+  // ── 日期带 ──
+  function loadDateband() {
     return api("/api/journal/days").then(function (r) {
       var created = {}; (r.days || []).forEach(function (d) { created[d.date] = true; });
-      // 过去+今天:只列已建的(<=今天);未来:今天+1(可建) + 今天+2(灰边界)
       var list = Object.keys(created).filter(function (d) { return d <= TODAY; }).sort();
       if (list.indexOf(TODAY) === -1) list.push(TODAY);
       var t1 = isoAdd(TODAY, 1), t2 = isoAdd(TODAY, 2);
-      list.push(t1); list.push(t2);
-      var strip = $("dateRow"); strip.innerHTML = "";
-      list.forEach(function (iso) {
-        var el = document.createElement("div"); el.className = "day"; el.dataset.iso = iso;
-        var kind = "normal";
-        if (iso > TODAY) { kind = (iso === t1 && !created[t1]) ? "creatable" : "future"; el.classList.add(iso === t1 ? "creatable" : "future"); }
-        if (iso === state.date) el.classList.add("is-current");
-        el.dataset.kind = created[iso] ? "open" : kind;
-        var label = iso === TODAY ? "今天" : (iso === t1 ? "明天" : md_(iso));
-        el.innerHTML = '<span class="d-day">' + label + '</span><span class="d-sub">' + wk(iso) + '</span>';
-        el.addEventListener("click", function () { onDayTap(iso, el.dataset.kind); });
-        strip.appendChild(el);
-      });
-      // 居中当前
-      var cur = strip.querySelector(".is-current");
-      if (cur) cur.scrollIntoView({ inline: "center", block: "nearest" });
+      var days = list.map(function (iso) { return { iso: iso, state: iso === TODAY ? "today" : "past" }; });
+      days.push({ iso: t1, state: created[t1] ? "past" : "creatable" });
+      days.push({ iso: t2, state: created[t2] ? "past" : "locked" });
+      state.days = days; renderDateband();
     });
   }
-
-  function onDayTap(iso, kind) {
-    if (kind === "future") return;               // 今天+2:灰,不可建
-    if (kind === "creatable") {                   // 明天:滑/点 → 创建
-      api("/api/journal/new-day", { method: "POST", body: JSON.stringify({ date: iso }) })
-        .then(function () { state.date = iso; renderDateStrip().then(function () { loadDay(iso); }); });
+  function renderDateband() {
+    var band = $("dateband"); band.innerHTML = "";
+    state.days.forEach(function (d) {
+      var p = dparts(d.iso);
+      var cls = "gw-day" + (d.state === "today" ? " today" : "") + (d.iso === state.date ? " on" : "") +
+        (d.state === "creatable" ? " future creatable" : "") + (d.state === "locked" ? " future locked" : "");
+      var moTxt = d.state === "today" ? "今天" : d.state === "creatable" ? "明天" : p.mo;
+      var b = el("button", cls,
+        '<span class="gw-day-dow">' + p.dow + '</span>' +
+        '<span class="gw-day-num">' + p.num + '</span>' +
+        '<span class="gw-day-mo">' + moTxt + '</span>' +
+        (d.state === "creatable" ? '<span class="gw-day-plus">+</span>' : ''));
+      b.addEventListener("click", function () { pickDay(d); });
+      band.appendChild(b);
+    });
+    var cur = band.querySelector(".today") || band.querySelector(".on");
+    if (cur) band.scrollLeft = cur.offsetLeft - band.clientWidth / 2 + cur.offsetWidth / 2;
+  }
+  function pickDay(d) {
+    if (d.state === "locked") { flash("最多只能建到明天（+1）"); return; }
+    if (d.state === "creatable") {
+      api("/api/journal/new-day", { method: "POST", body: JSON.stringify({ date: d.iso }) }).then(function (res) {
+        if (res && res.ok === false) { flash(res.error || "建不了"); return; }
+        state.date = d.iso;
+        loadDateband().then(function () {
+          var nb = $("dateband").querySelector(".gw-day.on"); if (nb) nb.classList.add("born");
+          flash("明天已创建 · 落了张空骨架"); loadDay();
+        });
+      });
       return;
     }
-    state.date = iso; markCurrent(iso); loadDay(iso);
-  }
-  function markCurrent(iso) {
-    var strip = $("dateRow");
-    Array.prototype.forEach.call(strip.children, function (c) { c.classList.toggle("is-current", c.dataset.iso === iso); });
-  }
-  // 滑动停下时,若停在"明天"格 → 创建(滑动创建新日记)
-  var stripScrollT;
-  function bindStripCreate() {
-    var strip = $("dateRow");
-    strip.addEventListener("scroll", function () {
-      clearTimeout(stripScrollT);
-      stripScrollT = setTimeout(function () {
-        var mid = strip.scrollLeft + strip.clientWidth / 2, best = null, bd = 1e9;
-        Array.prototype.forEach.call(strip.children, function (c) {
-          var cc = c.offsetLeft + c.offsetWidth / 2, dd = Math.abs(cc - mid);
-          if (dd < bd) { bd = dd; best = c; }
-        });
-        if (best && best.dataset.kind === "creatable") onDayTap(best.dataset.iso, "creatable");
-      }, 220);
-    }, { passive: true });
+    state.date = d.iso; renderDateband(); loadDay();
   }
 
   // ── 日记页 ──
-  function loadDay(iso) {
-    api("/api/journal/today?date=" + iso).then(function (j) { renderTimeline(j); });
-    api("/api/daily-tasks?date=" + iso).then(function (t) { renderCheckins(t); });
+  function loadDay() {
+    state.readonly = state.date < TODAY;
+    Promise.all([api("/api/journal/today?date=" + state.date), api("/api/daily-tasks?date=" + state.date)])
+      .then(function (rs) { renderJournal(rs[0], rs[1]); });
   }
-  function renderTimeline(j) {
-    var tl = $("timeline"); tl.innerHTML = "";
+  function renderJournal(j, t) {
+    var v = $("journalView"); v.innerHTML = "";
+    // care: 八杯水 + 打卡
+    var care = el("div", "gw-care");
+    care.appendChild(buildCups());
+    care.appendChild(buildTasks((t && t.tasks) || []));
+    v.appendChild(care);
+    // 时间线
+    var stream = el("div", "gw-stream");
     var blocks = (j && j.blocks) || [];
-    if (!blocks.length) { tl.innerHTML = '<div class="empty-hint">这天还空着。<br>底下「记一笔」写第一条。</div>'; return; }
-    blocks.forEach(function (b) {
-      b.h2.forEach(function (h) {
-        var e = document.createElement("div"); e.className = "entry";
-        var tags = (h.tags || []).map(function (t) { return "#" + t; }).join(" ");
-        e.innerHTML =
-          '<div class="t">' + b.time + '</div>' +
-          '<div class="ebody">' +
-            (tags ? '<div class="tags">' + tags + '</div>' : '') +
-            (h.title ? '<div class="title">' + h.title + '</div>' : '') +
-            '<div class="prose">' + md(h.body) + '</div>' +
-          '</div>';
-        tl.appendChild(e);
+    var entries = [];
+    blocks.forEach(function (b) { (b.h2 || []).forEach(function (h) { entries.push({ time: b.time, h: h }); }); });
+    if (!entries.length) {
+      stream.appendChild(el("div", "gw-empty", "<b>这一天还是空白</b>点下面的 + 写下第一块，<br>或滑日期带到今天自动落骨架。"));
+    } else {
+      entries.forEach(function (e) { stream.appendChild(buildEntry(e)); });
+    }
+    v.appendChild(stream);
+  }
+
+  // 八杯水(滑动点亮,触点放大;本地态,持久化留后续批次)
+  function buildCups() {
+    var N = 8, block = el("div", "gw-care-block", '<div class="gw-care-label">八杯水</div>');
+    var row = el("div", "gw-cups");
+    var cups = [];
+    for (var i = 0; i < N; i++) { var c = el("div", "gw-cup", '<div class="gw-cup-fill"></div>'); cups.push(c); row.appendChild(c); }
+    var count = el("div", "gw-cups-count");
+    function paint(focus) {
+      cups.forEach(function (c, i) {
+        c.className = "gw-cup" + (i < state.filled ? " filled" : "") +
+          (i === focus ? " cup-focus" : (focus >= 0 && Math.abs(i - focus) === 1 ? " cup-near" : ""));
       });
-    });
+      count.innerHTML = "<b>" + state.filled + "</b> / " + N + " 杯 · " + (state.readonly ? "历史日只读" : "滑过杯子点亮");
+    }
+    function idxAt(x) { var best = -1, bd = 1e9; cups.forEach(function (c, i) { var r = c.getBoundingClientRect(); var d = Math.abs(x - (r.left + r.width / 2)); if (d < bd) { bd = d; best = i; } }); return best; }
+    function apply(x) { if (state.readonly) return; var i = idxAt(x); if (i < 0) return; var was = state.filled; state.filled = i + 1; paint(i); if (i + 1 > was) cups[i].classList.add("just"); }
+    row.addEventListener("pointerdown", function (e) { if (state.readonly) return; try { row.setPointerCapture(e.pointerId); } catch (x) {} apply(e.clientX); });
+    row.addEventListener("pointermove", function (e) { if (state.readonly || !row.hasPointerCapture || !row.hasPointerCapture(e.pointerId)) return; apply(e.clientX); });
+    row.addEventListener("pointerup", function () { paint(-1); });
+    paint(-1);
+    block.appendChild(row); block.appendChild(count); return block;
   }
-  function renderCheckins(t) {
-    var box = $("checkins"); box.innerHTML = "";
-    (t && t.tasks || []).forEach(function (task) {
-      var c = document.createElement("div"); c.className = "checkin" + (task.checked ? " done" : "");
-      c.innerHTML = '<div class="dot">' + (task.checked ? "✓" : "") + '</div><div class="nm">' + task.name + '</div>';
-      c.addEventListener("click", function () {
-        api("/api/daily-tasks/check", { method: "POST", body: JSON.stringify({ task_name: task.name, checked: !task.checked }) })
-          .then(function () { loadDay(state.date); });
+
+  // 打卡(横滑,点 toggle → daily-tasks/check)
+  function buildTasks(tasks) {
+    var block = el("div", "gw-care-block", '<div class="gw-care-label">今日打卡</div>');
+    var row = el("div", "gw-tasks");
+    tasks.forEach(function (t) {
+      var glyph = (t.name || "·").slice(0, 1);
+      var b = el("button", "gw-task" + (t.checked ? " on" : ""),
+        '<span class="gw-task-glyph">' + esc(glyph) + '</span><span class="gw-task-name">' + esc(t.name) + '</span>');
+      if (state.readonly) b.disabled = true;
+      b.addEventListener("click", function () {
+        if (state.readonly) return;
+        api("/api/daily-tasks/check", { method: "POST", body: JSON.stringify({ task_name: t.name, checked: !t.checked }) }).then(loadDay);
       });
-      box.appendChild(c);
+      row.appendChild(b);
     });
+    block.appendChild(row); return block;
   }
 
-  // ── 对话页 ──
-  function loadThread() {
-    api("/api/thread/history").then(function (r) {
-      var box = $("thread"); box.innerHTML = "";
-      (r.history || []).forEach(function (m) { appendMsg(box, m.role === "ai" || m.role === "assistant" ? "ai" : "user", typeof m.content === "string" ? m.content : (m.text || "")); });
+  // 单条 entry: 左滑删 + 长按拉进对话
+  function parseCommit(raw) {
+    var m = /#commit\s*[（(]\s*([^）)]*)[）)]\s*[:：]\s*([\s\S]*)/.exec(raw || "");
+    if (!m) return null;
+    var who = /claude|gpt|deepseek|gemini|\bai\b|opus|sonnet|fable/i.test(m[1]) ? "ai" : "me";
+    return { who: who, text: m[2].trim() };
+  }
+  function buildEntry(e) {
+    var wrap = el("div", "gw-entry-wrap");
+    wrap.appendChild(el("div", "gw-entry-del", "删除"));
+    var h = e.h;
+    var tagsHtml = (h.tags || []).map(function (t) { return '<span class="gw-tag">#' + esc(t) + '</span>'; }).join("");
+    var commitsHtml = "";
+    (h.commits || []).forEach(function (raw) {
+      var c = parseCommit(raw); if (!c) return;
+      commitsHtml += '<div class="gw-commit ' + c.who + '"><span class="gw-commit-au">' + (c.who === "ai" ? "AI" : "我") + '</span><span class="gw-commit-text">' + esc(c.text) + '</span></div>';
     });
+    var entry = el("div", "gw-entry",
+      '<div class="gw-lp-hint"></div>' +
+      '<div class="gw-entry-time"><span class="hr">' + e.time.split(":")[0] + '</span>:' + e.time.split(":")[1] + '</div>' +
+      '<div class="gw-entry-main">' +
+        (tagsHtml ? '<div class="gw-entry-tags">' + tagsHtml + '</div>' : '') +
+        (h.title ? '<div class="gw-entry-title">' + esc(h.title) + '</div>' : '') +
+        '<div class="gw-entry-body">' + md(h.body) + '</div>' +
+        (commitsHtml ? '<div class="gw-commits">' + commitsHtml + '</div>' : '') +
+      '</div>');
+    bindEntryGesture(entry, e);
+    wrap.appendChild(entry);
+    return wrap;
   }
-  function appendMsg(box, who, text) {
-    var m = document.createElement("div"); m.className = "msg " + who;
-    m.innerHTML = who === "ai" ? md(text) : text.replace(/</g, "&lt;");
-    box.appendChild(m); m.scrollIntoView({ block: "nearest" });
-  }
-
-  // ── tab 切换 ──
-  function switchView(v) {
-    state.view = v;
-    Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (t) { t.classList.toggle("is-active", t.dataset.view === v); });
-    $("journalView").hidden = v !== "journal";
-    $("chatView").hidden = v !== "chat";
-    $("dateRow").style.display = v === "journal" ? "" : "none";
-    $("composerPlaceholder").textContent = v === "journal" ? "记一笔…" : "说点什么…";
-    if (v === "chat") loadThread();
-  }
-
-  // ── 顶栏下滑收起 / 上滑唤回 ──
-  function bindAutohide() {
-    var sc = $("content"), last = 0;
-    sc.addEventListener("scroll", function () {
-      var y = sc.scrollTop;
-      if (y > last && y > 40) $("topbar").classList.add("collapsed");
-      else if (y < last) $("topbar").classList.remove("collapsed");
-      last = y;
-    }, { passive: true });
-  }
-
-  // ── 底部输入:点击展开 → 写入 ──
-  function curBlock() { var d = new Date(); return pad(d.getHours()) + ":" + (d.getMinutes() < 30 ? "00" : "30"); }
-  function bindComposer() {
-    var pill = $("composerPill"), send = $("sendBtn");
-    pill.addEventListener("click", function () {
-      if (pill.querySelector("textarea")) return;
-      pill.innerHTML = '<textarea rows="1" style="flex:1;border:none;background:transparent;font:inherit;color:inherit;resize:none;outline:none;"></textarea>';
-      var ta = pill.querySelector("textarea"); ta.focus(); send.hidden = false;
+  function bindEntryGesture(entry, e) {
+    var st = { x: 0, y: 0, mode: null, timer: null }, dx = 0;
+    function setDx(v) { dx = v; entry.style.transform = "translateX(" + v + "px)"; }
+    function clearT() { if (st.timer) { clearTimeout(st.timer); st.timer = null; } }
+    entry.addEventListener("pointerdown", function (ev) {
+      if (ev.button === 2) return;
+      st = { x: ev.clientX, y: ev.clientY, mode: null, timer: null };
+      entry.classList.add("lp-arming");
+      st.timer = setTimeout(function () {
+        if (st.mode === null) { st.mode = "lp"; entry.classList.add("longpress"); if (navigator.vibrate) navigator.vibrate(12); setTimeout(function () { pullToChat(e); entry.classList.remove("longpress", "lp-arming"); }, 420); }
+      }, 480);
     });
-    send.addEventListener("click", function () {
-      var ta = pill.querySelector("textarea"); if (!ta) return;
-      var text = ta.value.trim(); if (!text) return;
-      if (state.view === "journal") {
-        api("/api/journal/insert-block", { method: "POST", body: JSON.stringify({ date: state.date, time: curBlock(), body: text }) })
-          .then(function () { resetComposer(); loadDay(state.date); });
-      } else {
-        var box = $("thread"); appendMsg(box, "user", text); resetComposer();
-        sendChat(text, box);
+    entry.addEventListener("pointermove", function (ev) {
+      var adx = ev.clientX - st.x, ady = ev.clientY - st.y;
+      if (st.mode === null && (Math.abs(adx) > 8 || Math.abs(ady) > 8)) {
+        clearT(); entry.classList.remove("lp-arming");
+        if (Math.abs(adx) > Math.abs(ady) && adx < 0) { st.mode = "swipe"; try { entry.setPointerCapture(ev.pointerId); } catch (x) {} entry.classList.add("dragging"); }
+        else st.mode = "scroll";
+      }
+      if (st.mode === "swipe" && !state.readonly) setDx(Math.max(-96, Math.min(0, adx)));
+    });
+    entry.addEventListener("pointerup", function () {
+      clearT(); entry.classList.remove("lp-arming");
+      if (st.mode === "swipe") {
+        entry.classList.remove("dragging");
+        if (dx < -60) { setDx(-window.innerWidth); setTimeout(function () { deleteEntry(e); }, 240); }
+        else setDx(0);
       }
     });
+    entry.addEventListener("pointercancel", function () { clearT(); entry.classList.remove("lp-arming", "dragging"); setDx(0); });
+    entry.addEventListener("contextmenu", function (ev) { ev.preventDefault(); });
   }
-  function resetComposer() { $("composerPill").innerHTML = '<span id="composerPlaceholder">' + (state.view === "journal" ? "记一笔…" : "说点什么…") + '</span>'; $("sendBtn").hidden = true; }
-  function sendChat(text, box) {
-    fetch("/api/chat", { method: "POST", body: JSON.stringify({ message: text, history: [] }) }).then(function (res) {
-      var reader = res.body.getReader(), dec = new TextDecoder(), buf = "", el = null;
+
+  function deleteEntry(e) {
+    api("/api/journal/delete-block", { method: "POST", body: JSON.stringify({ date: state.date, time: e.time }) }).then(function () {
+      state.undo = { e: e, date: state.date }; showUndo(e.h.title || "条目"); loadDay();
+    });
+  }
+  function showUndo(label) {
+    var t = $("toasts"); var old = t.querySelector(".gw-undo"); if (old) old.remove();
+    var u = el("div", "gw-undo on",
+      '<span class="gw-undo-msg">已删除「' + esc(label) + '」</span>' +
+      '<button class="gw-undo-btn">撤回</button>' +
+      '<span class="gw-undo-bar" style="animation:gw-undobar 5s linear forwards"></span>');
+    u.querySelector(".gw-undo-btn").addEventListener("click", doUndo);
+    t.appendChild(u);
+    clearTimeout(state.undoTimer);
+    state.undoTimer = setTimeout(function () { u.classList.remove("on"); setTimeout(function () { u.remove(); }, 250); state.undo = null; }, 5000);
+  }
+  function doUndo() {
+    if (!state.undo) return; var e = state.undo.e, date = state.undo.date;
+    var tag = (e.h.tags || [])[0] || "";
+    api("/api/journal/insert-block", { method: "POST", body: JSON.stringify({ date: date, time: e.time, tag: tag, title: e.h.title || "", body: e.h.body || "" }) }).then(function () {
+      state.undo = null; clearTimeout(state.undoTimer);
+      var u = $("toasts").querySelector(".gw-undo"); if (u) u.remove();
+      if (date === state.date) loadDay();
+    });
+  }
+  function pullToChat(e) {
+    state.thread.push({ kind: "ref", who: "me", refKind: "日记 · " + e.time, refText: e.h.title || md(e.h.body).replace(/<[^>]+>/g, "").slice(0, 24) });
+    saveThread(); flash("已拉进对话 ✦ 指给 AI 看");
+  }
+
+  // ── 对话 ──
+  function loadThread() {
+    return api("/api/thread/history").then(function (r) {
+      state.thread = (r.history || []).map(function (m) {
+        if (m.kind) return m;
+        return { kind: "msg", who: (m.role === "ai" || m.role === "assistant" || m.who === "ai") ? "ai" : "me", text: typeof m.content === "string" ? m.content : (m.text || "") };
+      });
+      renderThread();
+    });
+  }
+  function saveThread() { api("/api/thread/save", { method: "POST", body: JSON.stringify({ history: state.thread }) }).catch(function () {}); }
+  function renderThread(grinding) {
+    var v = $("chatView"); v.innerHTML = "";
+    var box = el("div", "gw-thread");
+    state.thread.forEach(function (m) {
+      if (m.kind === "ref") { box.appendChild(el("div", "gw-ref", '<div class="rk">' + esc(m.refKind) + '</div><div class="rt">' + esc(m.refText) + '</div>')); return; }
+      if (m.kind === "note") { box.appendChild(el("div", "gw-note", '<div class="gw-note-time">' + esc(m.time || "") + '</div><div class="gw-note-body">' + md(m.body) + '</div><div class="gw-note-sig">' + esc(m.sig || "") + '</div>')); return; }
+      var msg = el("div", "gw-msg " + (m.who === "ai" ? "ai" : "me"),
+        '<span class="who">' + (m.who === "ai" ? "Gateway" : "我") + '</span>' +
+        '<div class="gw-bubble' + (m.streaming ? " gw-cursor" : "") + '">' + (m.who === "ai" ? md(m.text) : esc(m.text)) + '</div>');
+      box.appendChild(msg);
+    });
+    if (grinding) box.appendChild(el("div", "gw-grind", '<span class="gw-grind-stone"></span><span class="gw-grind-text">磨墨中…</span>'));
+    v.appendChild(box);
+    var sc = $("scroll"); sc.scrollTop = sc.scrollHeight;
+  }
+  function sendChat(text) {
+    state.thread.push({ kind: "msg", who: "me", text: text }); renderThread(true);
+    var hist = state.thread.filter(function (m) { return m.kind === "msg"; }).map(function (m) { return { role: m.who === "ai" ? "assistant" : "user", content: m.text }; });
+    fetch("/api/chat", { method: "POST", body: JSON.stringify({ message: text, history: hist }) }).then(function (res) {
+      var reader = res.body.getReader(), dec = new TextDecoder(), buf = "", aiMsg = null;
       function pump() {
         return reader.read().then(function (r) {
-          if (r.done) return;
+          if (r.done) { if (aiMsg) { aiMsg.streaming = false; } saveThread(); renderThread(); return; }
           buf += dec.decode(r.value, { stream: true });
           var parts = buf.split("\n\n"); buf = parts.pop();
           parts.forEach(function (line) {
             line = line.trim(); if (line.indexOf("data:") !== 0) return;
-            try { var ev = JSON.parse(line.slice(5).trim());
-              if (ev.type === "delta") { if (!el) { el = document.createElement("div"); el.className = "msg ai"; box.appendChild(el); } el.innerHTML = md((el.dataset.raw = (el.dataset.raw || "") + ev.text)); el.scrollIntoView({ block: "nearest" }); }
-            } catch (e) {}
+            try {
+              var ev = JSON.parse(line.slice(5).trim());
+              if (ev.type === "delta") { if (!aiMsg) { aiMsg = { kind: "msg", who: "ai", text: "", streaming: true }; state.thread.push(aiMsg); } aiMsg.text += ev.text; renderThread(); }
+              else if (ev.type === "error") { if (!aiMsg) { aiMsg = { kind: "msg", who: "ai", text: "" }; state.thread.push(aiMsg); } aiMsg.text += "（出错：" + ev.text + "）"; }
+            } catch (x) {}
           });
           return pump();
         });
       }
       return pump();
-    }).catch(function () {});
+    }).catch(function () { renderThread(); });
   }
 
-  // ── 菜单 ──
-  function bindMenu() {
-    $("menuBtn").addEventListener("click", function () { $("menuSheet").hidden = false; });
-    $("sheetScrim").addEventListener("click", function () { $("menuSheet").hidden = true; });
+  // ── 底栏 ──
+  function renderBottom() {
+    var b = $("bottom"); b.innerHTML = "";
+    if (state.tab === "journal") {
+      var row = el("div", "gw-fab-row");
+      var fab = el("button", "gw-fab", I.plus); fab.setAttribute("aria-label", "新建条目");
+      fab.addEventListener("click", function () { openCard(); });
+      row.appendChild(fab); b.appendChild(row);
+    } else {
+      var bar = el("div", "gw-chatbar");
+      var att = el("button", "gw-chat-attach", I.attach);
+      var ta = el("textarea", "gw-chat-input"); ta.rows = 1; ta.placeholder = "跟 Gateway 说点什么…";
+      var send = el("button", "gw-chat-send", I.send); send.disabled = true;
+      ta.addEventListener("input", function () { send.disabled = !ta.value.trim(); ta.style.height = "auto"; ta.style.height = Math.min(96, ta.scrollHeight) + "px"; });
+      ta.addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); fire(); } });
+      send.addEventListener("click", fire);
+      function fire() { var t = ta.value.trim(); if (!t) return; ta.value = ""; ta.style.height = "auto"; send.disabled = true; sendChat(t); }
+      bar.appendChild(att); bar.appendChild(ta); bar.appendChild(send); b.appendChild(bar);
+    }
+  }
+
+  // ── + 卡片编辑器(底部 sheet 形态)──
+  var SUGGEST = ["#gateway", "#a股", "#身体", "#桌宠", "#杂", "#风险"];
+  function openCard() {
+    var layer = $("cardLayer"); layer.innerHTML = "";
+    var picked = {}; // tag → true
+    var now = new Date(); var hh = pad(now.getHours()), mm = now.getMinutes() < 30 ? "00" : "30";
+    var scrim = el("div", "gw-scrim");
+    var card = el("div", "gw-card sheet",
+      '<div class="gw-card-grip"></div>' +
+      '<div class="gw-card-head"><span class="gw-card-kicker">写一块</span><button class="gw-card-x">×</button></div>' +
+      '<div class="gw-field"><div class="gw-field-lab"># 标签</div><div class="gw-chips" id="cChips"></div></div>' +
+      '<div class="gw-field"><div class="gw-field-lab">时间块</div><div class="gw-time-row">' +
+        '<input class="gw-time-in" id="cHh" inputmode="numeric" maxlength="2" value="' + hh + '">' +
+        '<span class="gw-time-colon">:</span>' +
+        '<input class="gw-time-in" id="cMm" inputmode="numeric" maxlength="2" value="' + mm + '">' +
+        '<div class="gw-time-quick"><button id="cNow">现在</button><button id="cHour">整点</button><button id="cHalf">半</button></div></div></div>' +
+      '<div class="gw-field" style="margin-bottom:8px"><div class="gw-field-lab">正文</div>' +
+        '<input class="gw-entry-title" id="cTitle" placeholder="标题（可选）" style="display:block;width:100%;border:0;outline:none;background:transparent;margin-bottom:6px">' +
+        '<textarea class="gw-body-in" id="cBody" placeholder="此刻在想什么…"></textarea></div>' +
+      '<div class="gw-card-foot"><span class="gw-card-hint">MD 是真相 · 写进当天</span><button class="gw-card-save">落笔</button></div>');
+    layer.appendChild(scrim); layer.appendChild(card);
+    // tag chips
+    var chips = card.querySelector("#cChips");
+    function renderChips() {
+      chips.innerHTML = "";
+      SUGGEST.forEach(function (t) { var c = el("button", "gw-chip" + (picked[t] ? " on" : ""), esc(t)); c.addEventListener("click", function () { picked[t] = !picked[t]; renderChips(); }); chips.appendChild(c); });
+      Object.keys(picked).forEach(function (t) { if (SUGGEST.indexOf(t) === -1 && picked[t]) { var c = el("button", "gw-chip on", esc(t)); c.addEventListener("click", function () { picked[t] = false; renderChips(); }); chips.appendChild(c); } });
+      var add = el("button", "gw-chip add", "+ 新标签");
+      add.addEventListener("click", function () {
+        var inp = el("input", "gw-chip"); inp.placeholder = "标签…"; inp.style.width = "88px";
+        chips.replaceChild(inp, add); inp.focus();
+        function commit() { var t = inp.value.trim(); if (t && t[0] !== "#") t = "#" + t; if (t) picked[t] = true; renderChips(); }
+        inp.addEventListener("blur", commit); inp.addEventListener("keydown", function (e) { if (e.key === "Enter") commit(); });
+      });
+      chips.appendChild(add);
+    }
+    picked["#gateway"] = true; renderChips();
+    // quick time
+    card.querySelector("#cNow").addEventListener("click", function () { var d = new Date(); card.querySelector("#cHh").value = d.getHours(); card.querySelector("#cMm").value = d.getMinutes() < 30 ? "00" : "30"; });
+    card.querySelector("#cHour").addEventListener("click", function () { card.querySelector("#cMm").value = "00"; });
+    card.querySelector("#cHalf").addEventListener("click", function () { card.querySelector("#cMm").value = "30"; });
+    // close / save
+    function close() { scrim.classList.remove("on"); card.classList.remove("on"); setTimeout(function () { layer.innerHTML = ""; }, 460); }
+    scrim.addEventListener("pointerdown", close);
+    card.querySelector(".gw-card-x").addEventListener("click", close);
+    card.querySelector(".gw-card-save").addEventListener("click", function () {
+      var hv = pad(parseInt(card.querySelector("#cHh").value || "0", 10)), mv = pad(parseInt(card.querySelector("#cMm").value || "0", 10));
+      var tags = Object.keys(picked).filter(function (t) { return picked[t]; }).map(function (t) { return t.replace(/^#/, ""); });
+      var body = { date: state.date, time: hv + ":" + mv, tag: tags[0] || "", title: card.querySelector("#cTitle").value.trim(), body: card.querySelector("#cBody").value.trim() };
+      api("/api/journal/insert-block", { method: "POST", body: JSON.stringify(body) }).then(function () { close(); flash("已落笔 · 写进 " + body.time); loadDay(); });
+    });
+    requestAnimationFrame(function () { scrim.classList.add("on"); card.classList.add("on"); });
+  }
+
+  // ── ☰ 抽屉 ──
+  function openMenu() {
+    var layer = $("menuLayer"); layer.innerHTML = "";
+    var scrim = el("div", "gw-scrim");
+    var drawer = el("div", "gw-drawer",
+      '<div class="gw-drawer-grip"></div>' +
+      '<div class="gw-drawer-head"><span class="gw-drawer-brand">Gateway</span><span class="gw-drawer-sub">人和 AI 共写的一本日记</span></div>');
+    MENU.forEach(function (m) {
+      var item = el("button", "gw-menu-item",
+        '<span class="gw-menu-glyph">' + m.glyph + '</span><span class="gw-menu-label">' + m.label + '</span><span class="gw-menu-desc">' + m.desc + '</span><span class="gw-menu-chev">' + I.chev + '</span>');
+      item.addEventListener("click", function () { close(); openSubPage(m); });
+      drawer.appendChild(item);
+    });
+    layer.appendChild(scrim); layer.appendChild(drawer);
+    function close() { scrim.classList.remove("on"); drawer.classList.remove("on"); setTimeout(function () { layer.innerHTML = ""; }, 460); }
+    scrim.addEventListener("pointerdown", close);
+    requestAnimationFrame(function () { scrim.classList.add("on"); drawer.classList.add("on"); });
+  }
+
+  // ── 子页(设置 / 占位)──
+  function openSubPage(m) {
+    var ov = el("div", "gw", "");
+    ov.style.cssText = "position:fixed;inset:0;z-index:80";
+    ov.innerHTML = '<div class="gw-breath"></div><div class="gw-grain"></div>' +
+      '<div class="gw-top" style="position:static"><div class="gw-top-row1"><button class="gw-burger" id="subBack"></button>' +
+      '<div class="gw-tabs"><span class="gw-tab on" style="cursor:default">' + m.label + '</span></div>' +
+      '<div class="gw-top-spacer"></div><span class="gw-breathdot"></span></div></div>' +
+      '<div class="gw-scroll" id="subScroll"></div>';
+    document.body.appendChild(ov);
+    ov.querySelector("#subBack").innerHTML = I.back;
+    ov.querySelector("#subBack").addEventListener("click", function () { ov.remove(); });
+    var sc = ov.querySelector("#subScroll");
+    if (m.id === "settings") sc.appendChild(buildSettings());
+    else sc.appendChild(el("div", "gw-empty", "<b>" + m.label + "</b>" + m.desc + "。<br>桌面已有，移动端按路线图一个一个往上加。"));
+  }
+  function buildSettings() {
+    var wrap = el("div", "gw-set");
+    var key = "";
+    try { } catch (e) {}
+    wrap.innerHTML =
+      '<div class="gw-set-sec"><div class="gw-set-sec-lab">双钥匙 · 给它声音和眼睛</div>' +
+        '<div class="gw-key" id="kDeep"><div class="gw-key-head"><span class="gw-key-role">DeepSeek</span><span class="gw-key-tag">· 说话的那个</span></div>' +
+        '<div class="gw-key-desc">常驻对话、夹批、21:30 的纸条，都从这把钥匙发声。</div>' +
+        '<div class="gw-key-row"><input class="gw-key-in" id="kDeepIn" placeholder="sk-…"><button class="gw-key-test" id="kDeepTest">测试</button></div>' +
+        '<div class="gw-key-status idle" id="kDeepStat">待填 / 测试</div></div>' +
+        '<div class="gw-key"><div class="gw-key-head"><span class="gw-key-role">阿里云百炼</span><span class="gw-key-tag">· 看东西的那只眼</span></div>' +
+        '<div class="gw-key-desc">抠图、看照片里有什么、自动定位贴纸——视觉都走这把钥匙。可选，填了才长出眼睛。</div>' +
+        '<div class="gw-key-row"><input class="gw-key-in" placeholder="粘贴百炼 API Key…"><button class="gw-key-test">测试</button></div>' +
+        '<div class="gw-key-status idle">未填 · 暂无视觉</div></div></div>' +
+      '<div class="gw-set-sec"><div class="gw-set-sec-lab">皮肤</div>' +
+        '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">私印小报 · classic</div><div class="gw-row-desc">米黄纸 + 4 粉彩。夜色是另一套皮肤，暂未上线。</div></div>' +
+        '<div class="gw-seg"><button class="on">日间</button><button style="opacity:.5">夜</button></div></div>' +
+        '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">呼吸暖光</div><div class="gw-row-desc">页面背后那束慢慢起伏的光。</div></div><div class="gw-toggle on" id="tBreath"></div></div></div>' +
+      '<div class="gw-set-sec"><div class="gw-set-sec-lab">数据 · 无障碍</div>' +
+        '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">减少动效</div><div class="gw-row-desc">关掉呼吸、墨迹、纸页翻动。</div></div><div class="gw-toggle" id="tReduce"></div></div>' +
+        '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">本地 vault 路径</div><div class="gw-row-desc">MD 是真相 · 存在你自己的设备里。</div></div><span class="gw-row-val">~/Gateway ⟩</span></div></div>';
+    // load existing key
+    api("/api/setup/current").then(function (r) {
+      var k = r && r.models && r.models[0] && r.models[0].api_key; var inp = wrap.querySelector("#kDeepIn");
+      if (k) { inp.value = k; wrap.querySelector("#kDeep").classList.add("ok"); var s = wrap.querySelector("#kDeepStat"); s.className = "gw-key-status ok"; s.textContent = "已连通 · deepseek-chat"; }
+    });
+    var test = wrap.querySelector("#kDeepTest");
+    test.addEventListener("click", function () {
+      var inp = wrap.querySelector("#kDeepIn"), stat = wrap.querySelector("#kDeepStat"), v = inp.value.trim();
+      if (!v) { flash("先粘贴 key"); return; }
+      test.textContent = "测试中…";
+      api("/api/setup/save", { method: "POST", body: JSON.stringify({ models: [{ id: "deepseek-chat", api_key: v }] }) }).then(function () {
+        test.textContent = "测试"; wrap.querySelector("#kDeep").classList.add("ok"); stat.className = "gw-key-status ok"; stat.textContent = "已保存 · deepseek-chat"; flash("钥匙已存本地");
+      });
+    });
+    wrap.querySelectorAll(".gw-toggle").forEach(function (t) { t.addEventListener("click", function () { t.classList.toggle("on"); }); });
+    return wrap;
+  }
+
+  // ── 顶栏下滑收起 ──
+  function bindAutohide() {
+    var sc = $("scroll"), last = 0;
+    sc.addEventListener("scroll", function () {
+      var t = sc.scrollTop;
+      if (t > last + 6 && t > 70) $("top").classList.add("hidden");
+      else if (t < last - 6) $("top").classList.remove("hidden");
+      last = t;
+    }, { passive: true });
+  }
+
+  // ── tab 切换 ──
+  function switchTab(tab) {
+    state.tab = tab;
+    document.querySelectorAll(".gw-tab").forEach(function (t) { t.classList.toggle("on", t.dataset.tab === tab); });
+    $("journalView").hidden = tab !== "journal";
+    $("chatView").hidden = tab !== "chat";
+    $("top").classList.remove("hidden");
+    renderBottom();
+    if (tab === "chat") { if (!state.thread.length) loadThread(); else renderThread(); }
   }
 
   // ── init ──
   document.addEventListener("DOMContentLoaded", function () {
-    Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (t) { t.addEventListener("click", function () { switchView(t.dataset.view); }); });
-    bindAutohide(); bindComposer(); bindMenu(); bindStripCreate();
-    renderDateStrip().then(function () { loadDay(state.date); });
+    $("burger").innerHTML = I.burger;
+    $("burger").addEventListener("click", openMenu);
+    document.querySelectorAll(".gw-tab").forEach(function (t) { t.addEventListener("click", function () { switchTab(t.dataset.tab); }); });
+    bindAutohide(); renderBottom();
+    loadDateband().then(loadDay);
   });
 })();

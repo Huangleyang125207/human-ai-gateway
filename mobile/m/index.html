@@ -4,60 +4,39 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
 <title>Gateway</title>
-<!-- 移动原生前端。复用 shim 数据层 + gatewayMd 渲染 + 设计 token,不包桌面 index.html。 -->
+<!-- 移动原生前端 · cd 设计组装。shim 数据层 + gatewayMd 渲染,classic 单一日间。 -->
 <script>window.__GATEWAY_MOBILE__ = true;</script>
 <script src="../mobile-api.js"></script>
 <link rel="stylesheet" href="./mobile.css">
 </head>
 <body>
-<div id="app">
+<div class="gw" id="gw">
+  <div class="gw-breath"></div>
+  <div class="gw-grain"></div>
 
-  <!-- 顶栏:☰·日记·对话 一排(☰最左) + 日期次行;下滑收起,上滑唤回 -->
-  <header id="topbar">
-    <div class="bar-main">
-      <button id="menuBtn" class="icon-btn" aria-label="菜单"><span class="ham"></span></button>
-      <nav class="tabs" role="tablist">
-        <button class="tab is-active" data-view="journal" role="tab">日记</button>
-        <button class="tab" data-view="chat" role="tab">对话</button>
-      </nav>
+  <div class="gw-scroll" id="scroll">
+    <div class="gw-top" id="top">
+      <div class="gw-top-row1">
+        <button class="gw-burger" id="burger" aria-label="菜单"></button>
+        <div class="gw-tabs">
+          <button class="gw-tab on" data-tab="journal">日记</button>
+          <button class="gw-tab" data-tab="chat">对话</button>
+        </div>
+        <div class="gw-top-spacer"></div>
+        <span class="gw-breathdot" aria-hidden="true"></span>
+      </div>
+      <div class="gw-dateband" id="dateband"></div>
     </div>
-    <div class="date-wrap">
-      <div class="bar-date" id="dateRow"></div>
-    </div>
-  </header>
 
-  <!-- 内容区(唯一滚动容器) -->
-  <main id="content">
-    <section id="journalView" class="view">
-      <div id="checkins" class="checkins" aria-label="打卡"></div>
-      <div id="timeline" class="timeline"></div>
-    </section>
-    <section id="chatView" class="view" hidden>
-      <div id="thread" class="thread"></div>
-    </section>
-  </main>
-
-  <!-- 底部常驻输入:日记态=记一笔,对话态=说点什么;点击展开 -->
-  <footer id="composer">
-    <div class="composer-pill" id="composerPill">
-      <span id="composerPlaceholder">记一笔…</span>
-    </div>
-    <button class="send-btn" id="sendBtn" aria-label="发送" hidden><i></i></button>
-  </footer>
-
-  <!-- ☰ 菜单(底部抽屉) -->
-  <div id="menuSheet" class="sheet" hidden>
-    <div class="sheet-scrim" id="sheetScrim"></div>
-    <div class="sheet-panel">
-      <div class="sheet-grip"></div>
-      <a class="sheet-row" data-page="settings">设置 <em>钥匙 / 皮肤 / 数据</em></a>
-      <a class="sheet-row" data-page="aggregate">聚合页 <em>项目脉搏</em></a>
-      <a class="sheet-row" data-page="widgets">小组件 <em>打卡管理</em></a>
-      <a class="sheet-row" data-page="history">历史 <em>往日翻阅</em></a>
-      <a class="sheet-row" data-page="about">关于</a>
-    </div>
+    <div id="journalView"></div>
+    <div id="chatView" hidden></div>
   </div>
 
+  <div class="gw-bottom" id="bottom"></div>
+
+  <div id="toasts"></div>
+  <div id="cardLayer"></div>
+  <div id="menuLayer"></div>
 </div>
 
 <script src="../../vendor/marked.min.js"></script>
