@@ -148,20 +148,46 @@
 
   // 打卡(横滑,点 toggle → daily-tasks/check)
   function buildTasks(tasks) {
-    var block = el("div", "gw-care-block", '<div class="gw-care-label">今日打卡</div>');
+    var block = el("div", "gw-care-block", '<div class="gw-care-label">今日打卡 <span style="opacity:.55">· 长按换图标</span></div>');
     var row = el("div", "gw-tasks");
     tasks.forEach(function (t) {
-      var glyph = (t.name || "·").slice(0, 1);
+      var inner = t.image_url
+        ? '<img src="' + t.image_url + '" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">'
+        : esc((t.name || "·").slice(0, 1));
       var b = el("button", "gw-task" + (t.checked ? " on" : ""),
-        '<span class="gw-task-glyph">' + esc(glyph) + '</span><span class="gw-task-name">' + esc(t.name) + '</span>');
+        '<span class="gw-task-glyph">' + inner + '</span><span class="gw-task-name">' + esc(t.name) + '</span>');
       if (state.readonly) b.disabled = true;
+      var lp = null, didLong = false;
+      b.addEventListener("pointerdown", function () { if (state.readonly) return; didLong = false; lp = setTimeout(function () { didLong = true; if (navigator.vibrate) navigator.vibrate(12); pickTaskImage(t); }, 480); });
+      ["pointerup", "pointercancel", "pointerleave"].forEach(function (ev) { b.addEventListener(ev, function () { clearTimeout(lp); }); });
       b.addEventListener("click", function () {
-        if (state.readonly) return;
+        if (state.readonly || didLong) { didLong = false; return; }
         api("/api/daily-tasks/check", { method: "POST", body: JSON.stringify({ task_name: t.name, checked: !t.checked }) }).then(loadDay);
       });
       row.appendChild(b);
     });
     block.appendChild(row); return block;
+  }
+
+  // 选图 → 端侧抠图(真机 Cutout 插件;浏览器/模拟器回落原图)→ 落成打卡图标
+  function pickTaskImage(task) {
+    var inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+    document.body.appendChild(inp);
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; if (inp.parentNode) document.body.removeChild(inp); if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        var dataUrl = rd.result;
+        var cut = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Cutout;
+        if (cut) flash("抠图中…");
+        var p = cut ? cut.cutout({ image: dataUrl }).then(function (r) { return r.png; }).catch(function () { flash("没抠出主体 · 先用原图"); return dataUrl; }) : Promise.resolve(dataUrl);
+        p.then(function (png) {
+          api("/api/daily-tasks/set-image", { method: "POST", body: JSON.stringify({ task_name: task.name, image: png }) }).then(function () { flash("图标已换 ✦"); loadDay(); });
+        });
+      };
+      rd.readAsDataURL(f);
+    });
+    inp.click();
   }
 
   // 单条 entry: 左滑删 + 长按拉进对话
@@ -481,6 +507,9 @@
 
   // ── init ──
   document.addEventListener("DOMContentLoaded", function () {
+    var _cut = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Cutout;
+    if (_cut && _cut.available) _cut.available().then(function (r) { console.log("[cutout] available:", JSON.stringify(r)); }).catch(function (e) { console.log("[cutout] err:", e); });
+    else console.log("[cutout] plugin not present (browser/未注册)");
     $("burger").innerHTML = I.burger;
     $("burger").addEventListener("click", openMenu);
     document.querySelectorAll(".gw-tab").forEach(function (t) { t.addEventListener("click", function () { switchTab(t.dataset.tab); }); });

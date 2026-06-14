@@ -1,0 +1,21 @@
+{
+  "name": "capacitor-cutout",
+  "version": "0.0.1",
+  "description": "端侧抠主体 · iOS Vision(VNGenerateForegroundInstanceMask) / Android ML Kit Subject Segmentation",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "types": "src/index.d.ts",
+  "files": [
+    "src/",
+    "ios/",
+    "android/",
+    "CapacitorCutout.podspec"
+  ],
+  "capacitor": {
+    "ios": { "src": "ios" },
+    "android": { "src": "android" }
+  },
+  "peerDependencies": {
+    "@capacitor/core": "^6.0.0"
+  }
+}

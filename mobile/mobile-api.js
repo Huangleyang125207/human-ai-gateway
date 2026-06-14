@@ -343,8 +343,18 @@
     "GET /api/daily-tasks": function (req, u) {
       var date = qsDate(u) || todayIso();
       return Store.readDailyTasksMd().then(function (md) {
-        return jsonResp({ tasks: parseDailyTasks(md), date: date, is_today: date === todayIso(), is_writable: true });
+        var tasks = parseDailyTasks(md);
+        return Promise.all(tasks.map(function (t) {
+          return Store.getSetting("taskimg/" + t.name).then(function (img) { t.image_url = img || null; return t; });
+        })).then(function (ts) {
+          return jsonResp({ tasks: ts, date: date, is_today: date === todayIso(), is_writable: true });
+        });
       });
+    },
+    // 打卡图标:存抠好的 PNG(端侧抠图后由前端传来),按 task 名持久化
+    "POST /api/daily-tasks/set-image": function (req, u, body) {
+      if (!(body && body.task_name)) return jsonResp({ ok: false, error: "缺 task_name" });
+      return Store.setSetting("taskimg/" + body.task_name, body.image || "").then(function () { return jsonResp({ ok: true }); });
     },
     "POST /api/daily-tasks/check": function (req, u, body) {
       var name = body && body.task_name;
