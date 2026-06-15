@@ -4,9 +4,10 @@
  * 用户想拖哪儿就在哪儿 — 不绕文字,纯叠加。
  *
  * 数据:
- *   {id, src, anchor_time, x_pct, y_px, w, h, rotation}
+ *   {id, src, anchor_time, x_pct, y_px, size_pct, w, h, rotation}
  *   anchor_time 仍保留 — 用于"图属于哪一条 entry"的语义(future viewer/filter)
  *   x_pct / y_px = 真实位置(相对 .sb-layer 的尺寸)
+ *   size_pct = 宽度占 .sb-layer 宽 %(换分辨率等比缩放;w/h 仅留作纵横比 + 旧数据迁移)
  *
  * 兼容:
  *   旧 {align: 'left'|'right'} → 转 x_pct (left=3%, right=78%)
@@ -35,6 +36,11 @@
 
   /** 兼容老数据 → 统一成 {x_pct, y_px} */
   function normalizeItem(it) {
+    // 尺寸真源:size_pct(占 .sb-layer 宽 %)→ 换分辨率等比缩放。旧数据(绝对 w px)按当前 layer 宽迁移一次。
+    if (it.size_pct == null) {
+      const lw = ensureLayer().clientWidth || 800;
+      it.size_pct = Math.max(4, Math.min(90, ((it.w || 220) / lw) * 100));
+    }
     // auto_y=true:AI 调 place_scrapbook_image 没指定 y → 按 anchor_time 算到对应 entry 旁边。
     // 用户拖完后 upsert 清掉 auto_y,之后 reload 不再覆盖用户拖拽位置。
     if (it.auto_y && it.anchor_time) {
@@ -125,8 +131,10 @@
     wrap.className = "sb-wrap";
     wrap.dataset.id = it.id;
     applyPos(wrap, it);
-    wrap.style.width = (it.w || 200) + "px";
-    wrap.style.height = (it.h || 200) + "px";
+    // 宽用 % → CSS 自动随 .sb-layer 等比缩放(跟 x_pct 同款);高用 aspect-ratio 锁纵横比自适应
+    wrap.style.width = (it.size_pct ?? 24) + "%";
+    wrap.style.aspectRatio = ((it.w || 220) / (it.h || 220)) || 1;
+    wrap.style.height = "auto";
 
     wrap.dataset.rotation = String(it.rotation || 0);
     const inner = document.createElement("div");
@@ -265,17 +273,14 @@
     handle.addEventListener("pointerdown", (e) => {
       e.preventDefault(); e.stopPropagation();
       const startX = e.clientX;
-      const origW = it.w || 200, origH = it.h || 200;
-      const ratio = origH / origW;
+      const layerW = wrap.parentElement.getBoundingClientRect().width || 800;
+      const origPct = it.size_pct ?? 24;
       handle.setPointerCapture(e.pointerId);
       const onMove = (ev) => {
-        const dx = ev.clientX - startX;
-        let nw = Math.max(60, origW + dx);
-        let nh = nw * ratio;
-        it.w = Math.round(nw);
-        it.h = Math.round(nh);
-        wrap.style.width = it.w + "px";
-        wrap.style.height = it.h + "px";
+        // 缩放改 size_pct(占 layer 宽 %),高由 aspect-ratio 自适应 — 维持等比响应式
+        const dxPct = ((ev.clientX - startX) / layerW) * 100;
+        it.size_pct = Math.max(4, Math.min(90, Math.round((origPct + dxPct) * 10) / 10));
+        wrap.style.width = it.size_pct + "%";
         window.gateway?.entryWrap?.liveRewrap?.();
       };
       const onUp = () => {
@@ -331,6 +336,21 @@
       }
     }, 600);
   }
+
+  // 换分辨率/窗口缩放:x_pct + size_pct 由 CSS 自动等比跟随;锚定图(auto_y)的 y 需重算 + 文字重绕。
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      for (const it of items) {
+        if (!it.auto_y || !it.anchor_time) continue;
+        const newY = computeYFromAnchor(it.anchor_time);
+        const wrap = document.querySelector(`.sb-wrap[data-id="${it.id}"]`);
+        if (wrap) { it.y_px = newY; wrap.style.top = newY + "px"; }
+      }
+      window.gateway?.entryWrap?.rewrap?.();
+    }, 150);
+  });
 
   window.gateway = window.gateway || {};
   window.gateway.scrapbook = {
