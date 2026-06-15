@@ -58,7 +58,10 @@ command -v cargo >/dev/null || fail "cargo (Rust) 不在 PATH"
 command -v cargo-tauri >/dev/null 2>&1 || [ -f ~/.cargo/bin/cargo-tauri ] \
   || fail "tauri-cli 未装,跑 'cargo install tauri-cli --version ^2.0 --locked'"
 [ -f "$MINISIGN_KEY" ] || fail "minisign key 不在: $MINISIGN_KEY"
-[ -d .venv-build ] || fail ".venv-build 不存在 — 跑 'python3 -m venv .venv-build && .venv-build/bin/pip install -r requirements.txt pyinstaller'"
+[ -d .venv-build ] || fail ".venv-build 不存在 — 跑 'uv venv --python 3.11 .venv-build && uv pip install --python .venv-build -r requirements.txt pyinstaller rembg==2.0.61 rapidocr-onnxruntime'"
+# .venv-build 必须 3.10+:server.py 有运行时 X|None 联合语法(CI 用 3.11);3.9 能构建但一跑就崩(2026-06-15 踩过)
+_pyver=$(.venv-build/bin/python -c 'import sys;print(f"{sys.version_info[0]}.{sys.version_info[1]}")' 2>/dev/null)
+case "$_pyver" in 3.9|3.8|3.7|2.*|"") fail ".venv-build 是 Python $_pyver,需 3.10+(对齐 CI 的 3.11)。重建:'uv venv --python 3.11 .venv-build' 再装依赖";; esac
 security find-identity -p codesigning -v 2>/dev/null | grep -q "Developer ID Application: yang chunyan" \
   || fail "Apple Developer ID 证书不在 keychain"
 if [ "$PUSH" = "1" ]; then
@@ -160,3 +163,4 @@ fi
 echo ""
 echo "${GREEN}✓ 完成 — Gateway v$NEWVER 已装 + 启动${RESET}"
 [ "$PUSH" = "1" ] && echo "${GREEN}  其他用户 5s 内自动 fetch + 升级${RESET}"
+exit 0   # 末行 [ test ] && echo 在非 --push 时会让脚本退 1 假失败,显式退 0
