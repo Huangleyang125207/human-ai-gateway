@@ -453,6 +453,7 @@
       var p = [];
       if (key) p.push(Store.setSetting("deepseek_key", key));
       if (model) p.push(Store.setSetting("deepseek_model", model));
+      if (body && body.dashscope_api_key) p.push(Store.setSetting("dashscope_key", body.dashscope_api_key));
       return Promise.all(p).then(function () { return jsonResp({ ok: true }); });
     },
     "POST /api/setup/save-partial": function () { return jsonResp({ ok: true }); },

@@ -337,11 +337,12 @@
   // ── 底栏 ──
   function renderBottom() {
     var b = $("bottom"); b.innerHTML = "";
+    var oldFab = document.querySelector(".gw-fab-float"); if (oldFab) oldFab.remove();
     if (state.tab === "journal") {
-      var row = el("div", "gw-fab-row");
-      var fab = el("button", "gw-fab", I.plus); fab.setAttribute("aria-label", "新建条目");
+      // 悬浮 + (不占底栏空间)
+      var fab = el("button", "gw-fab gw-fab-float", I.plus); fab.setAttribute("aria-label", "新建条目");
       fab.addEventListener("click", function () { openCard(); });
-      row.appendChild(fab); b.appendChild(row);
+      $("gw").appendChild(fab);
     } else {
       var bar = el("div", "gw-chatbar");
       var att = el("button", "gw-chat-attach", I.attach);
@@ -513,7 +514,54 @@
     $("burger").innerHTML = I.burger;
     $("burger").addEventListener("click", openMenu);
     document.querySelectorAll(".gw-tab").forEach(function (t) { t.addEventListener("click", function () { switchTab(t.dataset.tab); }); });
-    bindAutohide(); renderBottom();
-    loadDateband().then(loadDay);
+    bindAutohide();
+    // 首次启动:没 key → 从 onboarding(填 DeepSeek key)起;有 key → 直接进
+    api("/api/setup/current").then(function (r) {
+      var key = r && r.models && r.models[0] && r.models[0].api_key;
+      if (key) startApp(); else showOnboarding();
+    }).catch(startApp);
   });
+
+  function startApp() { renderBottom(); loadDateband().then(loadDay); }
+
+  function saveKeys(deepseek, dashscope) {
+    var body = {};
+    if (deepseek) body.models = [{ id: "deepseek-chat", api_key: deepseek }];
+    if (dashscope) body.dashscope_api_key = dashscope;
+    return api("/api/setup/save", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  function showOnboarding() {
+    var ov = el("div", "gw-onboard");
+    ov.innerHTML =
+      '<div class="gw-breath"></div>' +
+      '<div class="gw-onboard-scroll">' +
+        '<div class="gw-onboard-head"><div class="gw-onboard-title">Gateway</div>' +
+        '<div class="gw-onboard-sub">人和 AI 共写的一本日记。<br>先给它一把钥匙，让它能开口说话。</div></div>' +
+        '<div class="gw-set">' +
+          '<div class="gw-set-sec"><div class="gw-set-sec-lab">说话的那个 · DeepSeek</div>' +
+            '<div class="gw-key" id="obKey"><div class="gw-key-desc">常驻对话、夹批、21:30 的纸条，都从这把钥匙发声。去 platform.deepseek.com 拿，每月赠 ¥10。</div>' +
+            '<div class="gw-key-row"><input class="gw-key-in" id="obKeyIn" placeholder="sk-…" autocapitalize="off" autocorrect="off"><button class="gw-key-test" id="obTest">测试</button></div>' +
+            '<div class="gw-key-status idle" id="obStat">填了它才能聊</div></div></div>' +
+          '<div class="gw-set-sec"><div class="gw-set-sec-lab">看东西的那只眼 · 阿里云百炼（可选）</div>' +
+            '<div class="gw-key"><div class="gw-key-desc">抠图、看照片里有什么、自动贴纸——视觉走这把。可跳过，以后在设置里补。</div>' +
+            '<div class="gw-key-row"><input class="gw-key-in" id="obKey2" placeholder="粘贴百炼 key（可跳过）…" autocapitalize="off" autocorrect="off"></div></div></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="gw-onboard-foot"><button class="gw-onboard-enter" id="obEnter">进入</button>' +
+      '<button class="gw-onboard-skip" id="obSkip">先跳过，进去看看</button></div>';
+    $("gw").appendChild(ov);
+    var keyIn = ov.querySelector("#obKeyIn");
+    ov.querySelector("#obTest").addEventListener("click", function () {
+      var v = keyIn.value.trim(); if (!v) { flash("先粘贴 key"); return; }
+      var t = ov.querySelector("#obTest"); t.textContent = "测试中…";
+      saveKeys(v, ov.querySelector("#obKey2").value.trim()).then(function () {
+        t.textContent = "测试"; var s = ov.querySelector("#obStat"); s.className = "gw-key-status ok"; s.textContent = "已连通 · deepseek-chat"; ov.querySelector("#obKey").classList.add("ok");
+      });
+    });
+    ov.querySelector("#obEnter").addEventListener("click", function () {
+      saveKeys(keyIn.value.trim(), ov.querySelector("#obKey2").value.trim()).then(function () { ov.remove(); startApp(); });
+    });
+    ov.querySelector("#obSkip").addEventListener("click", function () { ov.remove(); startApp(); });
+  }
 })();

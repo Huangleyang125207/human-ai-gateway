@@ -595,6 +595,26 @@
 }
 
 /* ── CC 组装补丁:真机全高 + safe-area 接真 env() ── */
-html, body { height: 100%; margin: 0; }
+html, body { height: 100%; margin: 0; background: var(--bg); }
 #gw { height: 100dvh; }
 :root { --safe-top: env(safe-area-inset-top, 0px); --safe-bot: env(safe-area-inset-bottom, 0px); }
+
+/* ── 13:37 真机反馈:悬浮 + / 去上下白边 ── */
+.gw-top-row1 { padding-top: 4px; }                 /* 紧贴灵动岛,收掉顶部空带 */
+.gw-bottom:empty { display: none; padding: 0; }    /* 日记态底栏不占位(改悬浮 +)*/
+.gw-fab-float {
+  position: fixed; right: 18px; bottom: calc(20px + var(--safe-bot)); z-index: 25;
+  box-shadow: 0 8px 26px rgba(58, 52, 44, 0.34);
+}
+#journalView .gw-stream { padding-bottom: calc(104px + var(--safe-bot)); } /* 末条不被悬浮+/home 条挡 */
+
+/* ── 首次启动 onboarding(从填 key 起)── */
+.gw-onboard { position: fixed; inset: 0; z-index: 90; background: var(--bg); display: flex; flex-direction: column; }
+.gw-onboard .gw-breath { position: absolute; }
+.gw-onboard-scroll { position: relative; z-index: 1; flex: 1; min-height: 0; overflow-y: auto; padding-top: calc(var(--safe-top) + 30px); }
+.gw-onboard-head { padding: 6px 26px 6px; }
+.gw-onboard-title { font: 500 26px var(--serif); color: var(--ink); letter-spacing: .04em; margin-bottom: 10px; }
+.gw-onboard-sub { font: 15px/1.85 var(--kai); color: var(--ink-3); }
+.gw-onboard-foot { position: relative; z-index: 1; padding: 14px 22px calc(16px + var(--safe-bot)); border-top: 1px solid var(--line); }
+.gw-onboard-enter { width: 100%; appearance: none; border: 0; background: var(--ink); color: var(--bg); font: 500 16px var(--sans); letter-spacing: .06em; padding: 15px; border-radius: var(--r-pill); cursor: pointer; }
+.gw-onboard-skip { display: block; width: 100%; text-align: center; margin-top: 12px; background: none; border: 0; color: var(--ink-4); font: 13px var(--sans); cursor: pointer; }
