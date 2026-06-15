@@ -2899,6 +2899,19 @@ def _dispatch_tool(fn: str, args: dict, loaded_groups: set, quota_used: dict):
 # ── app ──────────────────────────────────────────────────────────────
 app = FastAPI(title="gateway v0.4")
 
+
+# ── UI 文件禁缓存:WKWebView 会按 URL 缓存 html/js/css,改了代码不 bump ?v= 就吃旧版
+# (2026-06-15 踩过:补建逻辑改了、重构建了,WebView 还服务 Build-1 缓存的旧 JS)。
+# local-first app 文件本就在盘上,no-store 零成本换"永远拉新"。字体 woff2 不在此列,照常缓存。
+@app.middleware("http")
+async def _no_cache_ui(request, call_next):
+    resp = await call_next(request)
+    p = request.url.path
+    if p == "/" or p.endswith((".html", ".js", ".css")):
+        resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
+
+
 # ── 自动建当天文件:启动 + 每分钟轮询(过 02:00 且文件缺) ──
 AUTO_CREATE_AFTER_HOUR = 2  # 02:00 之后才建,避免半夜熬夜还在写昨天的日记被切
 
