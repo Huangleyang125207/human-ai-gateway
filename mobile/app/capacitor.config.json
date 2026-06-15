@@ -2,12 +2,14 @@
   "appId": "com.humanai.gateway",
   "appName": "Gateway",
   "webDir": "www",
+  "backgroundColor": "#f4ede2",
   "server": {
     "androidScheme": "https",
     "iosScheme": "gateway"
   },
   "ios": {
-    "contentInset": "always"
+    "contentInset": "never",
+    "backgroundColor": "#f4ede2"
   },
   "plugins": {
     "CapacitorHttp": {
