@@ -195,7 +195,72 @@
     return lines.join("\n");
   }
 
-  // ── 空白一天模板(半小时格) ───────────────────────────
+  // ── 补剂打卡 + 八杯水:内嵌在当天 md 顶部(# 每日补剂打卡 段,首个时间块前),与桌面 vault 同构 ──
+  // 桌面真源:喝水(8 子杯) + 补剂若干,顶层 - [ ] 名、多粒项带缩进子项。喝水归"八杯水"widget,不进打卡行。
+  var SUPP_TOP = /^(- \[)([ xX])(\]\s+)(.+?)(\s*)$/;    // 顶层项 - [ ] 名
+  var SUPP_SUB = /^(\s+- \[)([ xX])(\]\s+)(.+?)(\s*)$/; // 缩进子项 - [ ] N
+  function suppRegionEnd(lines) { // 补剂段下界 = 首个时间块行号
+    for (var i = 0; i < lines.length; i++) if (TIME_H1_RE.test(lines[i])) return i;
+    return lines.length;
+  }
+  function suppTemplate() { // 与桌面 SCHEDULE_TEMPLATE 同源(本 vault 定制)
+    return [
+      "# 每日补剂打卡", "",
+      "- [ ] 喝水",
+      "  - [ ] 1", "  - [ ] 2", "  - [ ] 3", "  - [ ] 4", "  - [ ] 5", "  - [ ] 6", "  - [ ] 7", "  - [ ] 8",
+      "- [ ] 鱼油（Swisse）", "  - [ ] 1", "  - [ ] 2",
+      "- [ ] 肌酸",
+      "- [ ] 苏糖酸镁",
+      "- [ ] 维生素 D3+K2（gloryfeel）",
+      "- [ ] 南非醉茄 KSM-66（Nature Love，90粒新版）",
+      "", "---", "", "",
+    ].join("\n");
+  }
+  function parseSupplements(dayMd) { // 顶层补剂项(排除"喝水")→ 打卡行
+    var lines = (dayMd || "").split(/\r?\n/), end = suppRegionEnd(lines), tasks = [];
+    for (var i = 0; i < end; i++) {
+      if (SUPP_SUB.test(lines[i])) continue; // 跳子项
+      var m = SUPP_TOP.exec(lines[i]);
+      if (m && m[4] !== "喝水") {
+        var on = m[2].toLowerCase() === "x";
+        tasks.push({ name: m[4], checked: on, image_url: null, total_pills: null, daily_dose: 1, today_intake: on ? 1 : 0, remaining: null });
+      }
+    }
+    return tasks;
+  }
+  function parseWaterFilled(dayMd) { // 喝水下勾选的子杯数 → 八杯水
+    var lines = (dayMd || "").split(/\r?\n/), end = suppRegionEnd(lines), inWater = false, n = 0;
+    for (var i = 0; i < end; i++) {
+      var top = SUPP_TOP.exec(lines[i]);
+      if (top && !SUPP_SUB.test(lines[i])) { inWater = (top[4] === "喝水"); continue; }
+      if (inWater) { var s = SUPP_SUB.exec(lines[i]); if (s && s[2].toLowerCase() === "x") n++; }
+    }
+    return n;
+  }
+  function setSupplementChecked(dayMd, name, checked) {
+    var lines = (dayMd || "").split(/\r?\n/), end = suppRegionEnd(lines);
+    for (var i = 0; i < end; i++) {
+      if (SUPP_SUB.test(lines[i])) continue;
+      var m = SUPP_TOP.exec(lines[i]);
+      if (m && m[4] === name) { lines[i] = m[1] + (checked ? "x" : " ") + m[3] + m[4]; break; }
+    }
+    return lines.join("\n");
+  }
+  function setWaterFilled(dayMd, filled) { // 喝水子杯 1..8:序号<=filled 勾上;父项 filled>=8 勾上
+    var lines = (dayMd || "").split(/\r?\n/), end = suppRegionEnd(lines), inWater = false, idx = 0;
+    for (var i = 0; i < end; i++) {
+      var top = SUPP_SUB.test(lines[i]) ? null : SUPP_TOP.exec(lines[i]);
+      if (top) {
+        inWater = (top[4] === "喝水");
+        if (inWater) { idx = 0; lines[i] = top[1] + (filled >= 8 ? "x" : " ") + top[3] + top[4]; }
+        continue;
+      }
+      if (inWater) { var s = SUPP_SUB.exec(lines[i]); if (s) { idx++; lines[i] = s[1] + (idx <= filled ? "x" : " ") + s[3] + s[4]; } }
+    }
+    return lines.join("\n");
+  }
+
+  // ── 空白一天模板(补剂段 + 半小时格) ───────────────────
   function emptyDayMd() {
     var out = [], h, mm, mins = ["00", "30"];
     for (h = 7; h <= 23; h++) {
@@ -205,7 +270,7 @@
         out.push("# " + h + "：" + mm, "", "##", "", "---", "");
       }
     }
-    return out.join("\n");
+    return suppTemplate() + out.join("\n");
   }
 
   // ── 首次启动:seed 示例数据(合成,非真日记) ───────────
@@ -213,7 +278,7 @@
     return Store.listJournalDates().then(function (dates) {
       if (dates.length) return;
       var today = todayIso();
-      var sample = [
+      var sample = suppTemplate() + [
         "# 9：00", "", "## #ESP32 桌宠固件烧录", "",
         "折腾了一上午终于把固件刷进去了。**意义**:硬件这条线终于能自测了。", "", "---", "",
         "# 13：00", "", "## #配置系统/ctrl-c-v 跑通移动端 shim 雏形", "",
@@ -221,13 +286,7 @@
         "# 21：30", "", "## 纸条", "",
         "（晚间 AI 纸条会落在这里。移动版对话接通后由 AI 写。）", "", "---", "",
       ].join("\n");
-      return Promise.all([
-        Store.writeJournalMd(today, sample),
-        Store.readDailyTasksMd().then(function (m) {
-          if (m) return;
-          return Store.writeDailyTasksMd("# 每日打卡\n\n- [ ] 鱼油\n- [ ] 维生素 D3+K2\n- [ ] 苏糖酸镁\n- [x] 南非醉茄\n");
-        }),
-      ]);
+      return Store.writeJournalMd(today, sample);
     });
   }
 
@@ -356,12 +415,12 @@
     },
     "GET /api/daily-tasks": function (req, u) {
       var date = qsDate(u) || todayIso();
-      return Store.readDailyTasksMd().then(function (md) {
-        var tasks = parseDailyTasks(md);
+      return Store.readJournalMd(date).then(function (md) {
+        var tasks = parseSupplements(md), water = parseWaterFilled(md);
         return Promise.all(tasks.map(function (t) {
           return Store.getSetting("taskimg/" + t.name).then(function (img) { t.image_url = img || null; return t; });
         })).then(function (ts) {
-          return jsonResp({ tasks: ts, date: date, is_today: date === todayIso(), is_writable: true });
+          return jsonResp({ tasks: ts, water_filled: water, date: date, is_today: date === todayIso(), is_writable: date >= todayIso() });
         });
       });
     },
@@ -371,14 +430,26 @@
       return Store.setSetting("taskimg/" + body.task_name, body.image || "").then(function () { return jsonResp({ ok: true }); });
     },
     "POST /api/daily-tasks/check": function (req, u, body) {
+      var date = (body && body.date) || todayIso();
       var name = body && body.task_name;
-      return Store.readDailyTasksMd().then(function (md) {
-        var tasks = parseDailyTasks(md), cur = null, t;
+      return Store.readJournalMd(date).then(function (md) {
+        if (md === null) return jsonResp({ ok: false, error: "no file" }, 404);
+        var tasks = parseSupplements(md), cur = null, t;
         for (t = 0; t < tasks.length; t++) if (tasks[t].name === name) cur = tasks[t];
         var checked = body && typeof body.checked === "boolean" ? body.checked : !(cur && cur.checked);
-        var nmd = setDailyTaskChecked(md, name, checked);
-        return Store.writeDailyTasksMd(nmd).then(function () {
+        return Store.writeJournalMd(date, setSupplementChecked(md, name, checked)).then(function () {
           return jsonResp({ ok: true, task_name: name, checked: checked, total_pills: null, daily_dose: 1, today_intake: checked ? 1 : 0, remaining: null });
+        });
+      });
+    },
+    // 八杯水:落进当天 md 的"喝水"子杯勾选(序号<=filled 勾上),持久化八杯水进度
+    "POST /api/daily-tasks/water": function (req, u, body) {
+      var date = (body && body.date) || todayIso();
+      var filled = Math.max(0, Math.min(8, (body && body.filled) | 0));
+      return Store.readJournalMd(date).then(function (md) {
+        if (md === null) return jsonResp({ ok: false, error: "no file" }, 404);
+        return Store.writeJournalMd(date, setWaterFilled(md, filled)).then(function () {
+          return jsonResp({ ok: true, filled: filled });
         });
       });
     },

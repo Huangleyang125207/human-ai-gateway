@@ -105,6 +105,7 @@
   }
   function renderJournal(j, t) {
     var v = $("journalView"); v.innerHTML = "";
+    state.filled = (t && t.water_filled) || 0; // 从当天 md 喝水勾选数恢复八杯水进度
     // care: 八杯水 + 打卡
     var care = el("div", "gw-care");
     care.appendChild(buildCups());
@@ -141,7 +142,10 @@
     function apply(x) { if (state.readonly) return; var i = idxAt(x); if (i < 0) return; var was = state.filled; state.filled = i + 1; paint(i); if (i + 1 > was) cups[i].classList.add("just"); }
     row.addEventListener("pointerdown", function (e) { if (state.readonly) return; try { row.setPointerCapture(e.pointerId); } catch (x) {} apply(e.clientX); });
     row.addEventListener("pointermove", function (e) { if (state.readonly || !row.hasPointerCapture || !row.hasPointerCapture(e.pointerId)) return; apply(e.clientX); });
-    row.addEventListener("pointerup", function () { paint(-1); });
+    row.addEventListener("pointerup", function () {
+      paint(-1);
+      if (!state.readonly) api("/api/daily-tasks/water", { method: "POST", body: JSON.stringify({ date: state.date, filled: state.filled }) });
+    });
     paint(-1);
     block.appendChild(row); block.appendChild(count); return block;
   }
