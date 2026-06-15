@@ -414,24 +414,69 @@
   }
 
   /* ── 翻日:跳到存在的相邻日(跳过空缺),走 URL reload 保 STATE 干净 ── */
+  function addDay(iso, n) {
+    var d = new Date(iso + "T12:00:00");
+    d.setDate(d.getDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+  function cnDate(iso) {
+    var d = new Date(iso + "T12:00:00");
+    return cnNum(d.getMonth() + 1) + "月" + cnNum(d.getDate()) + "日";
+  }
+
+  // 补建目标:看的是最后一天 → 今天;看的不是最后一天且后一天缺 → 后一天;否则 null(不补)。
+  // 调用方再查"已存在则不显示"。补的是 journal 中间断掉的天。
+  function newDayTarget(existing, cur, today) {
+    if (!existing.length) return today;
+    var last = existing[existing.length - 1];
+    if (cur >= last) return today;            // 在最后一天(或今天)→ 起今天
+    var nextCal = addDay(cur, 1);             // 不在最后 → 看紧邻后一天缺不缺
+    return existing.indexOf(nextCal) < 0 ? nextCal : null;
+  }
+
+  function createDay(target) {
+    var today = new Date().toISOString().slice(0, 10);
+    whisper("起一页 ……");
+    fetch("/api/journal/new-day", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: target }),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d && d.ok) location.href = "./day-paper.html" + (target === today ? "" : "?date=" + target);
+      else whisper("没建成 — " + ((d && (d.error || d.message)) || "未知"));
+    }).catch(function (e) { whisper("没建成 — " + e.message); });
+  }
+
   function wireDayFlip() {
-    var prev = $("flipPrev"), next = $("flipNext");
+    var prev = $("flipPrev"), next = $("flipNext"), newBtn = $("flipNew");
     if (!prev || !next) return;
     fetch("/api/journal/days").then(function (r) { return r.json(); }).then(function (d) {
-      var dates = (d.days || []).map(function (x) { return x.date; }).sort();
+      var existing = (d.days || []).map(function (x) { return x.date; }).sort();  // 真有文件的天
       var today = new Date().toISOString().slice(0, 10);
-      if (dates.indexOf(today) < 0) dates.push(today);   // 今天即便没文件也可达
-      dates.sort();
+      var nav = existing.slice();
+      if (nav.indexOf(today) < 0) nav.push(today);   // 今天即便没文件也可达
+      nav.sort();
       var cur = STATE.date || today;
-      var i = dates.indexOf(cur);
+      var i = nav.indexOf(cur);
       function link(el, date, label) {
         if (!date) { el.hidden = true; return; }
         el.hidden = false;
         el.textContent = label;
         el.setAttribute("href", "./day-paper.html" + (date === today ? "" : "?date=" + date));
       }
-      link(prev, i > 0 ? dates[i - 1] : null, "‹ 前一日");
-      link(next, i >= 0 && i < dates.length - 1 ? dates[i + 1] : null, "后一日 ›");
+      link(prev, i > 0 ? nav[i - 1] : null, "‹ 前一日");
+      link(next, i >= 0 && i < nav.length - 1 ? nav[i + 1] : null, "后一日 ›");
+
+      // 补建:只在有"该建却没建"的目标时露出
+      if (newBtn) {
+        var target = newDayTarget(existing, cur, today);
+        if (!target || existing.indexOf(target) >= 0) {
+          newBtn.hidden = true;
+        } else {
+          newBtn.hidden = false;
+          newBtn.textContent = target === today ? "+ 起今天一页" : "+ 补建 " + cnDate(target);
+          newBtn.onclick = function (e) { e.preventDefault(); createDay(target); };
+        }
+      }
     }).catch(function () {});
   }
 
