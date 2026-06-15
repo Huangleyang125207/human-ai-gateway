@@ -424,14 +424,13 @@
     return cnNum(d.getMonth() + 1) + "月" + cnNum(d.getDate()) + "日";
   }
 
-  // 补建目标:看的是最后一天 → 今天;看的不是最后一天且后一天缺 → 后一天;否则 null(不补)。
-  // 调用方再查"已存在则不显示"。补的是 journal 中间断掉的天。
+  // 补建目标:永远是"你看的这天的紧邻后一天"(cur+1),逐天往前填断档。
+  // 上限到今天(不建未来);已存在则不补。"创建今天"只是 cur+1 恰好等于今天的特例。
+  // 例:停在 6.13、6.14 缺 → 补 6.14(不跳到今天 6.15);到了 6.14 再补 6.15。
   function newDayTarget(existing, cur, today) {
-    if (!existing.length) return today;
-    var last = existing[existing.length - 1];
-    if (cur >= last) return today;            // 在最后一天(或今天)→ 起今天
-    var nextCal = addDay(cur, 1);             // 不在最后 → 看紧邻后一天缺不缺
-    return existing.indexOf(nextCal) < 0 ? nextCal : null;
+    var target = addDay(cur, 1);
+    if (target > today) return null;                       // 不建未来,补建只到今天为止
+    return existing.indexOf(target) < 0 ? target : null;   // 紧邻后一天已存在 → 这儿没断档,不显示
   }
 
   function createDay(target) {
