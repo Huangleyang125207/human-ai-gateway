@@ -41,7 +41,7 @@
   var _fs = _cap && _cap.Filesystem, _prefs = _cap && _cap.Preferences;
   var DIR = "DATA";
   function capPath(k) {
-    if (k.indexOf("journal/") === 0) return "gw/journal/" + k.slice(8) + ".md";
+    if (k.indexOf("journal/") === 0) return "gw/journal/" + isoToStem(k.slice(8)) + ".md";
     if (k === "daily-tasks") return "gw/daily-tasks.md";
     if (k === "thread") return "gw/thread.json";
     return "gw/kv/" + k.replace(/[^\w.-]/g, "_") + ".txt";
@@ -63,7 +63,7 @@
       if (prefix.indexOf("journal/") === 0) {
         return _fs.readdir({ path: "gw/journal", directory: DIR }).then(function (r) {
           var files = (r && r.files) || [];
-          return files.map(function (f) { var n = typeof f === "string" ? f : f.name; return "journal/" + n.replace(/\.md$/, ""); });
+          return files.map(function (f) { var n = typeof f === "string" ? f : f.name; return "journal/" + stemToIso(n.replace(/\.md$/, "")); });
         }).catch(function () { return []; });
       }
       return Promise.resolve([]);
@@ -94,11 +94,25 @@
   // ── 工具:日期 ───────────────────────────────────────
   function pad2(n) { return (n < 10 ? "0" : "") + n; }
   function todayIso() { var d = new Date(); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+  // 第N天:距 2026-05-03(第1天)的日历天数,与桌面 vault 命名同源(实测对齐 6.12=41/6.13=42/6.15=44)。
+  // 按日历天算,跳过的天也占号(6.14 缺也让 6.15=44),与 file-count 无关。
+  function dayNum(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso); if (!m) return null;
+    var anchor = Date.UTC(2026, 4, 3); // 5.3 = 第1天
+    return Math.round((Date.UTC(+m[1], +m[2] - 1, +m[3]) - anchor) / 86400000) + 1;
+  }
+  // 2026-06-15 → 26.6.15(第44天)(桌面 canonical 文件名,字节一致)
   function isoToStem(iso) {
-    // 2026-06-13 → 26.6.13(模拟 server 命名,N 天号省略)
     var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
     if (!m) return iso;
-    return (m[1].slice(2)) + "." + parseInt(m[2], 10) + "." + parseInt(m[3], 10);
+    var n = dayNum(iso);
+    return m[1].slice(2) + "." + parseInt(m[2], 10) + "." + parseInt(m[3], 10) + (n != null ? "(第" + n + "天)" : "");
+  }
+  // 26.6.15(第44天) 或 26.6.15 → 2026-06-15(读盘 stem 反解回内部 iso 键)
+  function stemToIso(stem) {
+    var m = /^(\d{2})\.(\d{1,2})\.(\d{1,2})/.exec(stem);
+    if (!m) return stem;
+    return "20" + m[1] + "-" + pad2(+m[2]) + "-" + pad2(+m[3]);
   }
 
   // ── 忠实复刻 server.py parse_journal ────────────────
