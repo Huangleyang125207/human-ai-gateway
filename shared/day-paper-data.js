@@ -85,23 +85,31 @@
     var tags = (h2.tags || []).filter(function (t) { return t !== "commit"; });
     var editable = STATE.writable;
     var html = '<article class="piece" data-bi="' + bi + '" data-pi="' + pi + '">';
-    // 拖图贴纸暂缓:走 AI 中介(对话流接好后,文档级拖图→thread→place_scrapbook_image),
-    // 不在此另造直连模型。drop-spot 待对话流落地后再启。
-    if (tags.length) {
-      html += '<p class="piece-tags">' + tags.map(function (t) { return "<span>#" + esc(t) + "</span>"; }).join("") + "</p>";
+    // 拖图贴纸暂缓:走 AI 中介(对话流接好后,文档级拖图→thread→place_scrapbook_image),不在此另造直连。
+    // tags:每个 chip 可改(空=删),末尾「＋」加 tag
+    if (tags.length || editable) {
+      html += '<p class="piece-tags">' +
+        tags.map(function (t, ti) {
+          return '<span class="tag-chip' + (editable ? " editable" : "") + '"' +
+            (editable ? ' data-field="tag" data-ti="' + ti + '" data-placeholder="tag"' : "") + ">#" + esc(t) + "</span>";
+        }).join("") +
+        (editable ? '<button class="tag-add" type="button" title="加 tag" style="background:none;border:none;cursor:pointer;color:var(--cinnabar-soft);font:inherit;">＋</button>' : "") + "</p>";
     }
-    if (a.title) {
-      html += '<h3 class="piece-title">' + esc(a.title) +
+    if (a.title || editable) {
+      html += '<h3 class="piece-title"><span class="title-text' + (editable ? " editable" : "") + '"' +
+        (editable ? ' data-field="title" data-placeholder="标题…"' : "") + ">" + esc(a.title) + "</span>" +
         (a.author === "ai" ? '<span class="ai-mark" title="@ai 在读"></span>' : "") + "</h3>";
     }
     var bodyHtml = h2.body ? md(h2.body) : "";
     if (withDropcap && bodyHtml) bodyHtml = bodyHtml.replace("<p>", '<p class="dropcap">');
     html += '<div class="piece-body' + (editable ? " editable" : "") + '"' +
-      (editable ? ' data-placeholder="点一下,在纸上改 ……"' : "") + ">" + bodyHtml + "</div>";
-    (h2.commits || []).forEach(function (c) {
+      (editable ? ' data-field="body" data-placeholder="点一下,在纸上改 ……"' : "") + ">" + bodyHtml + "</div>";
+    (h2.commits || []).forEach(function (c, ci) {
       var pc = parseCommit(c);
       html += '<aside class="annot ink-in"><p class="annot-head"><span class="seal">批</span>' +
-        esc(pc.author || "ai") + ' · #commit</p><p>' + esc(pc.text) + "</p></aside>";
+        esc(pc.author || "ai") + ' · #commit</p><p class="annot-body' + (editable ? " editable" : "") + '"' +
+        (editable ? ' data-field="commit" data-ci="' + ci + '" data-author="' + esc(pc.author || "ai") + '" data-placeholder="空=删去这条批"' : "") +
+        ">" + esc(pc.text) + "</p></aside>";
     });
     if (editable) {
       html += '<button class="strike-aff" type="button" title="划掉这一段">划</button>' +
@@ -186,6 +194,23 @@
   function hOf(art) {
     var b = STATE.blocks[+art.dataset.bi];
     return b && b.h2 ? b.h2[+art.dataset.pi] : null;
+  }
+
+  function flashSaved(art) {
+    art.classList.add("saved");
+    setTimeout(function () { art.classList.remove("saved"); }, 2300);
+  }
+
+  // 结构变了(tag/commit 增删)→ 按 STATE 重渲染这一条 piece。事件走委托,无需重绑。
+  function rerenderPiece(art) {
+    var bi = +art.dataset.bi, pi = +art.dataset.pi;
+    var b = STATE.blocks[bi];
+    if (!b || !b.h2[pi]) return art;
+    var tmp = document.createElement("div");
+    tmp.innerHTML = pieceHtml(b.h2[pi], bi, pi, art.querySelector(".dropcap") ? true : false);
+    var fresh = tmp.firstChild;
+    art.parentNode.replaceChild(fresh, art);
+    return fresh;
   }
 
   function deleteBlockAt(bi, sec) {
@@ -277,16 +302,32 @@
       if (add) { e.preventDefault(); openAddEntry(add.dataset.time); }
     });
 
-    // 行内编辑:点 .editable → contenteditable;blur 写回(只在变了时)
+    // 行内编辑:title / body / tag / commit 都走 .editable + data-field
+    function rawFor(ed, h) {
+      var f = ed.dataset.field;
+      if (f === "title") return authorOf(h.title).title;
+      if (f === "tag") return (h.tags || [])[+ed.dataset.ti] || "";
+      if (f === "commit") return parseCommit((h.commits || [])[+ed.dataset.ci] || "").text;
+      return h.body || "";
+    }
     main.addEventListener("click", function (e) {
+      if (e.target.closest(".tag-add")) {       // 加 tag:push 空 tag → 重渲染 → 聚焦新 chip
+        var art0 = e.target.closest(".piece"), h0 = hOf(art0);
+        if (!h0) return;
+        h0.tags = h0.tags || []; h0.tags.push("");
+        var fresh = rerenderPiece(art0);
+        var chip = fresh && fresh.querySelector('.tag-chip[data-ti="' + (h0.tags.length - 1) + '"]');
+        if (chip) chip.click();
+        return;
+      }
       var ed = e.target.closest(".editable");
       if (!ed || ed.isContentEditable) return;
       var art = ed.closest(".piece");
       if (art.classList.contains("struck")) return;
       var h = hOf(art);
       if (!h) return;
-      ed.dataset.raw = h.body || "";
-      ed.textContent = h.body || "";
+      ed.dataset.raw = rawFor(ed, h);
+      ed.textContent = ed.dataset.raw;
       ed.contentEditable = "true";
       art.classList.add("editing");
       ed.focus();
@@ -298,14 +339,22 @@
       ed.contentEditable = "false";
       art.classList.remove("editing");
       var next = ed.textContent.replace(/ /g, " ").trim();
-      if (h && next !== (ed.dataset.raw || "")) {
-        h.body = next;
-        ed.innerHTML = next ? md(next) : "";
-        art.classList.add("saved");
-        setTimeout(function () { art.classList.remove("saved"); }, 2300);
-        saveBlock(+art.dataset.bi);
-      } else {
-        ed.innerHTML = h && h.body ? md(h.body) : "";
+      if (!h) return;
+      var field = ed.dataset.field || "body", bi = +art.dataset.bi;
+      var changed = next !== (ed.dataset.raw || "");
+      if (field === "body") {
+        if (changed) { h.body = next; ed.innerHTML = next ? md(next) : ""; flashSaved(art); saveBlock(bi); }
+        else ed.innerHTML = h.body ? md(h.body) : "";
+      } else if (field === "title") {
+        if (changed) { var au = authorOf(h.title).author; h.title = next + (au ? " @" + au : ""); ed.textContent = next; flashSaved(art); saveBlock(bi); }
+      } else if (field === "tag") {
+        var ti = +ed.dataset.ti, cleaned = next.replace(/^#+/, "").replace(/\s+/g, "");
+        if (!cleaned) h.tags.splice(ti, 1); else h.tags[ti] = cleaned;
+        rerenderPiece(art); saveBlock(bi);
+      } else if (field === "commit") {
+        var ci = +ed.dataset.ci;
+        if (!next) h.commits.splice(ci, 1); else h.commits[ci] = "- #commit（" + (ed.dataset.author || "ai") + "）：" + next;
+        rerenderPiece(art); saveBlock(bi);
       }
     }, true);
 
