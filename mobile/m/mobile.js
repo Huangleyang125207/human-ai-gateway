@@ -12,7 +12,6 @@
     burger: '<svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M3 6h16M3 11h16M3 16h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
     plus: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 4v16M4 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
     send: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 10l14-6-6 14-2.2-5.8L3 10z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
-    attach: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M14 6.5l-6 6a2.2 2.2 0 003.1 3.1l6.2-6.2a4 4 0 00-5.7-5.7L5.4 9.2a5.8 5.8 0 008.2 8.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
     chev: '<svg width="8" height="14" viewBox="0 0 8 14" fill="none"><path d="M1 1l6 6-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     settings: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.4"/><path d="M10 1.5v2M10 16.5v2M18.5 10h-2M3.5 10h-2M16 4l-1.4 1.4M5.4 14.6L4 16M16 16l-1.4-1.4M5.4 5.4L4 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
     aggregate: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M5 10h10M7 15h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
@@ -21,11 +20,9 @@
     about: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.3"/><path d="M10 9v4.5M10 6.4v.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
     back: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4l-6 6 6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
   };
+  // MVP 范围:聚合/小组件/历史 是 C 类(plan 路线图后续往上加),先不放入口免得点开是空页。
   var MENU = [
-    { id: "settings", glyph: I.settings, label: "设置", desc: "钥匙 · 模型 · 皮肤" },
-    { id: "aggregate", glyph: I.aggregate, label: "聚合页", desc: "按 #标签 横切" },
-    { id: "widget", glyph: I.widget, label: "小组件", desc: "打卡 · 八杯水 · 脉搏" },
-    { id: "history", glyph: I.history, label: "历史", desc: "往日翻阅" },
+    { id: "settings", glyph: I.settings, label: "设置", desc: "钥匙 · 模型" },
     { id: "about", glyph: I.about, label: "关于", desc: "Gateway · 私印小报" }
   ];
 
@@ -349,14 +346,13 @@
       $("gw").appendChild(fab);
     } else {
       var bar = el("div", "gw-chatbar");
-      var att = el("button", "gw-chat-attach", I.attach);
       var ta = el("textarea", "gw-chat-input"); ta.rows = 1; ta.placeholder = "跟 Gateway 说点什么…";
       var send = el("button", "gw-chat-send", I.send); send.disabled = true;
       ta.addEventListener("input", function () { send.disabled = !ta.value.trim(); ta.style.height = "auto"; ta.style.height = Math.min(96, ta.scrollHeight) + "px"; });
       ta.addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); fire(); } });
       send.addEventListener("click", fire);
       function fire() { var t = ta.value.trim(); if (!t) return; ta.value = ""; ta.style.height = "auto"; send.disabled = true; sendChat(t); }
-      bar.appendChild(att); bar.appendChild(ta); bar.appendChild(send); b.appendChild(bar);
+      bar.appendChild(ta); bar.appendChild(send); b.appendChild(bar);
     }
   }
 
@@ -447,7 +443,17 @@
     ov.querySelector("#subBack").addEventListener("click", function () { ov.remove(); });
     var sc = ov.querySelector("#subScroll");
     if (m.id === "settings") sc.appendChild(buildSettings());
-    else sc.appendChild(el("div", "gw-empty", "<b>" + m.label + "</b>" + m.desc + "。<br>桌面已有，移动端按路线图一个一个往上加。"));
+    else if (m.id === "about") sc.appendChild(buildAbout());
+  }
+  function buildAbout() {
+    var wrap = el("div", "gw-set");
+    wrap.innerHTML =
+      '<div class="gw-set-sec"><div class="gw-set-sec-lab">Gateway · 移动 MVP</div>' +
+        '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">v0.4 · 私印小报皮肤</div>' +
+          '<div class="gw-row-desc">人和 AI 共写的一本日记。MD 是真相 · 数据存在你自己的设备里。</div></div></div>' +
+        '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">许可与免责</div>' +
+          '<div class="gw-row-desc">本应用按"现状"提供，不对任何数据损坏或丢失负责。桌面版有 git 自动备份兜底；移动端目前依赖系统备份。</div></div></div></div>';
+    return wrap;
   }
   function buildSettings() {
     var wrap = el("div", "gw-set");
@@ -461,11 +467,10 @@
         '<div class="gw-key-status idle" id="kDeepStat">待填 / 测试</div></div>' +
         '<div class="gw-key"><div class="gw-key-head"><span class="gw-key-role">阿里云百炼</span><span class="gw-key-tag">· 看东西的那只眼</span></div>' +
         '<div class="gw-key-desc">抠图、看照片里有什么、自动定位贴纸——视觉都走这把钥匙。可选，填了才长出眼睛。</div>' +
-        '<div class="gw-key-row"><input class="gw-key-in" placeholder="粘贴百炼 API Key…"><button class="gw-key-test">测试</button></div>' +
+        '<div class="gw-key-row"><input class="gw-key-in" placeholder="粘贴百炼 API Key…"></div>' +
         '<div class="gw-key-status idle">未填 · 暂无视觉</div></div></div>' +
       '<div class="gw-set-sec"><div class="gw-set-sec-lab">皮肤</div>' +
-        '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">私印小报 · classic</div><div class="gw-row-desc">米黄纸 + 4 粉彩。夜色是另一套皮肤，暂未上线。</div></div>' +
-        '<div class="gw-seg"><button class="on">日间</button><button style="opacity:.5">夜</button></div></div>' +
+        '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">私印小报 · classic</div><div class="gw-row-desc">米黄纸 + 4 粉彩。当前唯一皮肤。</div></div></div>' +
         '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">呼吸暖光</div><div class="gw-row-desc">页面背后那束慢慢起伏的光。</div></div><div class="gw-toggle on" id="tBreath"></div></div></div>' +
       '<div class="gw-set-sec"><div class="gw-set-sec-lab">数据 · 无障碍</div>' +
         '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">减少动效</div><div class="gw-row-desc">关掉呼吸、墨迹、纸页翻动。</div></div><div class="gw-toggle" id="tReduce"></div></div>' +
