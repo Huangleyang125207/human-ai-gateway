@@ -492,9 +492,26 @@
       });
     }
     Array.prototype.forEach.call(document.querySelectorAll(".med[data-task]"), function (medBtn) {
-      medBtn.addEventListener("click", function () {
-        var dose = +medBtn.dataset.dose || 1;
+      medBtn.addEventListener("click", function (e) {
+        var w = medBtn.closest(".widget");
         var marks = medBtn.querySelectorAll(".mark");
+        // 管理态:点第 N 个 mark → 设每天 N 粒(meta)。增到现有粒数之上找 AI("改成每天3粒")。
+        if (w && w.classList.contains("managing")) {
+          var mk = e.target.closest(".mark");
+          if (!mk) return;
+          var n = Array.prototype.indexOf.call(marks, mk) + 1;
+          if (n < 1) return;
+          whisper("改成每天 " + n + " ……");
+          fetch("/api/daily-tasks/meta", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ task_name: medBtn.dataset.task, daily_dose: n }),
+          }).then(function (r) { return r.json(); }).then(function (d) {
+            if (d && !d.error && !d.detail) { whisper("每天 " + n + " 了 · " + medBtn.dataset.task); location.reload(); }
+            else whisper("没改上 — " + (d.error || d.detail || ""));
+          }).catch(function (err) { whisper("没改上 — " + err.message); });
+          return;
+        }
+        var dose = +medBtn.dataset.dose || 1;
         var got = medBtn.querySelectorAll(".mark.done").length;
         var next = got >= dose ? 0 : got + 1;   // 满了再点=清零重计
         marks.forEach ? marks.forEach(function (m, i) { m.classList.toggle("done", i < next); })
