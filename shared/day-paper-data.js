@@ -570,9 +570,46 @@
     }).then(function (r) { return r.json(); });
   }
 
+  /* ── 更换水杯图片(对齐 classic uploadForCup):传图 → /api/water-cup 端侧抠图 → 刷新 ── */
+  function uploadForCup() {
+    var fi = document.createElement("input");
+    fi.type = "file"; fi.accept = "image/*"; fi.style.display = "none";
+    document.body.appendChild(fi);
+    fi.addEventListener("change", function () {
+      var f = fi.files && fi.files[0]; fi.remove();
+      if (!f) return;
+      whisper("上传中 ……");
+      var fd = new FormData(); fd.append("file", f);
+      fetch("/api/chat/upload-image", { method: "POST", body: fd }).then(function (r) { return r.json(); }).then(function (up) {
+        if (!up.url) throw new Error(up.detail || "上传失败");
+        whisper("抠图中 ……(1-3 秒)");
+        return fetch("/api/water-cup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ attachment_url: up.url }) });
+      }).then(function (r) { return r.json(); }).then(function (cut) {
+        if (!cut || !cut.ok) throw new Error((cut && cut.detail) || "抠图失败");
+        whisper("水杯图换好了 · 刷新看看");
+        setTimeout(function () { location.reload(); }, 700);
+      }).catch(function (e) { whisper("没换上 — " + e.message); });
+    });
+    fi.click();
+  }
+
   function bindMorning() {
     var cupsWrap = $("cups"), tally = $("cupsTally");
     if (cupsWrap) {
+      // 右键水杯 → 更换图片 / 指给AI看水量(对齐 classic 水杯 contextmenu)
+      cupsWrap.addEventListener("contextmenu", function (e) {
+        if (!window.gateway || !window.gateway.menu) return;
+        e.preventDefault();
+        var full = cupsWrap.querySelectorAll(".cup.full").length;
+        var total = cupsWrap.querySelectorAll(".cup").length || 8;
+        window.gateway.menu.show(e, [
+          { label: "🔄 更换水杯图片", action: function () { uploadForCup(); } },
+          { label: "💬 指给 AI 看今日水量", disabled: !(window.gateway && window.gateway.thread),
+            action: function () {
+              if (window.gateway.thread) window.gateway.thread.addRef({ kind: "water", label: "今日水量 " + full + "/" + total, payload: "今日喝水 " + full + "/" + total + " 杯" });
+            } },
+        ]);
+      });
       cupsWrap.addEventListener("click", function (e) {
         var cup = e.target.closest(".cup");
         if (!cup) return;
