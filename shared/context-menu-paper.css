@@ -1,0 +1,36 @@
+/* context-menu-paper.css — 纸与灯皮肤下,给 context-menu.js(原件不动)穿纸衣。
+ * 右键菜单在两皮肤行为完全一致(同一个 window.gateway.menu.show)→ 0 迁移学习成本;
+ * classic 的菜单 css 在 style.css(不在 paper 加载),这里是 paper 唯一来源。
+ */
+.ctx-menu {
+  position: fixed; z-index: 90;
+  min-width: 11em;
+  padding: 0.35rem 0;
+  background:
+    linear-gradient(var(--slip-sheen, rgba(255,255,255,0.04)), transparent 30%),
+    var(--paper-slip, var(--paper));
+  border: 1px solid var(--hairline-strong);
+  border-radius: 4px;
+  box-shadow: var(--shadow-slip, 0 12px 34px rgba(0,0,0,0.18));
+  font-family: var(--font-kai);
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.ctx-menu.hidden { display: none; }
+.ctx-item {
+  display: block; width: 100%;
+  text-align: left; background: none; border: none; cursor: pointer;
+  padding: 0.4em 1.1em;
+  font: inherit; color: var(--ink-soft);
+  letter-spacing: 0.04em;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.ctx-item:hover { background: var(--cinnabar-wash); color: var(--ink); }
+.ctx-item.danger:hover, .ctx-item.danger { color: var(--cinnabar-soft); }
+.ctx-item.danger:hover { color: var(--cinnabar); }
+.ctx-item.disabled { color: var(--ink-faint); cursor: default; }
+.ctx-item.disabled:hover { background: none; color: var(--ink-faint); }
+.ctx-divider {
+  height: 1px; margin: 0.3rem 0.9rem;
+  background: var(--hairline);
+}

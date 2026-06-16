@@ -8,6 +8,7 @@
 <script src="./shared/theme.js?v=20260612b" defer></script>
 <link rel="stylesheet" href="./shared/design-tokens.css" />
 <link rel="stylesheet" href="./shared/components.css" />
+<link rel="stylesheet" href="./shared/context-menu-paper.css?v=20260616a" />
 <style>
   /* 翻日:报头下一行,安静的纸习语(非 cd reference 件,页内作用域) */
   .day-flip {
@@ -86,7 +87,9 @@
 <script src="./vendor/marked.min.js"></script>
 <script src="./vendor/dompurify.min.js"></script>
 <script src="./shared/md.js?v=20260612a"></script>
-<script src="./shared/day-paper-data.js?v=20260612a"></script>
+<!-- 右键菜单:context-menu.js 原件(同 classic),纸衣走 context-menu-paper.css → 0 迁移 -->
+<script src="./shared/context-menu.js?v=20260515f"></script>
+<script src="./shared/day-paper-data.js?v=20260616b"></script>
 
 <a href="#" id="toClassic" onclick="window.gatewaySkin&&window.gatewaySkin.set('classic');return false;" style="position:fixed;right:16px;bottom:14px;font-family:var(--font-kai);font-size:12.5px;color:var(--ink-soft,#888);text-decoration:none;letter-spacing:.14em;opacity:.62;z-index:60;border-bottom:1px solid var(--hairline-strong,#ccc);padding-bottom:1px;" title="这套皮肤不合口味?切回标准版">切回标准版</a>
 </body>

@@ -296,6 +296,42 @@
   function wireWrites() {
     var main = $("dayMain");
 
+    // 右键菜单:跟 classic 同款动作入口(复用 window.gateway.menu),0 迁移成本。
+    // 菜单项全接现有 paper 函数;inline 习语(划/落一笔/点chip)保留作额外路径。
+    main.addEventListener("contextmenu", function (e) {
+      if (!window.gateway || !window.gateway.menu) return;
+      var tag = e.target.closest(".tag-chip");
+      var annot = e.target.closest(".annot");
+      var gap = e.target.closest(".gap");
+      var piece = e.target.closest(".piece");
+      var items = null;
+      if (tag && tag.classList.contains("editable")) {
+        items = [
+          { label: "✎ 改 tag", action: function () { tag.click(); } },
+          { label: "✕ 删 tag", action: function () { tag.click(); tag.textContent = ""; tag.dispatchEvent(new FocusEvent("blur", { bubbles: true })); } },
+        ];
+      } else if (annot) {
+        var aBody = annot.querySelector(".annot-body.editable");
+        if (aBody) items = [
+          { label: "✎ 改这条批注", action: function () { aBody.click(); } },
+          { label: "✕ 删这条批注", action: function () { aBody.click(); aBody.textContent = ""; aBody.dispatchEvent(new FocusEvent("blur", { bubbles: true })); } },
+        ];
+      } else if (piece) {
+        var sec = piece.closest(".block");
+        var titleEd = piece.querySelector(".title-text.editable");
+        items = [
+          { label: "✚ 加新条目", action: function () { openAddEntry(sec ? sec.dataset.time : ""); } },
+          { label: "✎ 改标题", action: function () { if (titleEd) titleEd.click(); }, disabled: !titleEd },
+          { divider: true },
+          { label: "🗑 删整个时间块", action: function () { piece.classList.add("folding"); setTimeout(function () { deleteBlockAt(+sec.dataset.bi, sec); }, 200); } },
+        ];
+      } else if (gap) {
+        var addBtn = gap.querySelector(".gap-add");
+        items = [{ label: "✚ 落一笔(加新条目)", action: function () { openAddEntry(addBtn ? addBtn.dataset.time : ""); } }];
+      }
+      if (items) { e.preventDefault(); window.gateway.menu.show(e, items); }
+    });
+
     // 落一笔:gap 上「＋ 落一笔」→ 开加条目模态(默认填那段空白的起始时间)
     main.addEventListener("click", function (e) {
       var add = e.target.closest(".gap-add");
