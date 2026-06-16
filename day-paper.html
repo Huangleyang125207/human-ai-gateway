@@ -52,6 +52,28 @@
   }
   .day-pill:hover { color: var(--cinnabar-soft); }
   .day-pill.on { color: var(--ink); border-color: var(--hairline-strong); }
+
+  /* 撤回式删除:专用浮层(独立于 whisper,5s 窗口) */
+  .paper-undo {
+    position: fixed; left: 50%; bottom: 30px; z-index: 95;
+    transform: translate(-50%, 12px); opacity: 0;
+    display: flex; align-items: baseline; gap: 0.7em;
+    padding: 0.55rem 1.1rem;
+    background: var(--paper-slip, var(--paper));
+    border: 1px solid var(--hairline-strong);
+    border-radius: 4px; box-shadow: var(--shadow-slip, 0 12px 34px rgba(0,0,0,0.18));
+    font-family: var(--font-kai); font-size: 13px; letter-spacing: 0.06em;
+    color: var(--ink-soft);
+    transition: opacity 0.34s ease, transform 0.34s ease;
+    pointer-events: none;
+  }
+  .paper-undo.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+  .paper-undo button {
+    background: none; border: none; cursor: pointer; font: inherit;
+    color: var(--cinnabar); letter-spacing: 0.1em;
+    border-bottom: 1px solid var(--cinnabar-soft); padding: 0 0 1px;
+  }
+  .paper-undo button:hover { color: var(--cinnabar-soft); }
 </style>
 </head>
 <body data-screen-label="单日页">
@@ -161,7 +183,7 @@
 <script src="./shared/md.js?v=20260612a"></script>
 <!-- 右键菜单:context-menu.js 原件(同 classic),纸衣走 context-menu-paper.css → 0 迁移 -->
 <script src="./shared/context-menu.js?v=20260515f"></script>
-<script src="./shared/day-paper-data.js?v=20260616d"></script>
+<script src="./shared/day-paper-data.js?v=20260616f"></script>
 <!-- 对话引擎:原件不动(streaming + past_boards 红线在此),scroll-drag 供 resizer,compact-ring 圆环自挂 thread-head -->
 <script src="./shared/scroll-drag.js?v=20260517e"></script>
 <script src="./shared/thread.js?v=20260603urlstrip"></script>

@@ -17,6 +17,7 @@
 
   // 可变数据模型:渲染后留着,写操作改它再 reconstruct→patch(防多 piece 块互相覆盖)。
   var STATE = { date: "", file: "", blocks: [], writable: true };
+  var KNOWN_DAYS = [];   // 真有文件的天(renderDayStrip 填),日级菜单判「今天建没建」
 
   /* ── 轻提示(whisper):AI 说带朱点,系统说不带 ── */
   var whisperT = null;
@@ -29,6 +30,37 @@
     w.classList.add("show");
     if (whisperT) clearTimeout(whisperT);
     whisperT = setTimeout(function () { w.classList.remove("show"); }, 2600);
+  }
+
+  /* ── 撤回式删除(对齐 classic gatewayUndo;dialog.js 不在 paper → 自造专用浮层)──
+        乐观隐藏 + 5s「撤回」窗口,过后才真删。删除不弹确认,给的是后悔药。
+        用独立元素,不抢 #whisper —— thread.js 也往 whisper 写「在听…」会互相覆盖。 ── */
+  var undoT = null, undoEl = null;
+  function paperUndo(message, opts) {
+    opts = opts || {};
+    if (undoEl && undoEl.parentNode) undoEl.parentNode.removeChild(undoEl);
+    if (undoT) { clearTimeout(undoT); undoT = null; }
+    var el = document.createElement("div");
+    el.className = "paper-undo";
+    var span = document.createElement("span");
+    span.textContent = message;
+    var btn = document.createElement("button");
+    btn.type = "button"; btn.textContent = "撤回";
+    el.appendChild(span); el.appendChild(btn);
+    document.body.appendChild(el);
+    undoEl = el;
+    requestAnimationFrame(function () { el.classList.add("show"); });
+    var done = false;
+    function finish(undo) {
+      if (done) return; done = true;
+      clearTimeout(undoT); undoT = null;
+      el.classList.remove("show");
+      setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); if (undoEl === el) undoEl = null; }, 380);
+      if (undo) { if (opts.onUndo) opts.onUndo(); }
+      else if (opts.onCommit) opts.onCommit();
+    }
+    btn.addEventListener("click", function () { finish(true); });
+    undoT = setTimeout(function () { finish(false); }, (opts.seconds || 5) * 1000);
   }
 
   function esc(s) {
@@ -213,19 +245,30 @@
     return fresh;
   }
 
+  function unfold(sec) {
+    [].forEach.call(sec.querySelectorAll(".folding, .struck"), function (p) { p.classList.remove("folding", "struck"); });
+  }
+
   function deleteBlockAt(bi, sec) {
     var b = STATE.blocks[bi];
-    if (!b) return;
-    var payload = { time: b.time };
-    if (STATE.date) payload.date = STATE.date;
-    fetch("/api/journal/delete-block", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }).then(function (r) { return r.json(); }).then(function (d) {
-      if (d && (d.error || d.detail)) { whisper("删除失败 — " + (d.error || d.detail)); sec.style.display = ""; return; }
-      sec.parentNode && sec.parentNode.removeChild(sec);
-      whisper("收起了 " + b.time + " 的纸");
-    }).catch(function (e) { whisper("删除失败 — " + e.message); sec.style.display = ""; });
+    if (!b || !sec) return;
+    var date = STATE.date;                          // 锁定(撤回窗口内可能翻日)
+    sec.style.display = "none";                     // 乐观隐藏(调用方已折叠),撤回窗口过后才真删
+    paperUndo("收起了 " + b.time + " 的纸", {
+      seconds: 5,
+      onUndo: function () { sec.style.display = ""; unfold(sec); },
+      onCommit: function () {
+        var payload = { time: b.time };
+        if (date) payload.date = date;
+        fetch("/api/journal/delete-block", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then(function (r) { return r.json(); }).then(function (d) {
+          if (d && (d.error || d.detail)) { whisper("删除失败 — " + (d.error || d.detail)); sec.style.display = ""; unfold(sec); return; }
+          sec.parentNode && sec.parentNode.removeChild(sec);
+        }).catch(function (e) { whisper("删除失败 — " + e.message); sec.style.display = ""; unfold(sec); });
+      },
+    });
   }
 
   /* ── 落一笔:加新条目(tag + 标题 + 时间,tag-stats 建议)。参照 classic showTagInsertModal ── */
@@ -706,6 +749,7 @@
     if (!el) return;
     fetch("/api/journal/days").then(function (r) { return r.json(); }).then(function (d) {
       var existing = (d.days || []).map(function (x) { return x.date; });
+      KNOWN_DAYS = existing.slice();                     // 缓存给日级菜单
       var today = new Date().toISOString().slice(0, 10);
       var list = existing.slice();
       if (list.indexOf(today) < 0) list.push(today);    // 今天没文件也露出
@@ -726,6 +770,37 @@
       var onPill = el.querySelector(".day-pill.on");
       if (onPill && onPill.scrollIntoView) onPill.scrollIntoView({ block: "nearest", inline: "center", behavior: "auto" });
     }).catch(function () {});
+  }
+
+  /* ── 加一项每日任务:聚焦晨课的「添一项」行(paper 的 task-add 习语) ── */
+  function addDailyTaskInline() {
+    var line = document.querySelector(".morning .med-add-line");
+    if (!line) { whisper("晨课栏里点「添一项」加任务"); return; }
+    line.scrollIntoView({ block: "center", behavior: "smooth" });
+    setTimeout(function () { line.focus(); }, 260);
+  }
+
+  /* ── 日级右键菜单:空白处右键 → 创建今天/加条目/加任务(对齐 classic 的 document 菜单)。
+        绑一次(非 wireWrites,后者每次 renderDay 重跑)。capped-at-today:不给「创建明天」,
+        逐天补建走报头 flipNew 按钮。 ── */
+  function wireDayMenu() {
+    document.addEventListener("contextmenu", function (e) {
+      if (e.defaultPrevented) return;                       // dayMain 已处理 piece/tag/annot/gap
+      if (!window.gateway || !window.gateway.menu) return;
+      if (e.target.closest(".thread")) return;              // 对话区留原生菜单
+      if (e.target.closest(".morning")) return;             // 晨课有自己的加/删/改
+      if (e.target.closest(".tag-chip, .annot, .gap, .piece")) return;  // 兜底,理论上 defaultPrevented 已挡
+      if (!STATE.writable) return;
+      var today = new Date().toISOString().slice(0, 10);
+      var hasToday = STATE.date === today || KNOWN_DAYS.indexOf(today) >= 0;
+      var items = [
+        { label: "✚ 加新条目", action: function () { openAddEntry(); } },
+        { label: "➕ 加一项每日任务", action: function () { addDailyTaskInline(); } },
+      ];
+      if (!hasToday) items.unshift({ label: "📅 创建今天", action: function () { createDay(today); } });
+      e.preventDefault();
+      window.gateway.menu.show(e, items);
+    });
   }
 
   function wireDayFlip() {
@@ -812,5 +887,5 @@
       $("mhDate").textContent = "纸还没铺开";
       $("mhSub").textContent = "数据没接上,稍后再来";
     })
-    .then(function () { wireModeSeal(); wireDayFlip(); renderDayStrip(); renderStickers(); window.paperInit && window.paperInit(); });
+    .then(function () { wireModeSeal(); wireDayFlip(); renderDayStrip(); wireDayMenu(); renderStickers(); window.paperInit && window.paperInit(); });
 })();
