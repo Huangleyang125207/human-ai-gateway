@@ -393,9 +393,12 @@
             var dose = t.daily_dose || 1, got = Math.min(t.today_intake || 0, dose);
             var marks = "";
             for (var i = 0; i < dose; i++) marks += '<span class="mark' + (i < got ? " done" : "") + '"></span>';
-            return '<li><button class="med' + (got >= dose ? " alldone" : "") + '" type="button" data-task="' + esc(t.name) + '" data-dose="' + dose + '"' +
-              (writable ? "" : " disabled") + '><span class="marks">' + marks + "</span>" + esc(t.name) + "</button></li>";
-          }).join("") + "</ul></div>";
+            return '<li class="med-row"><button class="med' + (got >= dose ? " alldone" : "") + '" type="button" data-task="' + esc(t.name) + '" data-dose="' + dose + '"' +
+              (writable ? "" : " disabled") + '><span class="marks">' + marks + "</span>" + esc(t.name) + "</button>" +
+              (writable ? '<button class="med-x" type="button" data-task="' + esc(t.name) + '" title="划掉这项追踪">划</button>' : "") + "</li>";
+          }).join("") +
+          (writable ? '<li class="med-add"><div class="med-add-line" contenteditable="true" data-placeholder="添一项 · 回车" role="textbox" aria-label="添一项追踪"></div></li>' : "") +
+          "</ul></div>";
       }
       if (cupsTask) {
         var dose = cupsTask.daily_dose || 8, got = Math.min(cupsTask.today_intake || 0, dose);
@@ -407,7 +410,8 @@
           '<div class="widget-body"><div class="cups" id="cups" data-task="' + esc(cupsTask.name) + '">' + cups + "</div>" +
           '<p class="cups-tally" id="cupsTally">' + got + " / " + dose + "</p></div></div>";
       }
-      html += '<p class="morning-hint" style="grid-column: 1 / -1;">想多记一件事?跟它说一句,它会替你在这里裁一个栏目。</p>';
+      html += '<p class="morning-hint" style="grid-column: 1 / -1;">想多记一件事?跟它说一句,它会替你在这里裁一个栏目。' +
+        (writable ? ' <button id="morningManage" type="button" style="background:none;border:none;cursor:pointer;font:inherit;letter-spacing:.1em;color:var(--cinnabar-soft);">· 管理</button>' : "") + '</p>';
       morning.innerHTML = html;
       morning.hidden = false;
       if (writable) bindMorning(dateIso);
@@ -450,6 +454,46 @@
         postIntake(medBtn.dataset.task, next).catch(function () {});
       });
     });
+
+    // ── 晨课管理态:管理 toggle / 划掉任务 / 添一项(参照 classic ritual 管理) ──
+    var mgBtn = $("morningManage");
+    if (mgBtn) {
+      mgBtn.addEventListener("click", function () {
+        var on = !document.querySelector("#morning .widget.managing");
+        document.querySelectorAll("#morning .widget").forEach(function (w) { w.classList.toggle("managing", on); });
+        mgBtn.textContent = on ? "· 完成" : "· 管理";
+      });
+    }
+    document.querySelectorAll(".med-x[data-task]").forEach(function (x) {
+      x.addEventListener("click", function () {
+        var name = x.dataset.task, row = x.closest(".med-row");
+        row.classList.add("struck");
+        fetch("/api/daily-tasks/delete", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ task_name: name }),
+        }).then(function (r) { return r.json(); }).then(function (d) {
+          if (d && !d.error && !d.detail) { whisper("划掉了 · " + name); setTimeout(function () { location.reload(); }, 550); }
+          else { row.classList.remove("struck"); whisper("没删掉 — " + (d.error || d.detail || "")); }
+        }).catch(function (e) { row.classList.remove("struck"); whisper("没删掉 — " + e.message); });
+      });
+    });
+    var addLine = document.querySelector(".med-add-line");
+    if (addLine) {
+      addLine.addEventListener("keydown", function (e) {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        var text = addLine.textContent.trim();
+        if (!text) return;
+        addLine.textContent = "添中 ……";
+        fetch("/api/template/task", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "add", text: text }),
+        }).then(function (r) { return r.json(); }).then(function (d) {
+          if (d && !d.error && !d.detail) { whisper("添了一项 · " + text); location.reload(); }
+          else { addLine.textContent = text; whisper("没添上 — " + (d.error || d.detail || "")); }
+        }).catch(function (e) { addLine.textContent = text; whisper("没添上 — " + e.message); });
+      });
+    }
   }
 
   /* ── 贴纸渲染层:把持久化的 scrapbook item 按 anchor_time 浮进对应块 ──
