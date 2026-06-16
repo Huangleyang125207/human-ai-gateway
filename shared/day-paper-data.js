@@ -113,8 +113,10 @@
 
   function gapHtml(fromMin, toMinV) {
     var f = function (m) { return Math.floor(m / 60) + ":" + ("0" + (m % 60)).slice(-2); };
-    return '<div class="gap ink-in" aria-hidden="true"><div class="rail"></div>' +
-      '<p class="gap-span">' + f(fromMin) + " ⋯⋯ " + f(toMinV) + "</p></div>";
+    var add = STATE.writable
+      ? '<button class="gap-add" type="button" data-time="' + f(fromMin) + '">＋ 落一笔</button>' : "";
+    return '<div class="gap ink-in"><div class="rail"></div>' +
+      '<p class="gap-span">' + f(fromMin) + " ⋯⋯ " + f(toMinV) + add + "</p></div>";
   }
 
   function renderDay(payload) {
@@ -125,7 +127,10 @@
       main.innerHTML =
         '<div class="blank-day ink-in"><div class="blank-ruler"></div>' +
         '<p class="blank-invite">这一天还空着。</p>' +
+        (STATE.writable ? '<button class="blank-start" type="button" id="blankAdd">＋ 落第一笔</button>' : "") +
         '<p class="blank-whale">想从哪一刻写起都行——纸不催人。</p></div>';
+      var ba = $("blankAdd");
+      if (ba) ba.onclick = function () { openAddEntry(); };
       return;
     }
     var html = "", firstPiece = true, prevEnd = null;
@@ -198,8 +203,79 @@
     }).catch(function (e) { whisper("删除失败 — " + e.message); sec.style.display = ""; });
   }
 
+  /* ── 落一笔:加新条目(tag + 标题 + 时间,tag-stats 建议)。参照 classic showTagInsertModal ── */
+  function openAddEntry(defaultTime) {
+    if (document.querySelector(".slipnote.show")) return;
+    var now = new Date();
+    var p = (defaultTime || "").split(":");
+    var hh = p[0] || String(now.getHours());
+    var mm = p[1] || (now.getMinutes() < 30 ? "00" : "30");
+    var inS = "font-family:var(--font-song);font-size:14px;color:var(--ink);background:transparent;" +
+              "border:none;border-bottom:1px solid var(--hairline-strong);padding:0.3em 0.2em;";
+    var scrim = document.createElement("div");
+    scrim.className = "slipnote-scrim";
+    var note = document.createElement("aside");
+    note.className = "slipnote";
+    note.setAttribute("role", "dialog");
+    note.innerHTML =
+      '<p style="font-weight:600;letter-spacing:.08em;margin-bottom:1rem;">落一笔 · 加一条</p>' +
+      '<div id="addChips" style="display:flex;flex-wrap:wrap;gap:0.45em;margin-bottom:0.8rem;font-size:13px;color:var(--ink-faint);"></div>' +
+      '<div style="margin-bottom:0.7rem;"><input id="addTag" placeholder="tag(不带 #),如 探索 / 工作" style="' + inS + 'width:100%;"></div>' +
+      '<div style="margin-bottom:0.7rem;"><input id="addTitle" placeholder="标题(可空,之后点正文写)" style="' + inS + 'width:100%;"></div>' +
+      '<div style="margin-bottom:0.4rem;">时间 <input id="addHH" value="' + hh + '" maxlength="2" inputmode="numeric" style="' + inS + 'width:2em;text-align:center;">：' +
+      '<input id="addMM" value="' + mm + '" maxlength="2" inputmode="numeric" style="' + inS + 'width:2em;text-align:center;"></div>' +
+      '<p id="addMsg" style="min-height:1.1em;font-size:12.5px;color:var(--cinnabar-soft);"></p>' +
+      '<p class="slipnote-acts"><button class="sn-quiet" id="addCancel" type="button">算了</button>' +
+      '<button class="sn-main" id="addOk" type="button">落下</button></p>';
+    document.body.appendChild(scrim);
+    document.body.appendChild(note);
+    requestAnimationFrame(function () { scrim.classList.add("show"); note.classList.add("show"); });
+    var tagEl = note.querySelector("#addTag");
+    setTimeout(function () { tagEl.focus(); }, 200);
+    fetch("/api/journal/tag-stats?limit=5").then(function (r) { return r.json(); }).then(function (d) {
+      var chips = note.querySelector("#addChips");
+      (d.tags || []).forEach(function (t) {
+        var c = document.createElement("button");
+        c.type = "button"; c.textContent = "#" + (t.tag || t);
+        c.style.cssText = "background:var(--cinnabar-wash);border:1px solid var(--hairline);border-radius:3px;cursor:pointer;color:var(--ink-soft);padding:.1em .5em;font:inherit;";
+        c.onclick = function () { tagEl.value = (t.tag || t); tagEl.focus(); };
+        chips.appendChild(c);
+      });
+    }).catch(function () {});
+    function close() {
+      scrim.classList.remove("show"); note.classList.remove("show");
+      setTimeout(function () { scrim.remove(); note.remove(); }, 600);
+    }
+    note.querySelector("#addCancel").onclick = close;
+    scrim.onclick = close;
+    note.querySelector("#addOk").onclick = function () {
+      var tag = tagEl.value.trim().replace(/^#/, "");
+      var msg = note.querySelector("#addMsg");
+      if (!tag) { msg.textContent = "给个 tag 吧"; tagEl.focus(); return; }
+      var h = (note.querySelector("#addHH").value.trim() || "0");
+      var m = (note.querySelector("#addMM").value.trim() || "0");
+      var time = parseInt(h, 10) + ":" + ("0" + (parseInt(m, 10) || 0)).slice(-2);
+      var payload = { time: time, tag: tag, title: note.querySelector("#addTitle").value.trim() };
+      if (STATE.date) payload.date = STATE.date;
+      msg.textContent = "落墨中 ……";
+      fetch("/api/journal/insert-block", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        if (d && d.ok) { close(); whisper("落了一笔 · " + time); location.reload(); }
+        else msg.textContent = (d && d.error) ? d.error : "没落上,换个时间试试";
+      }).catch(function (e) { msg.textContent = "没落上 — " + e.message; });
+    };
+  }
+
   function wireWrites() {
     var main = $("dayMain");
+
+    // 落一笔:gap 上「＋ 落一笔」→ 开加条目模态(默认填那段空白的起始时间)
+    main.addEventListener("click", function (e) {
+      var add = e.target.closest(".gap-add");
+      if (add) { e.preventDefault(); openAddEntry(add.dataset.time); }
+    });
 
     // 行内编辑:点 .editable → contenteditable;blur 写回(只在变了时)
     main.addEventListener("click", function (e) {
