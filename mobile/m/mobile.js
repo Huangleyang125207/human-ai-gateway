@@ -248,6 +248,9 @@
         entry.classList.remove("dragging");
         if (dx < -60) { setDx(-window.innerWidth); setTimeout(function () { deleteEntry(e); }, 240); }
         else setDx(0);
+      } else if (st.mode === null && !state.readonly) {
+        // tap = 进入编辑(长按拉对话由 timer 走 mode="lp",滑动改 mode="swipe"/"scroll",都不会到这里)
+        openCard(e);
       }
     });
     entry.addEventListener("pointercancel", function () { clearT(); entry.classList.remove("lp-arming", "dragging"); setDx(0); });
@@ -357,15 +360,24 @@
   }
 
   // ── + 卡片编辑器(底部 sheet 形态)──
+  // existing 传入 = 编辑已有 entry(预填 + patch 路径);不传 = 新建(insert 路径)。
+  // 编辑时锁时间块,改时间 = 移动块,会撞已有内容,scope 外(A.2 再说)。
   var SUGGEST = ["#gateway", "#a股", "#身体", "#桌宠", "#杂", "#风险"];
-  function openCard() {
+  function openCard(existing) {
     var layer = $("cardLayer"); layer.innerHTML = "";
     var picked = {}; // tag → true
-    var now = new Date(); var hh = pad(now.getHours()), mm = now.getMinutes() < 30 ? "00" : "30";
+    var editing = !!existing;
+    var hh, mm;
+    if (editing) {
+      var parts = existing.time.split(":"); hh = parts[0]; mm = parts[1];
+      (existing.h.tags || []).forEach(function (t) { picked["#" + t] = true; });  // 全量预选,UI 端能看见所有现有 tag
+    } else {
+      var now = new Date(); hh = pad(now.getHours()); mm = now.getMinutes() < 30 ? "00" : "30";
+    }
     var scrim = el("div", "gw-scrim");
     var card = el("div", "gw-card sheet",
       '<div class="gw-card-grip"></div>' +
-      '<div class="gw-card-head"><span class="gw-card-kicker">写一块</span><button class="gw-card-x">×</button></div>' +
+      '<div class="gw-card-head"><span class="gw-card-kicker">' + (editing ? "改一块" : "写一块") + '</span><button class="gw-card-x">×</button></div>' +
       '<div class="gw-field"><div class="gw-field-lab"># 标签</div><div class="gw-chips" id="cChips"></div></div>' +
       '<div class="gw-field"><div class="gw-field-lab">时间块</div><div class="gw-time-row">' +
         '<input class="gw-time-in" id="cHh" inputmode="numeric" maxlength="2" value="' + hh + '">' +
@@ -375,8 +387,14 @@
       '<div class="gw-field" style="margin-bottom:8px"><div class="gw-field-lab">正文</div>' +
         '<input class="gw-entry-title" id="cTitle" placeholder="标题（可选）" style="display:block;width:100%;border:0;outline:none;background:transparent;margin-bottom:6px">' +
         '<textarea class="gw-body-in" id="cBody" placeholder="此刻在想什么…"></textarea></div>' +
-      '<div class="gw-card-foot"><span class="gw-card-hint">MD 是真相 · 写进当天</span><button class="gw-card-save">落笔</button></div>');
+      '<div class="gw-card-foot"><span class="gw-card-hint">MD 是真相 · 写进当天</span><button class="gw-card-save">' + (editing ? "改完" : "落笔") + '</button></div>');
     layer.appendChild(scrim); layer.appendChild(card);
+    if (editing) {
+      card.querySelector("#cTitle").value = existing.h.title || "";
+      card.querySelector("#cBody").value = existing.h.body || "";
+      card.querySelector("#cHh").readOnly = true; card.querySelector("#cMm").readOnly = true;
+      var qt = card.querySelector(".gw-time-quick"); if (qt) qt.style.display = "none";
+    }
     // tag chips
     var chips = card.querySelector("#cChips");
     function renderChips() {
@@ -392,7 +410,8 @@
       });
       chips.appendChild(add);
     }
-    picked["#gateway"] = true; renderChips();
+    if (!editing) picked["#gateway"] = true;  // 新建时默认 tag,编辑保留原状
+    renderChips();
     // quick time
     card.querySelector("#cNow").addEventListener("click", function () { var d = new Date(); card.querySelector("#cHh").value = d.getHours(); card.querySelector("#cMm").value = d.getMinutes() < 30 ? "00" : "30"; });
     card.querySelector("#cHour").addEventListener("click", function () { card.querySelector("#cMm").value = "00"; });
@@ -404,8 +423,18 @@
     card.querySelector(".gw-card-save").addEventListener("click", function () {
       var hv = pad(parseInt(card.querySelector("#cHh").value || "0", 10)), mv = pad(parseInt(card.querySelector("#cMm").value || "0", 10));
       var tags = Object.keys(picked).filter(function (t) { return picked[t]; }).map(function (t) { return t.replace(/^#/, ""); });
-      var body = { date: state.date, time: hv + ":" + mv, tag: tags[0] || "", title: card.querySelector("#cTitle").value.trim(), body: card.querySelector("#cBody").value.trim() };
-      api("/api/journal/insert-block", { method: "POST", body: JSON.stringify(body) }).then(function () { close(); flash("已落笔 · 写进 " + body.time); loadDay(); });
+      var title = card.querySelector("#cTitle").value.trim(), bodyText = card.querySelector("#cBody").value.trim();
+      if (editing) {
+        // 保住原批注:shim patch 会替换 H1 到下个 --- 之间的内容,不主动保 commits → 客户端拼回
+        var h2 = "## " + (tags[0] ? "#" + tags[0] + " " : "") + title;
+        var commits = (existing.h.commits || []).join("\n");
+        var new_md = h2 + "\n\n" + bodyText + (commits ? "\n\n" + commits : "");
+        api("/api/journal/patch", { method: "POST", body: JSON.stringify({ date: state.date, time: existing.time, new_md: new_md }) })
+          .then(function () { close(); flash("已改进 · " + existing.time); loadDay(); });
+      } else {
+        var body = { date: state.date, time: hv + ":" + mv, tag: tags[0] || "", title: title, body: bodyText };
+        api("/api/journal/insert-block", { method: "POST", body: JSON.stringify(body) }).then(function () { close(); flash("已落笔 · 写进 " + body.time); loadDay(); });
+      }
     });
     requestAnimationFrame(function () { scrim.classList.add("on"); card.classList.add("on"); });
   }
