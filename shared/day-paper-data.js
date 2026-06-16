@@ -667,6 +667,52 @@
     }).catch(function (e) { whisper("没建成 — " + e.message); });
   }
 
+  /* ── 脉搏:对齐 classic 单日的项目状态行(接 /api/pulse,同 index-paper 语汇) ── */
+  function renderPulse() {
+    return fetch("/api/pulse").then(function (r) { return r.json(); }).then(function (d) {
+      var projs = (d && d.projects) || [];
+      var sec = $("pulseOrgan");
+      var ul = sec && sec.querySelector("ul.pulse");
+      if (!ul || !projs.length) return;
+      ul.innerHTML = projs.slice(0, 6).map(function (p) {
+        var word = (p.tagline || p.now_line || "").replace(/^[🟡🔴🟢⚪🔵]\s*/, "").slice(0, 40);
+        var live = /🟡|🔴/.test(p.status_emoji || "") ? " data-live" : "";
+        return '<li class="pulse-row"' + live + '><span class="pulse-name">' + esc(p.name || "") + "</span>" +
+          '<span class="pulse-word">' + esc(word) + '</span><span class="pulse-spark">▂▃▃▅▆▇</span>' +
+          '<span class="pulse-when">' + esc(p.last_refreshed || "") + "</span></li>";
+      }).join("");
+      sec.hidden = false;
+    }).catch(function () {});
+  }
+
+  /* ── 横向切天条:对齐 classic 的 day-pill 习语(顶部一排天,点哪天跳哪天) ── */
+  function renderDayStrip() {
+    var el = $("dayStrip");
+    if (!el) return;
+    fetch("/api/journal/days").then(function (r) { return r.json(); }).then(function (d) {
+      var existing = (d.days || []).map(function (x) { return x.date; });
+      var today = new Date().toISOString().slice(0, 10);
+      var list = existing.slice();
+      if (list.indexOf(today) < 0) list.push(today);    // 今天没文件也露出
+      list.sort();
+      var cur = STATE.date || today;
+      el.innerHTML = list.map(function (date) {
+        var on = date === cur ? " on" : "";
+        var label = date.slice(5).replace("-", ".");     // MM.DD,跟 classic 一字一样
+        return '<button class="day-pill' + on + '" type="button" data-date="' + date + '">' + label + "</button>";
+      }).join("");
+      [].forEach.call(el.querySelectorAll(".day-pill"), function (p) {
+        p.addEventListener("click", function () {
+          var dt = p.dataset.date;
+          if (dt === cur) return;
+          location.href = "./day-paper.html" + (dt === today ? "" : "?date=" + dt);
+        });
+      });
+      var onPill = el.querySelector(".day-pill.on");
+      if (onPill && onPill.scrollIntoView) onPill.scrollIntoView({ block: "nearest", inline: "center", behavior: "auto" });
+    }).catch(function () {});
+  }
+
   function wireDayFlip() {
     var prev = $("flipPrev"), next = $("flipNext"), newBtn = $("flipNew");
     if (!prev || !next) return;
@@ -744,11 +790,12 @@
         jobs.push(renderSlip(payload.date, !DATE || payload.date === new Date().toISOString().slice(0, 10)));
       }
       jobs.push(renderMorning());
+      jobs.push(renderPulse());
       return Promise.all(jobs);
     })
     .catch(function () {
       $("mhDate").textContent = "纸还没铺开";
       $("mhSub").textContent = "数据没接上,稍后再来";
     })
-    .then(function () { wireModeSeal(); wireDayFlip(); renderStickers(); window.paperInit && window.paperInit(); });
+    .then(function () { wireModeSeal(); wireDayFlip(); renderDayStrip(); renderStickers(); window.paperInit && window.paperInit(); });
 })();

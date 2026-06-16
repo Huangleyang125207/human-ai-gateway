@@ -19,11 +19,16 @@
 
   // 孪生页映射:classic 文件名 ↔ paper 文件名。
   // paper 族逐页组装,组装好一页就把它加进 PAPER_READY(没在列表里的不跳)。
+  //
+  // 落地一致(6.16 排版对齐):classic 首页(index)= 当天完整日记,所以 paper 也
+  // 开门见当天 → index/根 都映射到 day-paper(不落总览页)。总览页 index-paper 降为
+  // 二级"往日"入口(只经 paper 页内 往日 链接到达,不再被切皮肤路由命中)。
+  // index.html 排在 day.html 前 → classicTwin(day-paper) 反查回 index.html(切回 classic 落首页)。
   var TWINS = {
-    "day.html": "day-paper.html",
-    "index.html": "index-paper.html",
+    "index.html": "day-paper.html",    // classic 首页=当天日记 ↔ paper 开门见当天
+    "day.html": "day-paper.html",      // 遗留 day.html(无人链)也指向 day-paper
     "history.html": "history-paper.html",
-    "": "index-paper.html",            // 根路径 = index
+    "": "day-paper.html",              // 根路径 = 当天单日
   };
   var PAPER_READY = ["day-paper.html", "index-paper.html"];  // 组装一页加一页
 
