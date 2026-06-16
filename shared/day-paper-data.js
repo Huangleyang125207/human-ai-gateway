@@ -293,6 +293,20 @@
     };
   }
 
+  /* ── 指给AI看:把这条 entry 当 ref 推进对话(同 classic 的 thread.addRef,addRef 自带开页) ── */
+  function refEntryToThread(piece) {
+    if (!window.gateway || !window.gateway.thread || !piece) return;
+    var bi = +piece.dataset.bi, pi = +piece.dataset.pi;
+    var b = STATE.blocks[bi];
+    var h = b && b.h2 && b.h2[pi];
+    if (!b || !h) return;
+    var title = authorOf(h.title).title || "";
+    var label = b.time + (title ? " · " + title.slice(0, 14) : "");
+    var tags = (h.tags || []).filter(function (t) { return t !== "commit"; }).map(function (t) { return "#" + t; }).join(" ");
+    var payload = "[" + (STATE.date || "") + " " + b.time + "] " + tags + " " + title + "\n" + (h.body || "");
+    window.gateway.thread.addRef({ kind: "entry", label: label, payload: payload });
+  }
+
   function wireWrites() {
     var main = $("dayMain");
 
@@ -320,6 +334,7 @@
         var sec = piece.closest(".block");
         var titleEd = piece.querySelector(".title-text.editable");
         items = [
+          { label: "💬 指给 AI 看这一段", action: function () { refEntryToThread(piece); }, disabled: !(window.gateway && window.gateway.thread) },
           { label: "✚ 加新条目", action: function () { openAddEntry(sec ? sec.dataset.time : ""); } },
           { label: "✎ 改标题", action: function () { if (titleEd) titleEd.click(); }, disabled: !titleEd },
           { divider: true },

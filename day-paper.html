@@ -9,6 +9,11 @@
 <link rel="stylesheet" href="./shared/design-tokens.css" />
 <link rel="stylesheet" href="./shared/components.css" />
 <link rel="stylesheet" href="./shared/context-menu-paper.css?v=20260616a" />
+<link rel="stylesheet" href="./shared/thread-paper.css?v=20260613a" />
+<link rel="stylesheet" href="./shared/marketplace-paper.css?v=20260613a" />
+<script>/* thread.js / marketplace.js 在 paper 没装 toast/dialog → 垫静默 shim,缺它们时优雅降级 */
+  window.gatewayToast = window.gatewayToast || function (m) { try { console.log("[toast]", m); } catch (e) {} };
+  window.gatewayAlert = window.gatewayAlert || function (m) { try { window.alert(m); } catch (e) {} };</script>
 <style>
   /* 翻日:报头下一行,安静的纸习语(非 cd reference 件,页内作用域) */
   .day-flip {
@@ -76,6 +81,7 @@
       <button class="mode-seal" id="modeSeal" type="button" title="换一盏灯">
         <span class="ms-char">夜</span>
       </button>
+      <button class="paper-settings-btn" id="marketBtn" type="button" title="设置 · 钥匙 · 皮肤" aria-label="设置">⚙</button>
     </div>
     <nav class="day-flip" id="dayFlip" aria-label="翻日">
       <a class="flip-prev" id="flipPrev" rel="prev" hidden>‹ 前一日</a>
@@ -108,17 +114,60 @@
 
 </div>
 
+<!-- ── 对话:thread.js 原件驱动(脚手架 ID 同 classic/index-paper),纸衣走 thread-paper.css ──
+     单日页 = 当天日记 + 常驻对话(对齐 classic 主页:journal + thread 同处)。
+     streaming + past_boards 红线全在 thread.js,不动;此处只是脚手架。 -->
+<!-- thread.js 无 guard 绑 #threadToggleTop;paper 主开口是折页 tab,这里隐藏占位防 null 崩 -->
+<button id="threadToggleTop" hidden aria-hidden="true"></button>
+<aside class="thread" id="thread" aria-hidden="true">
+  <div class="thread-resizer" id="threadResizer" aria-label="拖拽改宽度" title="拖拽改宽度"></div>
+  <div class="thread-tab" id="threadTab" role="button" aria-label="与鲸说话">
+    <span class="tab-dot"></span>
+    <span class="tab-label">与鲸说话</span>
+  </div>
+  <header class="thread-head">
+    <div class="thread-view-tabs" role="tablist">
+      <button class="tvt on" data-view="chat" id="tvtChat">对话</button>
+      <button class="tvt" data-view="board" id="tvtBoard">留言板<span class="tvt-dot" id="tvtBoardDot" hidden></span></button>
+    </div>
+    <select class="thread-model" id="threadModel" aria-label="切换模型" title="切换模型"><option value="">⋯</option></select>
+    <span class="thread-status" id="threadStatus">⋯</span>
+    <a class="thread-reset" href="./reset.html" title="清空聊天记录">⟲</a>
+    <button class="thread-close" id="threadClose" aria-label="收页">×</button>
+  </header>
+  <div class="thread-view chat-view on" id="chatView">
+    <div class="thread-stream" id="threadStream"></div>
+    <div class="thread-pending" id="threadPending"></div>
+    <div class="thread-input-row">
+      <button class="thread-attach" id="threadAttachBtn" aria-label="上传图片" title="上传图片(也可粘贴/拖入)">📎</button>
+      <input type="file" id="threadFileInput" accept="image/*" multiple hidden>
+      <textarea class="thread-input" id="threadInput" rows="1" placeholder="跟它说点什么⋯  ⏎ 发送 · shift+⏎ 换行"></textarea>
+      <div class="thread-hint"><span id="threadHintLeft">点页面上任意东西 → 带进对话</span><span>⏎</span></div>
+    </div>
+  </div>
+  <div class="thread-view board-view" id="boardView">
+    <div class="board-content" id="boardContent"><div class="board-empty">载入中⋯</div></div>
+  </div>
+</aside>
+
+<div class="img-lightbox" id="imgLightbox" hidden></div>
 <button class="quote-chip" id="quoteChip" type="button"><span class="chip-dot"></span>引入对话</button>
 
 <aside class="whisper" id="whisper" role="status" aria-live="polite"><i class="whale-dot"></i><span id="whisperText"></span></aside>
 
-<script src="./shared/day-paper.js"></script>
+<script src="./shared/day-paper.js?v=20260616a"></script>
 <script src="./vendor/marked.min.js"></script>
 <script src="./vendor/dompurify.min.js"></script>
 <script src="./shared/md.js?v=20260612a"></script>
 <!-- 右键菜单:context-menu.js 原件(同 classic),纸衣走 context-menu-paper.css → 0 迁移 -->
 <script src="./shared/context-menu.js?v=20260515f"></script>
-<script src="./shared/day-paper-data.js?v=20260616c"></script>
+<script src="./shared/day-paper-data.js?v=20260616d"></script>
+<!-- 对话引擎:原件不动(streaming + past_boards 红线在此),scroll-drag 供 resizer,compact-ring 圆环自挂 thread-head -->
+<script src="./shared/scroll-drag.js?v=20260517e"></script>
+<script src="./shared/thread.js?v=20260603urlstrip"></script>
+<script src="./shared/compact-ring.js"></script>
+<!-- 设置:marketplace.js 原件(钥匙/模型/consent/检查更新/widget/皮肤行 全现成),纸衣走 marketplace-paper.css -->
+<script src="./shared/marketplace.js?v=20260613a"></script>
 
 <a href="#" id="toClassic" onclick="window.gatewaySkin&&window.gatewaySkin.set('classic');return false;" style="position:fixed;right:16px;bottom:14px;font-family:var(--font-kai);font-size:12.5px;color:var(--ink-soft,#888);text-decoration:none;letter-spacing:.14em;opacity:.62;z-index:60;border-bottom:1px solid var(--hairline-strong,#ccc);padding-bottom:1px;" title="这套皮肤不合口味?切回标准版">切回标准版</a>
 </body>

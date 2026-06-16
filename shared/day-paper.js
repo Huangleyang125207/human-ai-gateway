@@ -137,25 +137,29 @@ window.paperInit = function () {
     if (!sel || sel.isCollapsed) { hideChip(); }
   });
 
-  if (chip && composer) {
+  if (chip) {
     chip.addEventListener("click", function () {
-      var quote = "「" + lastQuote.replace(/\s+/g, " ") + "」";
-      composer.textContent = (composer.textContent ? composer.textContent + " " : "") + quote + " ";
+      var text = (lastQuote || "").replace(/\s+/g, " ").trim();
       hideChip();
       var sel = window.getSelection();
       if (sel) { sel.removeAllRanges(); }
-      var y = composer.getBoundingClientRect().top + window.scrollY - window.innerHeight * 0.45;
-      window.scrollTo({ top: y, behavior: motionOn() ? "smooth" : "auto" });
-      window.setTimeout(function () {
-        composer.focus();
-        /* 光标移到末尾 */
-        var r = document.createRange();
-        r.selectNodeContents(composer);
-        r.collapse(false);
-        var s = window.getSelection();
-        s.removeAllRanges();
-        s.addRange(r);
-      }, motionOn() ? 450 : 0);
+      if (!text) { return; }
+      // 引入对话:选中的话当 quote ref 推进 thread(同 classic「指给AI看」,addRef 自带开页)。
+      // 旧版往 #composer 塞,但 composer 由纸条异步渲染、init 时为 null → chip 一直是死的;改打 thread。
+      if (window.gateway && window.gateway.thread) {
+        window.gateway.thread.addRef({
+          kind: "quote",
+          label: text.slice(0, 18) + (text.length > 18 ? "…" : ""),
+          payload: "「" + text + "」",
+        });
+        return;
+      }
+      // 兜底:thread 没起来时(理论不会)落进当晚「回一句」composer
+      var c = document.getElementById("composer");
+      if (c) {
+        c.textContent = (c.textContent ? c.textContent + " " : "") + "「" + text + "」 ";
+        c.focus();
+      }
     });
   }
 
