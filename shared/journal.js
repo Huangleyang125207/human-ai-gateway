@@ -524,7 +524,23 @@
     window.gateway.korok.yahaha(r.left + r.width / 2, r.top);
   }
 
-  // ── new-day button: POST → 后端跑 scripts/new-day.sh ──
+  // 逐天补建:目标 = 你看的这天的紧邻后一天(cur+1),填 journal 断档;上限到今天,
+  // 已存在就退而建今天。跟 paper 单日页同款规则(paper 先落于 6.15,classic 6.16 补齐)。
+  // 例:停在 6.13、6.14 缺 → 补 6.14(不跳今天 6.16);到了 6.14 再补 6.15,逐天往前。
+  function _addDay(iso, n) {
+    const d = new Date(iso + "T12:00:00");
+    d.setDate(d.getDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+  function _newDayTarget() {
+    const today = new Date().toISOString().slice(0, 10);
+    const cur = currentDate || today;
+    const has = (x) => dayList.some((d) => d.date === x);
+    const next = _addDay(cur, 1);
+    return (next <= today && !has(next)) ? next : today;
+  }
+
+  // ── new-day button: 逐天补建(默认就近补断档,不再写死今天)──
   function wireNewDay() {
     const btn = document.getElementById("newDayBtn");
     if (!btn) return;
@@ -533,22 +549,22 @@
       const orig = btn.textContent;
       btn.textContent = "…";
       try {
+        const target = _newDayTarget();
         const r = await fetch("/api/journal/new-day", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: "{}",
+          body: JSON.stringify({ date: target }),
         });
         const data = await r.json();
         if (!data.ok) {
           gatewayAlert("生成失败: " + (data.error || data.stdout || "unknown"));
           return;
         }
-        // 刷新 days 列表 + 跳到今天
+        // 刷新 days 列表 + 跳到补建的那天
         await fetchDays();
-        const today = new Date().toISOString().slice(0, 10);
         lastSig = null;
-        currentDate = today;
-        fetchJournal(today);
+        currentDate = target;
+        fetchJournal(target);
         if (data.created) bumpYahaha(btn);
       } catch (e) {
         gatewayAlert("server 不通: " + e.message);
