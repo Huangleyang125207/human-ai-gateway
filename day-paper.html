@@ -13,7 +13,10 @@
 <link rel="stylesheet" href="./shared/marketplace-paper.css?v=20260613a" />
 <script>/* thread.js / marketplace.js 在 paper 没装 toast/dialog → 垫静默 shim,缺它们时优雅降级 */
   window.gatewayToast = window.gatewayToast || function (m) { try { console.log("[toast]", m); } catch (e) {} };
-  window.gatewayAlert = window.gatewayAlert || function (m) { try { window.alert(m); } catch (e) {} };</script>
+  window.gatewayAlert = window.gatewayAlert || function (m) { try { window.alert(m); } catch (e) {} };
+  // compact-ring 在 paper 也加载;原生 window.confirm 在 Tauri WKWebView 被吞 → 在 paper 等于不激活。
+  // shim fallback 同 alert(走原生),纸侧 compact 体验受限是已知妥协;真要纸感弹窗,日后给 paper 装 dialog-paper.css。
+  window.gatewayConfirm = window.gatewayConfirm || function (m) { try { return Promise.resolve(window.confirm(m)); } catch (e) { return Promise.resolve(false); } };</script>
 <style>
   /* 翻日:报头下一行,安静的纸习语(非 cd reference 件,页内作用域) */
   .day-flip {

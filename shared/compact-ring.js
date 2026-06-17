@@ -93,7 +93,9 @@
 
     if (!opts.skipConfirm) {
       const kChars = (chars / 1000).toFixed(1);
-      const ok = window.confirm(
+      // window.confirm 在 Tauri WKWebView 里默默返 false → 整个 compact 早期 return
+      // 改用项目自实现的 gatewayConfirm(同 aggregate.js:98 用法,返 Promise<boolean>)
+      const ok = await window.gatewayConfirm(
         `整理对话历史(${kChars}K 字符)?\n\n` +
         `LLM 会重写 3 份 md:\n` +
         `  · USER_PULSE — 你的当下快照\n` +
