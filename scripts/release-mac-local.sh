@@ -1,9 +1,13 @@
 #!/bin/bash
-# release-mac-local.sh — 本机一键 build + 装 + 验证 + (可选) 推 yanpai
+# release-mac-local.sh — 本机 build/装/(可选)推 yanpai。
+#
+# ⚠️  这不是主发版路径!主路径是 CI tag-push(详 RELEASE.md "A · CI 主路径")。
+#     本脚本 --push 只发 Mac,Win 用户不同步;6.17 教训就是把 B 当默认导致 Win 落后 5 天。
+#     用本脚本 --push 后,**同一周内必须再走 CI 路径让 Win 跟上**。
 #
 # 用法:
-#   bash scripts/release-mac-local.sh              # 只 build + 装 /Applications + 启动测
-#   bash scripts/release-mac-local.sh --push       # 全套: + notarize + 推 yanpai 给所有用户 auto-update
+#   bash scripts/release-mac-local.sh              # 只 build + 装 /Applications + 启动测(C 路径)
+#   bash scripts/release-mac-local.sh --push       # B 路径:本机 notarize + 推 yanpai(仅 Mac,紧急时用)
 #   bash scripts/release-mac-local.sh --skip-build # 直接装当前已 build 的产物(调试用)
 #
 # 前置 setup (一次性):

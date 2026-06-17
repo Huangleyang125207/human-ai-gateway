@@ -3,8 +3,13 @@ name: Build Windows (Tauri + auto-update)
 # 6.4 Win Tauri 化:从 PyInstaller standalone + Inno Setup 切到 Tauri 桌面壳。
 # 装出来:独立窗口 + 任务栏 Gateway 图标 + 关 X 退 server + Tauri updater 跟 yanpai 同步。
 # Inno Setup 那条退场 — Tauri 2 自带 NSIS installer 出 -setup.exe。
-#
 # 之前 PyInstaller standalone 模式留在 git history (commit b7dfae0),要复原直接看老 yml。
+#
+# ✓ Win 发版同步路径(详 RELEASE.md "A · CI 主路径")。
+#   push main + 路径含 .py/.html/shared 时自动跑,跟 Mac 那侧 build-mac.yml (tag v*) 并行。
+#   所以发版要 push main + push tag v* 两步:第一步触发本 CI,第二步触发 Mac CI。
+#   单独 push tag 不触发 Win — 必须同时 push main 才能让 Win 跟上。
+#   6.17 教训:把"只发 Mac"当默认导致 Win 落后 5 天没人发现。
 
 on:
   push:

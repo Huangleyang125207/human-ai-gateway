@@ -1,11 +1,11 @@
 name: Build & Release Mac (Tauri + auto-update)
 
+# ✓ 这是发版主路径(详 RELEASE.md "A · CI 主路径")。
+#   tag v* push 触发,自动 notarize(用 secrets) + 上 GH Release + 推 COS。
+#   Mac 用户走 Tauri updater 拉到;Win 那侧由 build-win.yml(branches:[main])同步,
+#   所以发版前要 push main + push tag 两步。
+# 备选:scripts/release-mac-local.sh --push(本机 build,只发 Mac,Win 不同步,只紧急时用)。
 on:
-  # 6.2 改:mac build 转本机跑(M2 arm64 = macos-14 等价,Keychain 已有 signing identity)。
-  # macos runner $0.08/min × cold build 12min ≈ $1/次,private repo free 配额一个月 ~12 次烧完。
-  # 本地 cold ~5min,incremental 1-2min,更快也更省。CI 留 workflow_dispatch 作 fallback。
-  # 本地脚本:scripts/build-mac-local.sh
-  # 6.3 改:tag v* push 时跑,完了上 GitHub Release(给陌生用户下载)。
   push:
     tags: ['v*']
   workflow_dispatch:
