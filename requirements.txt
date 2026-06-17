@@ -1,7 +1,9 @@
-fastapi
-uvicorn[standard]
-openai
-requests
-python-multipart
-Pillow
-lxml          # web_search 解析 360/搜狗公众号 HTML;漏了它生产包不打进 → web_search 全挂(No module named 'lxml')
+# 锁版本:生产打 PyInstaller 冻结二进制,版本要可复现(对齐 CI / .venv-build 实测 known-good)。
+# 升级走有意 bump:改这里 → 重建 .venv-build → 跑测试 → 出包,不要无意漂移。
+fastapi==0.137.0
+uvicorn[standard]==0.49.0
+openai==2.41.1
+requests==2.34.2
+python-multipart==0.0.32
+Pillow==12.2.0
+lxml==6.1.1          # web_search 解析 360/搜狗公众号 HTML;漏了它生产包不打进 → web_search 全挂(No module named 'lxml')
