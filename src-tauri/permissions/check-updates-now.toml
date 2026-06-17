@@ -1,0 +1,13 @@
+"$schema" = "schemas/schema.json"
+
+# 自定义 Rust command 的 ACL。lib.rs:289 注册了 check_updates_now,前端
+# marketplace.js:119 invoke 它(用户在设置里点"检查更新"按钮)。Tauri 2 对
+# 自定义 commands 是 deny-by-default,所以必须在这里显式 allow。
+#
+# 6.17 用户点"检查更新"报 "Command check_updates_now not allowed by ACL" —
+# 真因就是这条 permission 之前从未存在(没人加 permissions/ 目录)。
+
+[[permission]]
+identifier = "allow-check-updates-now"
+description = "Allow frontend to trigger immediate update check (settings → 检查更新)"
+commands.allow = ["check_updates_now"]
