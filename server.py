@@ -468,7 +468,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.37"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.38"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
@@ -774,19 +774,23 @@ def _sf_cursor_write(line_no: int):
         pass  # cursor 丢失最坏后果:下次重发已发条目(server 不去重也无伤大雅)
 
 
+# Prod default — 跟自更新通道同思路(yanpai box 长期不下线作 hardcoded fallback)。
+# 6.17 发现 .env 没打进 PyInstaller bundle,真用户 sidecar 启动一直拿不到 URL
+# → events 卡本地从未上送(5.29 通道上线起整个 prod 反馈通道哑了三周半)。
+# dev 用 .env override 切 staging/mock;prod 用户直接拿到默认值开始上报。
+DEFAULT_FEEDBACK_SINK_URL = "http://101.42.108.30:18080"
+
+
 def _sf_sender_loop():
     """后台 thread:每 SF_SENDER_INTERVAL 秒读 jsonl 未发条目 → batch POST。
-    server 端 URL 来自 env FEEDBACK_SINK_URL (e.g. https://feedback.example.com)。
-    没配 → 这个 thread 不做任何事(只本地 jsonl 兜底)。
+    server 端 URL 来自 env FEEDBACK_SINK_URL,默认走 DEFAULT_FEEDBACK_SINK_URL。
     """
     # 走 _env_overlay() — 这样 .env 文件里的 FEEDBACK_SINK_URL 也能读到
     # (os.environ.get 直读只能拿 process env,装机后 .app 没显式 export 就拿不到)
-    url_base = (_env_overlay().get("FEEDBACK_SINK_URL", "")
-                or os.environ.get("FEEDBACK_SINK_URL", "")).strip().rstrip("/")
-    if not url_base:
-        log.info("[sf-sender] FEEDBACK_SINK_URL 未配,只本地兜底,不上送云端")
-        return
-    log.info(f"[sf-sender] started, target={url_base}, interval={SF_SENDER_INTERVAL}s")
+    env_url = (_env_overlay().get("FEEDBACK_SINK_URL", "")
+               or os.environ.get("FEEDBACK_SINK_URL", "")).strip().rstrip("/")
+    url_base = env_url or DEFAULT_FEEDBACK_SINK_URL
+    log.info(f"[sf-sender] started, target={url_base}{' (env override)' if env_url else ' (prod default)'}, interval={SF_SENDER_INTERVAL}s")
     while not _SF_SENDER_STOP.wait(SF_SENDER_INTERVAL):
         try:
             # #2 折叠:先 flush 静默过期窗口的 coalesced 汇总进 jsonl,再 drain 上送
@@ -831,14 +835,15 @@ def _hb_sender_loop():
     """日活心跳 — 每天一次。同 silent-failure sender 一样 fire-and-forget。
     consent 关闭则只 sleep 不发;开启时 day 已发过也跳过。
     """
-    url_base = (_env_overlay().get("FEEDBACK_SINK_URL", "")
-                or os.environ.get("FEEDBACK_SINK_URL", "")).strip().rstrip("/")
-    if not url_base:
-        return
+    # 同 sf-sender:env override > prod default;原"未配就 return"导致 prod 心跳全程沉默
+    # (5.29 起 unique_clients 永远 0,你看不到"装机但没出错"的活体内测用户)
+    env_url = (_env_overlay().get("FEEDBACK_SINK_URL", "")
+               or os.environ.get("FEEDBACK_SINK_URL", "")).strip().rstrip("/")
+    url_base = env_url or DEFAULT_FEEDBACK_SINK_URL
     # 启动延迟,避开开机 spike(用户重启 app / 重启电脑都不应立刻 ping)
     if _HB_SENDER_STOP.wait(HB_STARTUP_DELAY):
         return
-    log.info(f"[hb-sender] started, target={url_base}, daily")
+    log.info(f"[hb-sender] started, target={url_base}{' (env override)' if env_url else ' (prod default)'}, daily")
     while True:
         sent_today = False
         try:
