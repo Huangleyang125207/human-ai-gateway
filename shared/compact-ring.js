@@ -12,8 +12,9 @@
   const THREAD_KEY = "gateway.thread.history.v1";
   const THRESHOLD_CHARS = 150000;  // ~75K tokens; 跟 chat 端 _trim_history_tool_volume + tool history 修后 5-10 轮深度大致对应
   const POLL_MS = 3000;
-  // 自动 compact 开关 — 默认 off(用户主动开,设置面板未来可加 toggle);
-  // 值在 localStorage,用户可手改 localStorage.setItem('gateway.compact.auto','on')
+  // 自动 compact 开关 — 默认 on(对齐 CC 无缝 compact 体验:超阈值后台自动跑、
+  // 期间 user 继续聊不丢消息靠 cutoffIndex snapshot)。用户可手改
+  // localStorage.setItem('gateway.compact.auto','off') 关掉。失败 2+ 次自动关 off。
   const AUTO_COMPACT_KEY = "gateway.compact.auto";
   const AUTO_FIRE_AT_KEY = "gateway.compact.lastAutoFireAt";  // persist 跨 reload(#10)
   const AUTO_FAIL_COUNT_KEY = "gateway.compact.consecutiveFails";  // partial-fail 计数(#22)
@@ -220,7 +221,7 @@
     ring.style.setProperty("--ring-color", color);
     const kChars = (chars / 1000).toFixed(1);
     const remaining = Math.max(0, 100 - pct);
-    const autoOn = localStorage.getItem(AUTO_COMPACT_KEY) === "on";
+    const autoOn = localStorage.getItem(AUTO_COMPACT_KEY) !== "off";  // 默认 on,显式 "off" 才关
     ring.title = `对话 ${kChars}K / 150K · ${pct}% · 距离整理 ${remaining}%${autoOn ? " · 自动整理: 开" : ""}`;
     // 超过 100% 加 pulse 微动画 (CSS)
     ring.classList.toggle("compact-ring-over", pct >= 100);
