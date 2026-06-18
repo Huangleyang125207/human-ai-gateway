@@ -211,6 +211,25 @@
 .gw-cup.with-image { background: transparent; border: 0; overflow: hidden; }
 .gw-cup.with-image .gw-cup-img { width: 100%; height: 100%; object-fit: contain; opacity: 0.28; transition: opacity 0.25s; pointer-events: none; -webkit-user-drag: none; }
 .gw-cup.with-image.filled .gw-cup-img { opacity: 1; }
+/* 长按打卡 → action sheet(对齐 PC 右键菜单:换图/改 N 粒/看历史/删除) */
+.gw-task-sheet .gw-ts-list { display: flex; flex-direction: column; gap: 6px; padding: 6px 0 14px; }
+.gw-task-sheet .gw-ts-row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; background: transparent; border: 0; text-align: left; font: 15px var(--sans); color: var(--ink); cursor: pointer; border-radius: var(--r-md); transition: background 0.15s; }
+.gw-task-sheet .gw-ts-row:active { background: var(--bg-2); }
+.gw-task-sheet .gw-ts-row.danger { color: #b14a2b; }
+.gw-task-sheet .gw-ts-lab { flex: 1; }
+.gw-task-sheet .gw-ts-back { background: none; border: 0; font: 22px var(--sans); color: var(--ink-3); margin-right: 6px; cursor: pointer; padding: 0 4px; }
+.gw-task-sheet .gw-ts-num { width: 100%; font: 16px var(--sans); padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg); color: var(--ink); -webkit-appearance: none; appearance: none; }
+.gw-task-sheet .gw-card-save.danger { background: #b14a2b; }
+.gw-task-sheet .gw-ts-warn { padding: 14px 18px; font: 14px/1.6 var(--sans); color: var(--ink-2); background: rgba(177, 74, 43, 0.06); border-radius: var(--r-md); margin: 0 0 12px; }
+.gw-task-sheet .gw-ts-hist { padding: 14px 4px; }
+.gw-task-sheet .gw-ts-rate { font: 14px var(--sans); color: var(--ink-2); margin-bottom: 12px; }
+.gw-task-sheet .gw-ts-rate b { color: var(--ink); font: 500 18px var(--serif); margin-right: 4px; }
+.gw-task-sheet .gw-ts-dots { display: flex; gap: 6px; flex-wrap: wrap; }
+.gw-task-sheet .gw-ts-dot { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); }
+.gw-task-sheet .gw-ts-dot.on { background: #8cab68; border-color: #8cab68; }
+.gw-task-sheet .gw-ts-dot.miss { background: var(--ink-4); border-color: var(--ink-4); }
+.gw-task-sheet .gw-ts-dot.skip { background: transparent; }
+.gw-task-sheet .gw-ts-legend { margin-top: 10px; font: 11px var(--sans); color: var(--ink-4); letter-spacing: 0.04em; }
 .gw-cups-count { font: 11px var(--sans); color: var(--ink-4); margin-top: 8px; letter-spacing: 0.04em; }
 .gw-cups-count b { color: var(--ink-2); font-weight: 500; }
 
