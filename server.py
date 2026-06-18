@@ -4768,36 +4768,8 @@ SCRAPBOOK_DIR = DATA_DIR / "scrapbook"
 SCRAPBOOK_IMAGES_DIR = DATA_DIR / "scrapbook-images"
 
 
-def _scrapbook_path(date_str: str) -> Path:
-    return SCRAPBOOK_DIR / f"{date_str}.json"
-
-
-def _load_scrapbook(date_str: str) -> list:
-    p = _scrapbook_path(date_str)
-    if not p.exists():
-        return []
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except Exception as e:
-        _report_silent_failure("scrapbook_parse_failed",
-            f"{type(e).__name__}: {str(e)[:120]}",
-            context={"date": date_str, "file_size_kb": p.stat().st_size // 1024})
-        return []
-
-
-def _save_scrapbook(date_str: str, items: list):
-    # A-H1: scrapbook 是用户拖图/抠图的 attachment 元数据,损坏 = 当日图卡全失
-    SCRAPBOOK_DIR.mkdir(parents=True, exist_ok=True)
-    _safe_write_text(
-        _scrapbook_path(date_str),
-        json.dumps(items, indent=2, ensure_ascii=False),
-        rotate=True,
-    )
-
-
-def _scrapbook_id() -> str:
-    import uuid
-    return uuid.uuid4().hex[:12]
+# scrapbook 4 helper 已搬到 scrapbook.py(行为零变化),endpoint 留下面
+from scrapbook import _scrapbook_path, _load_scrapbook, _save_scrapbook, _scrapbook_id
 
 
 @app.get("/api/scrapbook")
