@@ -1,11 +1,17 @@
 # TEST PATTERN: effect — _eval_build_messages 注入 past_boards
-# USE WHEN: 验跨夜 eval 连贯性 — AI 必须看到过去 N 晚的留言板原文,才能"不重复鼓励 / 跟进 tomorrow_question"
+# USE WHEN: 验跨夜 eval 连贯性 — AI 必须看到过去 N 晚的留言板原文
 # TESTED IN: gateway PULSE refactor P0 TDD net (2026-06-18)
 #
 # 这是 PULSE.md Cannot break 红线之一:past_boards 注入丢了 → AI 跨夜失忆 → 每天
 # 都重复同一句鼓励。重构 _eval_build_messages 时这条不能被破。
+#
+# fix_existing #2/#6 修订:
+#   - EVAL_LOG_DIR 走 conftest 的 isolated_pulse_paths(env-override 友好)
+#   - 用 UUID sentinel 防字符串污染假阳性
+#   - 加 strict < target boundary case(明天 vs 今天)
 
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -16,34 +22,26 @@ import server  # noqa: E402
 
 
 @pytest.fixture
-def eval_log_with_history(monkeypatch, tmp_path):
-    """构造 N 天历史 eval-log,monkeypatch EVAL_LOG_DIR 到 tmp"""
-    log_dir = tmp_path / "eval-log"
-    log_dir.mkdir()
-    # 造 5 天 past boards(target=今天,所以这些都该被读)
-    sentences = [
-        "板 2026-06-13: 用户当晚问要不要喝水",
-        "板 2026-06-14: AI 鼓励完成了散步",
-        "板 2026-06-15: tomorrow_question 关于阅读",
-        "板 2026-06-16: 用户没回应 reading question",
-        "板 2026-06-17: AI 换了维度问身体感受",
-    ]
-    for i, line in enumerate(sentences, start=13):
+def eval_log_with_history(isolated_pulse_paths, monkeypatch):
+    """构造 5 天历史 eval-log,每条带 UUID sentinel 防字符串污染假阳"""
+    log_dir = isolated_pulse_paths.eval_log
+    sentinels = []
+    for i in range(13, 18):
+        sentinel = f"BOARD-{uuid.uuid4().hex[:8]}-day{i}"
         f = log_dir / f"2026-06-{i:02d}.md"
-        f.write_text(line + "\n", encoding="utf-8")
-    monkeypatch.setattr(server, "EVAL_LOG_DIR", log_dir)
-    return log_dir, sentences
-
-
-def test_past_boards_injected_into_user_payload(eval_log_with_history, monkeypatch):
-    """_eval_build_messages 的 user payload 必须含过去 7 天的 past_boards 原文"""
-    log_dir, sentences = eval_log_with_history
-    # mock 掉外部依赖:vault md / pulse / claude.md 不存在时返占位,不该影响 past_boards 注入
+        f.write_text(f"过去板 2026-06-{i:02d}: {sentinel}\n", encoding="utf-8")
+        sentinels.append((f"2026-06-{i:02d}", sentinel))
+    # mock 上游 helper,让本测专注 past_boards 注入
     monkeypatch.setattr(server, "find_today_journal", lambda *a, **k: None)
-    monkeypatch.setattr(server, "_eval_load_recent_md", lambda *a, **k: "(no recent)")
-    monkeypatch.setattr(server, "_eval_load_pulse_all", lambda *a, **k: "(no pulse)")
-    monkeypatch.setattr(server, "_eval_load_project_claude_md", lambda *a, **k: "(no claude md)")
+    monkeypatch.setattr(server, "_eval_load_recent_md", lambda *a, **k: "<<<RECENT_MD_MARKER>>>")
+    monkeypatch.setattr(server, "_eval_load_pulse_all", lambda *a, **k: "<<<PULSE_ALL_MARKER>>>")
+    monkeypatch.setattr(server, "_eval_load_project_claude_md", lambda *a, **k: "<<<CLAUDE_MD_MARKER>>>")
+    return log_dir, sentinels
 
+
+def test_past_boards_injected_into_user_payload(eval_log_with_history):
+    """_eval_build_messages 的 user payload 必须含过去 5 天每条 sentinel"""
+    log_dir, sentinels = eval_log_with_history
     target = datetime(2026, 6, 18)  # 今天
     messages = server._eval_build_messages(target, model_id="test-model")
 
@@ -53,33 +51,58 @@ def test_past_boards_injected_into_user_payload(eval_log_with_history, monkeypat
     assert messages[1]["role"] == "user"
 
     user_payload = messages[1]["content"]
-    # 锁红线:5 条历史 board 全在
-    for s in sentences:
-        assert s in user_payload, f"past_boards 注入丢了:'{s}' 不在 user payload"
+    # 锁红线:5 条历史 board 每条 sentinel 都在
+    for date, sentinel in sentinels:
+        assert sentinel in user_payload, \
+            f"past_boards 注入丢了:sentinel '{sentinel}' (date={date}) 不在 user payload"
 
 
-def test_past_boards_excludes_target_day(eval_log_with_history, monkeypatch):
+def test_past_boards_excludes_target_day(eval_log_with_history):
     """严格小于 target,target 当天的 eval 不该被注入(否则 AI 读自己今晚要写的)"""
     log_dir, _ = eval_log_with_history
-    # 加一条今天的(模拟 target 当天已经写过 — 不该被读)
-    (log_dir / "2026-06-18.md").write_text("今天的 board 不该被注入", encoding="utf-8")
+    today_sentinel = f"TODAY-{uuid.uuid4().hex[:8]}"
+    (log_dir / "2026-06-18.md").write_text(
+        f"今天的 board: {today_sentinel}\n", encoding="utf-8")
+
+    target = datetime(2026, 6, 18)
+    messages = server._eval_build_messages(target, model_id="test-model")
+    user_payload = messages[1]["content"]
+    assert today_sentinel not in user_payload, \
+        "past_boards 严格小于 target 那条契约被破 — target 当天不该出现"
+
+
+def test_past_boards_strict_less_than_boundary(isolated_pulse_paths, monkeypatch):
+    """严格小于(<)而非 ≤:target=2026-06-18 → 含 17, 不含 18;
+    target=2026-06-19 → 含 17/18, 不含 19。(fix_existing #6 加的边界 case)"""
+    log_dir = isolated_pulse_paths.eval_log
+    sentinels = {}
+    for d in ("2026-06-17", "2026-06-18", "2026-06-19"):
+        s = f"SENTINEL-{d}-{uuid.uuid4().hex[:6]}"
+        (log_dir / f"{d}.md").write_text(s, encoding="utf-8")
+        sentinels[d] = s
     monkeypatch.setattr(server, "find_today_journal", lambda *a, **k: None)
     monkeypatch.setattr(server, "_eval_load_recent_md", lambda *a, **k: "(no recent)")
     monkeypatch.setattr(server, "_eval_load_pulse_all", lambda *a, **k: "(no pulse)")
     monkeypatch.setattr(server, "_eval_load_project_claude_md", lambda *a, **k: "(no claude md)")
 
-    target = datetime(2026, 6, 18)
-    messages = server._eval_build_messages(target, model_id="test-model")
-    user_payload = messages[1]["content"]
-    assert "今天的 board 不该被注入" not in user_payload, \
-        "past_boards 严格小于 target 那条契约被破 — target 当天不该出现"
+    # target=06-18 → 含 17,不含 18/19
+    msgs = server._eval_build_messages(datetime(2026, 6, 18))
+    p = msgs[1]["content"]
+    assert sentinels["2026-06-17"] in p
+    assert sentinels["2026-06-18"] not in p, "target 当天必排除(<)"
+    assert sentinels["2026-06-19"] not in p, "未来日期当然排除"
+
+    # target=06-19 → 含 17 + 18,不含 19
+    msgs = server._eval_build_messages(datetime(2026, 6, 19))
+    p = msgs[1]["content"]
+    assert sentinels["2026-06-17"] in p
+    assert sentinels["2026-06-18"] in p, "昨天必含"
+    assert sentinels["2026-06-19"] not in p, "target 当天必排除"
 
 
-def test_no_past_boards_returns_placeholder(monkeypatch, tmp_path):
+def test_no_past_boards_returns_placeholder(isolated_pulse_paths, monkeypatch):
     """全空 eval-log 时返占位,不抛(让 LLM 知道这是首晚)"""
-    log_dir = tmp_path / "empty-eval-log"
-    log_dir.mkdir()
-    monkeypatch.setattr(server, "EVAL_LOG_DIR", log_dir)
+    # eval_log dir 是空(isolated_pulse_paths 创建但没填)
     monkeypatch.setattr(server, "find_today_journal", lambda *a, **k: None)
     monkeypatch.setattr(server, "_eval_load_recent_md", lambda *a, **k: "(no recent)")
     monkeypatch.setattr(server, "_eval_load_pulse_all", lambda *a, **k: "(no pulse)")
@@ -89,21 +112,14 @@ def test_no_past_boards_returns_placeholder(monkeypatch, tmp_path):
     messages = server._eval_build_messages(target)
     user_payload = messages[1]["content"]
     # 占位字符串(在 _eval_load_past_boards 内定义)
-    assert "(target 之前没有历史 eval)" in user_payload or \
-           "(没有历史 eval — 这是第一次)" in user_payload
+    assert ("(target 之前没有历史 eval)" in user_payload or
+            "(没有历史 eval — 这是第一次)" in user_payload)
 
 
-def test_past_boards_section_header_present(eval_log_with_history, monkeypatch):
-    """user payload 里必须有 '过去 7 晚你(AI)给 user 的留言板原文' 这个 section 标签 —
-    LLM 靠它定位"""
-    monkeypatch.setattr(server, "find_today_journal", lambda *a, **k: None)
-    monkeypatch.setattr(server, "_eval_load_recent_md", lambda *a, **k: "(no recent)")
-    monkeypatch.setattr(server, "_eval_load_pulse_all", lambda *a, **k: "(no pulse)")
-    monkeypatch.setattr(server, "_eval_load_project_claude_md", lambda *a, **k: "(no claude md)")
-
+def test_past_boards_section_header_present(eval_log_with_history):
+    """user payload 里必须有 '过去 7 晚...留言板原文' 这个 section 标签 — LLM 靠它定位"""
     target = datetime(2026, 6, 18)
     messages = server._eval_build_messages(target)
     user_payload = messages[1]["content"]
-    # section 头(_eval_build_messages 写死的格式)
     assert "过去 7 晚" in user_payload
     assert "留言板原文" in user_payload
