@@ -381,7 +381,13 @@
       return jsonResp({ needs_consent: false, failures: false, heartbeat: false, consented_at: null, client_id: "mobile", silent_failures_local: 0 });
     },
     "GET /api/user-widgets": function () { return jsonResp({ active: [] }); },
-    "GET /api/water-cup": function () { return jsonResp({ image_url: null }); },
+    "GET /api/water-cup": function () {
+      return Store.getSetting("water_cup_img").then(function (img) { return jsonResp({ image_url: img || null }); });
+    },
+    // 同 daily-tasks/set-image:存 base64 dataUrl 到 Preferences,客户端已端侧抠图过
+    "POST /api/water-cup": function (req, u, body) {
+      return Store.setSetting("water_cup_img", (body && body.image) || "").then(function () { return jsonResp({ ok: true }); });
+    },
     "GET /api/journal/tag-stats": function () { return jsonResp({ tags: [] }); },
     // 移动端无 vault 文件漂移概念;返 0 漂移,vault-audit.js 据此不弹横幅
     "GET /api/vault/audit": function () { return jsonResp({ total_drift: 0, image_recoverable: [], image_orphans: [], meta_orphans: [], aggregate_broken_links: [] }); },
