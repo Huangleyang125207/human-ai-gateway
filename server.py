@@ -3506,52 +3506,14 @@ def _index_upsert(date: str, filename: str, **fields):
         _rebuild_curator_system_prompt()
 
 
-def _ocr_text(file_path: Path) -> str:
-    """统一 OCR 出口:端侧优先(macOS Vision / rapidocr ONNX),失败兜底百度云。
-
-    返恒非 None 的字符串(空 = 没识别出 / 全失败)。3 个 caller 共用,
-    替换原 from ocr import baidu_ocr_image 的散落模式。
-
-    优先级:
-      1. ocr_local.ocr_local(file_path) → 端侧链(macOS Vision Swift binary +
-         rapidocr ONNX fallback)。返 str = 成功(可能空),None = 端侧不可用
-      2. 端侧 None → 走 baidu(若 config 有 key);无 key → 返 ""
-    """
-    local_ok = False
-    try:
-        from ocr_local import ocr_local
-        local_result = ocr_local(file_path)
-        if local_result is not None:
-            return local_result
-        local_ok = False  # 端侧返 None — 不可用
-    except Exception as e:
-        log.info(f"ocr_local failed for {file_path.name}: {e}")
-        _report_silent_failure("ocr_local_exception",
-            f"{type(e).__name__}: {str(e)[:120]}")
-    # 端侧不可用 → baidu cloud fallback
-    try:
-        cfg = load_config() or {}
-        api_key = cfg.get("baidu_ocr_api_key", "")
-        secret_key = cfg.get("baidu_ocr_secret_key", "")
-        if not api_key or not secret_key:
-            # 端侧不行 + baidu 没 key — 用户图里的文字 server 看不见 → AI 也看不见
-            _report_silent_failure("ocr_all_unavailable",
-                "端侧 OCR 不可用且百度 OCR 未配 key,返空")
-            return ""
-        from ocr import baidu_ocr_image, BaiduOCRError
-        try:
-            return baidu_ocr_image(file_path, api_key, secret_key) or ""
-        except BaiduOCRError as be:
-            # B-#2: ocr.py 已经按 code 分桶上报过(_emit_failure),这里不重复;
-            # 但 _ocr_text 返 "" 给上层 → 上层把"返空"区分不出"图里没字"和"API 挂了"
-            # 看 ocr.py emit 的 silent-failure 上报通道,不要靠这个返回值
-            log.warning(f"baidu OCR error code {be.code} for {file_path.name}: {be.msg}")
-            return ""
-    except Exception as e:
-        log.warning(f"baidu OCR also failed for {file_path.name}: {e}")
-        _report_silent_failure("ocr_baidu_failed",
-            f"{type(e).__name__}: {str(e)[:120]}")
-        return ""
+# ── OCR dispatcher + 文本工具 ─ 抽到 ocr.py(行为零变化,仅搬迁) ──
+# _ocr_text / _strip_ocr_from_history / _parse_pill_count_from_ocr 三个 helper +
+# 配套 _OCR_BLOCK_RE / _OCR_FILENAME_RE / _PILL_COUNT_RE 三个正则 一起搬到 ocr.py。
+# silent-failure 走 ocr 模块自己的 _emit_failure(server.py 启动时已注入 sink)。
+from ocr import (
+    _ocr_text, _strip_ocr_from_history, _parse_pill_count_from_ocr,
+    _OCR_BLOCK_RE, _OCR_FILENAME_RE, _PILL_COUNT_RE,
+)
 
 
 def _index_attachment(date: str, filename: str, original: str, size: int, sha256_hex: str = ""):
@@ -3695,8 +3657,7 @@ def _summarize_history(old_messages: list, client, model: str) -> str:
     return summary
 
 
-_OCR_BLOCK_RE = re.compile(r'<图片 OCR 识别结果>.*?</图片 OCR 识别结果>', re.DOTALL)
-_OCR_FILENAME_RE = re.compile(r'图片 \[([^\]]+)\]:')
+# _OCR_BLOCK_RE / _OCR_FILENAME_RE 已搬到 ocr.py(顶部 from ocr import 进来)
 # history 里 thread.js 把 ref 拼成 `[image] filename`(或其他 kind),抓 image 那条
 _HISTORY_IMG_LABEL_RE = re.compile(r'\[image\]\s+([^\n]+?)(?=\n|$)')
 
@@ -3783,15 +3744,7 @@ def _enrich_history_image_labels(history: list) -> list:
     return out
 
 
-def _strip_ocr_from_history(text: str) -> str:
-    """history 里的 user msg 不需要重发 OCR 全文(首发时已给过)。
-    保留 [图片占位:filename] 让模型还知道当时贴过图,实际 OCR 文本去掉。
-    """
-    if '<图片 OCR 识别结果>' not in text:
-        return text
-    filenames = _OCR_FILENAME_RE.findall(text)
-    placeholder = f'[历史含图片: {", ".join(filenames)} (OCR 文本省略)]' if filenames else '[历史含图片]'
-    return _OCR_BLOCK_RE.sub(placeholder, text)
+# _strip_ocr_from_history 已搬到 ocr.py(顶部 from ocr import 进来)
 
 
 def _refs_to_image_blocks(refs):
@@ -4867,23 +4820,7 @@ DAILY_TASK_IMAGES_DIR = DATA_DIR / "daily-task-images"
 DAILY_TASK_IMAGES_MAP = DATA_DIR / "daily-task-images.json"
 DAILY_TASK_META_MAP = DATA_DIR / "daily-task-meta.json"
 
-# OCR 颗数识别:匹配 "60 粒" / "30 capsules" / "120 softgels"
-# 数字范围 1-9999,常见单位中英都覆盖。取所有匹配中的最大数(避免把规格 mg 误抓)。
-_PILL_COUNT_RE = re.compile(
-    r'(\d{1,4})\s*(?:粒|片|颗|錠|锭|capsules?|caps|tablets?|tabs?|softgels?|gummies|count\b)',
-    re.IGNORECASE,
-)
-
-
-def _parse_pill_count_from_ocr(ocr_text: str):
-    """从 OCR 文本里抽 '60粒/120 capsules' 这类总数。失败返 None。
-    取所有匹配的最大值 — 避免把规格 (e.g. '500 mg × 60粒' 里的 500) 算进来。
-    """
-    if not ocr_text:
-        return None
-    nums = [int(m.group(1)) for m in _PILL_COUNT_RE.finditer(ocr_text)]
-    nums = [n for n in nums if 1 <= n <= 9999]
-    return max(nums) if nums else None
+# _PILL_COUNT_RE / _parse_pill_count_from_ocr 已搬到 ocr.py(顶部 from ocr import 进来)
 
 
 def _sanitize_task_filename(name: str) -> str:
