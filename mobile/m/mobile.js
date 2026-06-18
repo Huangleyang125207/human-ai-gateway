@@ -97,8 +97,11 @@
   // ── 日记页 ──
   function loadDay() {
     state.readonly = state.date < TODAY;
-    Promise.all([api("/api/journal/today?date=" + state.date), api("/api/daily-tasks?date=" + state.date)])
-      .then(function (rs) { renderJournal(rs[0], rs[1]); });
+    Promise.all([
+      api("/api/journal/today?date=" + state.date),
+      api("/api/daily-tasks?date=" + state.date),
+      api("/api/water-cup"),
+    ]).then(function (rs) { state.cupImg = (rs[2] && rs[2].image_url) || null; renderJournal(rs[0], rs[1]); });
   }
   function renderJournal(j, t) {
     var v = $("journalView"); v.innerHTML = "";
@@ -121,28 +124,55 @@
     v.appendChild(stream);
   }
 
-  // 八杯水(滑动点亮,触点放大;本地态,持久化留后续批次)
+  // 八杯水(滑动点亮 + 长按换杯图;喝水落 md,水杯图落 Preferences 对齐 PC 端)
   function buildCups() {
-    var N = 8, block = el("div", "gw-care-block", '<div class="gw-care-label">八杯水</div>');
+    var N = 8, block = el("div", "gw-care-block", '<div class="gw-care-label">八杯水 <span style="opacity:.55">· 长按换杯</span></div>');
     var row = el("div", "gw-cups");
     var cups = [];
-    for (var i = 0; i < N; i++) { var c = el("div", "gw-cup", '<div class="gw-cup-fill"></div>'); cups.push(c); row.appendChild(c); }
+    var hasImg = !!state.cupImg;
+    for (var i = 0; i < N; i++) {
+      var inner = hasImg ? '<img src="' + state.cupImg + '" alt="" class="gw-cup-img">' : '<div class="gw-cup-fill"></div>';
+      var c = el("div", "gw-cup" + (hasImg ? " with-image" : ""), inner);
+      cups.push(c); row.appendChild(c);
+    }
     var count = el("div", "gw-cups-count");
     function paint(focus) {
       cups.forEach(function (c, i) {
-        c.className = "gw-cup" + (i < state.filled ? " filled" : "") +
+        c.className = "gw-cup" + (hasImg ? " with-image" : "") + (i < state.filled ? " filled" : "") +
           (i === focus ? " cup-focus" : (focus >= 0 && Math.abs(i - focus) === 1 ? " cup-near" : ""));
       });
-      count.innerHTML = "<b>" + state.filled + "</b> / " + N + " 杯 · " + (state.readonly ? "历史日只读" : "滑过杯子点亮");
+      count.innerHTML = "<b>" + state.filled + "</b> / " + N + " 杯 · " + (state.readonly ? "历史日只读" : "滑过杯子点亮 · 长按换杯");
     }
     function idxAt(x) { var best = -1, bd = 1e9; cups.forEach(function (c, i) { var r = c.getBoundingClientRect(); var d = Math.abs(x - (r.left + r.width / 2)); if (d < bd) { bd = d; best = i; } }); return best; }
     function apply(x) { if (state.readonly) return; var i = idxAt(x); if (i < 0) return; var was = state.filled; state.filled = i + 1; paint(i); if (i + 1 > was) cups[i].classList.add("just"); }
-    row.addEventListener("pointerdown", function (e) { if (state.readonly) return; try { row.setPointerCapture(e.pointerId); } catch (x) {} apply(e.clientX); });
-    row.addEventListener("pointermove", function (e) { if (state.readonly || !row.hasPointerCapture || !row.hasPointerCapture(e.pointerId)) return; apply(e.clientX); });
-    row.addEventListener("pointerup", function () {
+    // tap/swipe/longpress 三态:长按 480ms 不动 → 换杯图;一动 → swipe 喝水;tap 释放 → 单杯 commit
+    var st = { sx: 0, sy: 0, mode: null, timer: null, captured: false };
+    function clearT() { if (st.timer) { clearTimeout(st.timer); st.timer = null; } }
+    row.addEventListener("pointerdown", function (e) {
+      if (state.readonly) return;
+      st = { sx: e.clientX, sy: e.clientY, mode: null, timer: null, captured: false };
+      st.timer = setTimeout(function () {
+        if (st.mode === null) { st.mode = "lp"; if (navigator.vibrate) navigator.vibrate(12); pickWaterCupImage(); }
+      }, 480);
+    });
+    row.addEventListener("pointermove", function (e) {
+      if (state.readonly || st.mode === "lp") return;
+      var adx = e.clientX - st.sx, ady = e.clientY - st.sy;
+      if (st.mode === null && (Math.abs(adx) > 8 || Math.abs(ady) > 8)) {
+        clearT(); st.mode = "swipe";
+        try { row.setPointerCapture(e.pointerId); st.captured = true; } catch (x) {}
+      }
+      if (st.mode === "swipe") apply(e.clientX);
+    });
+    row.addEventListener("pointerup", function (e) {
+      clearT();
+      if (st.mode === "lp") { st.mode = null; return; }                  // 长按已 fire,不喝水
+      if (st.mode === null) apply(e.clientX);                            // tap = 单杯 commit
       paint(-1);
       if (!state.readonly) api("/api/daily-tasks/water", { method: "POST", body: JSON.stringify({ date: state.date, filled: state.filled }) });
+      st.mode = null;
     });
+    row.addEventListener("pointercancel", function () { clearT(); st.mode = null; paint(-1); });
     paint(-1);
     block.appendChild(row); block.appendChild(count); return block;
   }
@@ -184,6 +214,26 @@
         var p = cut ? cut.cutout({ image: dataUrl }).then(function (r) { return r.png; }).catch(function () { flash("没抠出主体 · 先用原图"); return dataUrl; }) : Promise.resolve(dataUrl);
         p.then(function (png) {
           api("/api/daily-tasks/set-image", { method: "POST", body: JSON.stringify({ task_name: task.name, image: png }) }).then(function () { flash("图标已换 ✦"); loadDay(); });
+        });
+      };
+      rd.readAsDataURL(f);
+    });
+    inp.click();
+  }
+  // 对齐 PC 端 uploadForCup:选图 → 端侧抠图 → POST /api/water-cup 落 base64 → 8 个杯子都变这张图
+  function pickWaterCupImage() {
+    var inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+    document.body.appendChild(inp);
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; if (inp.parentNode) document.body.removeChild(inp); if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        var dataUrl = rd.result;
+        var cut = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Cutout;
+        if (cut) flash("抠图中…");
+        var p = cut ? cut.cutout({ image: dataUrl }).then(function (r) { return r.png; }).catch(function () { flash("没抠出主体 · 先用原图"); return dataUrl; }) : Promise.resolve(dataUrl);
+        p.then(function (png) {
+          api("/api/water-cup", { method: "POST", body: JSON.stringify({ image: png }) }).then(function () { flash("水杯已换 ✦"); loadDay(); });
         });
       };
       rd.readAsDataURL(f);

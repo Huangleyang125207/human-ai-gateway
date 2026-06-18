@@ -207,6 +207,10 @@
 .gw-cup.cup-near  { transform: scale(1.3); z-index: 3; }
 .gw-cup.just { animation: gw-pour 0.9s ease; }
 @keyframes gw-pour { 0%{height:0} 60%{height:84%} 100%{height:76%} }
+/* 对齐 PC 端 uploadForCup:用户传图后 8 个杯子都换这张图;filled 不透明,未 filled 淡 */
+.gw-cup.with-image { background: transparent; border: 0; overflow: hidden; }
+.gw-cup.with-image .gw-cup-img { width: 100%; height: 100%; object-fit: contain; opacity: 0.28; transition: opacity 0.25s; pointer-events: none; -webkit-user-drag: none; }
+.gw-cup.with-image.filled .gw-cup-img { opacity: 1; }
 .gw-cups-count { font: 11px var(--sans); color: var(--ink-4); margin-top: 8px; letter-spacing: 0.04em; }
 .gw-cups-count b { color: var(--ink-2); font-weight: 500; }
 
