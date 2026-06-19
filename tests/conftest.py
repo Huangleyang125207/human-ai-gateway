@@ -124,6 +124,24 @@ def isolated_pulse_paths(monkeypatch, tmp_path):
     # VAULT_DIR 默认隔离到 tmp,让 path.resolve().is_relative_to(VAULT_DIR) 命中
     # ⇒ vault_git.commit_after_write 这条分支真执行(P0+ must-add #3 要)
     monkeypatch.setattr(server, "VAULT_DIR", tmp_path, raising=False)
+    # ③ P2-P4 抽出的模块也持有自己的常量副本(模块级 Path 在 import 时一次性 resolve)
+    # patch server.X 不影响 pulse_io / pulse_eval / pulse_evolve 的本地引用 → 也 patch 它们
+    for mod_name in ("pulse_io", "pulse_eval", "pulse_evolve"):
+        try:
+            mod = __import__(mod_name)
+        except ImportError:
+            continue
+        # patch 所有可能 hold 常量的 attrs(raising=False 兼容尚未抽出的阶段)
+        for attr, val in (
+            ("_USER_PULSE_PATH", user_p),
+            ("_PROJECT_PULSE_PATH", proj_p),
+            ("_AGENT_CONTEXT_PATH", agent_p),
+            ("PULSE_DIR", mirror_dir),
+            ("EVAL_LOG_DIR", eval_dir),
+            ("VAULT_DIR", tmp_path),
+        ):
+            if hasattr(mod, attr):
+                monkeypatch.setattr(mod, attr, val, raising=False)
 
     return SimpleNamespace(
         user=user_p, project=proj_p, agent_context=agent_p,

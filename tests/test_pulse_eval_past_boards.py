@@ -32,10 +32,14 @@ def eval_log_with_history(isolated_pulse_paths, monkeypatch):
         f.write_text(f"过去板 2026-06-{i:02d}: {sentinel}\n", encoding="utf-8")
         sentinels.append((f"2026-06-{i:02d}", sentinel))
     # mock 上游 helper,让本测专注 past_boards 注入
-    monkeypatch.setattr(server, "find_today_journal", lambda *a, **k: None)
-    monkeypatch.setattr(server, "_eval_load_recent_md", lambda *a, **k: "<<<RECENT_MD_MARKER>>>")
-    monkeypatch.setattr(server, "_eval_load_pulse_all", lambda *a, **k: "<<<PULSE_ALL_MARKER>>>")
-    monkeypatch.setattr(server, "_eval_load_project_claude_md", lambda *a, **k: "<<<CLAUDE_MD_MARKER>>>")
+    # P3 后:_eval_load_X 住在 pulse_eval,_eval_build_messages 走 pulse_eval namespace
+    # 查这些 helper。两边都 patch(raising=False 兼容 P3 之前)
+    import pulse_eval
+    for mod in (server, pulse_eval):
+        monkeypatch.setattr(mod, "find_today_journal", lambda *a, **k: None, raising=False)
+        monkeypatch.setattr(mod, "_eval_load_recent_md", lambda *a, **k: "<<<RECENT_MD_MARKER>>>", raising=False)
+        monkeypatch.setattr(mod, "_eval_load_pulse_all", lambda *a, **k: "<<<PULSE_ALL_MARKER>>>", raising=False)
+        monkeypatch.setattr(mod, "_eval_load_project_claude_md", lambda *a, **k: "<<<CLAUDE_MD_MARKER>>>", raising=False)
     return log_dir, sentinels
 
 
@@ -80,10 +84,12 @@ def test_past_boards_strict_less_than_boundary(isolated_pulse_paths, monkeypatch
         s = f"SENTINEL-{d}-{uuid.uuid4().hex[:6]}"
         (log_dir / f"{d}.md").write_text(s, encoding="utf-8")
         sentinels[d] = s
-    monkeypatch.setattr(server, "find_today_journal", lambda *a, **k: None)
-    monkeypatch.setattr(server, "_eval_load_recent_md", lambda *a, **k: "(no recent)")
-    monkeypatch.setattr(server, "_eval_load_pulse_all", lambda *a, **k: "(no pulse)")
-    monkeypatch.setattr(server, "_eval_load_project_claude_md", lambda *a, **k: "(no claude md)")
+    import pulse_eval
+    for mod in (server, pulse_eval):
+        monkeypatch.setattr(mod, "find_today_journal", lambda *a, **k: None, raising=False)
+        monkeypatch.setattr(mod, "_eval_load_recent_md", lambda *a, **k: "(no recent)", raising=False)
+        monkeypatch.setattr(mod, "_eval_load_pulse_all", lambda *a, **k: "(no pulse)", raising=False)
+        monkeypatch.setattr(mod, "_eval_load_project_claude_md", lambda *a, **k: "(no claude md)", raising=False)
 
     # target=06-18 → 含 17,不含 18/19
     msgs = server._eval_build_messages(datetime(2026, 6, 18))
@@ -103,10 +109,12 @@ def test_past_boards_strict_less_than_boundary(isolated_pulse_paths, monkeypatch
 def test_no_past_boards_returns_placeholder(isolated_pulse_paths, monkeypatch):
     """全空 eval-log 时返占位,不抛(让 LLM 知道这是首晚)"""
     # eval_log dir 是空(isolated_pulse_paths 创建但没填)
-    monkeypatch.setattr(server, "find_today_journal", lambda *a, **k: None)
-    monkeypatch.setattr(server, "_eval_load_recent_md", lambda *a, **k: "(no recent)")
-    monkeypatch.setattr(server, "_eval_load_pulse_all", lambda *a, **k: "(no pulse)")
-    monkeypatch.setattr(server, "_eval_load_project_claude_md", lambda *a, **k: "(no claude md)")
+    import pulse_eval
+    for mod in (server, pulse_eval):
+        monkeypatch.setattr(mod, "find_today_journal", lambda *a, **k: None, raising=False)
+        monkeypatch.setattr(mod, "_eval_load_recent_md", lambda *a, **k: "(no recent)", raising=False)
+        monkeypatch.setattr(mod, "_eval_load_pulse_all", lambda *a, **k: "(no pulse)", raising=False)
+        monkeypatch.setattr(mod, "_eval_load_project_claude_md", lambda *a, **k: "(no claude md)", raising=False)
 
     target = datetime(2026, 6, 18)
     messages = server._eval_build_messages(target)
