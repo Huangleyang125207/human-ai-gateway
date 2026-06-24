@@ -617,6 +617,12 @@
         action: { type: "string", enum: ["add", "delete"], description: "默认 add" },
         task_name: { type: "string" },
       }, required: ["task_name"] }}},
+    // Group C
+    { type: "function", function: { name: "search_journal", description: "在本机 vault 全部日记里搜关键词,返匹配的日期 + 时间块 + 片段",
+      parameters: { type: "object", properties: {
+        query: { type: "string", description: "搜索关键词" },
+        days: { type: "integer", description: "回看多少天,默认 30,最大 365" },
+      }, required: ["query"] }}},
   ];
   // tool_name → mobile-api endpoint dispatch
   // 注意:用 window.fetch(shim-hijacked)而不是 realFetch — /api/* 路径要走 shim
@@ -638,6 +644,9 @@
       case "manage_daily_task":
         var act = (args.action || "add");
         return fch("/api/daily-tasks/" + (act === "delete" ? "delete" : "add"), H).then(function (r) { return r.json(); });
+      case "search_journal":
+        return fch("/api/journal/search?query=" + encodeURIComponent(args.query || "") + "&days=" + (args.days || 30))
+          .then(function (r) { return r.json(); });
       default: return Promise.resolve({ error: "unknown tool: " + name });
     }
   }
@@ -1103,6 +1112,37 @@
     },
     // Group B:append_journal_comment — 给某块加 AI 评论(authorship 合法旁路,
     // AI 不能改 @user 块但可以在 body 末尾加 *AI:* 评论)
+    // Group C:search_journal — 扫 mobile 本机 vault md,关键词匹配返结果列表
+    "GET /api/journal/search": function (req, u) {
+      var url = new URL(u, "http://x");
+      var q = (url.searchParams.get("query") || "").trim();
+      var days = Math.max(1, Math.min(parseInt(url.searchParams.get("days") || "30", 10), 365));
+      if (!q) return jsonResp({ ok: false, error: "缺 query" }, 400);
+      var qLc = q.toLowerCase();
+      return Store.listJournalDates().then(function (dates) {
+        var sorted = (dates || []).sort().reverse().slice(0, days);
+        return Promise.all(sorted.map(function (date) {
+          return Store.readJournalMd(date).then(function (md) {
+            if (!md) return null;
+            var matches = [];
+            var lines = md.split(/\r?\n/);
+            var curTime = null;
+            for (var i = 0; i < lines.length; i++) {
+              var tm = TIME_H1_RE.exec(lines[i]);
+              if (tm) { curTime = pad2(parseInt(tm[1], 10)) + ":" + tm[2]; continue; }
+              if (lines[i].toLowerCase().indexOf(qLc) >= 0 && curTime) {
+                matches.push({ time: curTime, snippet: lines[i].trim().slice(0, 200) });
+              }
+            }
+            return matches.length ? { date: date, matches: matches } : null;
+          });
+        })).then(function (rs) {
+          var hits = rs.filter(Boolean);
+          var total = hits.reduce(function (a, h) { return a + h.matches.length; }, 0);
+          return jsonResp({ ok: true, query: q, days: days, total: total, hits: hits.slice(0, 30) });
+        });
+      });
+    },
     "POST /api/journal/append-comment": function (req, u, body) {
       var date = (body && body.date) || todayIso();
       var time = body && body.time;

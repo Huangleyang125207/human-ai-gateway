@@ -509,6 +509,7 @@
       case "set_water_cup_image": return "换喝水图标";
       case "append_journal_comment": return "给 " + (args.time || "?") + " 加评论";
       case "manage_daily_task": return ((args.action || "add") === "delete" ? "删 " : "加 ") + (args.task_name || "?") + " 打卡";
+      case "search_journal": return "搜 \"" + (args.query || "") + "\"";
       default: return name;
     }
   }
