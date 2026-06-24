@@ -92,17 +92,51 @@
       });
     },
     writeThread: function (arr) {
-      // 写时同时落"逻辑 mtime"独立 setting,做 thread CAS 用(test_thread_cas 锁)
+      // 写前 rotate 5 份 bak(复刻桌面 _safe_write_text rotate=True);
+      // 再落新 thread + 推进 mtime(CAS 用)。复刻 test_restore_from_bak_roundtrip 真值线。
       var mt = Date.now();
-      return Promise.all([
-        Backend.setText("thread", JSON.stringify(arr || [])),
-        Backend.setText("setting/thread_mtime", String(mt)),
-      ]).then(function () { return mt; });
+      return Store.rotateThreadBaks().then(function () {
+        return Promise.all([
+          Backend.setText("thread", JSON.stringify(arr || [])),
+          Backend.setText("setting/thread_mtime", String(mt)),
+        ]);
+      }).then(function () { return mt; });
     },
     readThreadMtime: function () {
       return Backend.getText("setting/thread_mtime").then(function (s) {
         var v = parseInt(s, 10); return isNaN(v) ? 0 : v;  // 0 = 文件尚不存在,首次写放行
       });
+    },
+    // bak.5 删 → bak.4→bak.5 → ... → 当前→bak.1。无当前 thread 时 noop。
+    rotateThreadBaks: function () {
+      return Backend.getText("thread").then(function (cur) {
+        if (cur == null) return;
+        // 从 4→5, 3→4, 2→3, 1→2, current→1。bak.5 旧值丢弃。
+        return Backend.getText("setting/thread_bak/4").then(function (b4) {
+          return (b4 == null ? Promise.resolve() : Backend.setText("setting/thread_bak/5", b4));
+        }).then(function () { return Backend.getText("setting/thread_bak/3"); }).then(function (b3) {
+          return (b3 == null ? Promise.resolve() : Backend.setText("setting/thread_bak/4", b3));
+        }).then(function () { return Backend.getText("setting/thread_bak/2"); }).then(function (b2) {
+          return (b2 == null ? Promise.resolve() : Backend.setText("setting/thread_bak/3", b2));
+        }).then(function () { return Backend.getText("setting/thread_bak/1"); }).then(function (b1) {
+          return (b1 == null ? Promise.resolve() : Backend.setText("setting/thread_bak/2", b1));
+        }).then(function () { return Backend.setText("setting/thread_bak/1", cur); });
+      });
+    },
+    listThreadBaks: function () {
+      // 扫 1..5,有则进列表(mobile 无 readdir,逐个尝试)
+      var ps = [1, 2, 3, 4, 5].map(function (i) {
+        return Backend.getText("setting/thread_bak/" + i).then(function (s) {
+          return s == null ? null : { index: i, bytes: s.length };
+        });
+      });
+      return Promise.all(ps).then(function (rs) { return rs.filter(Boolean); });
+    },
+    readThreadBakAt: function (idx) { return Backend.getText("setting/thread_bak/" + idx); },
+    // 原损坏内容存 setting/thread_corrupted/<ts>(对齐桌面.corrupted.<ts> 备份策略)
+    archiveCorruptedThread: function (raw) {
+      var ts = Date.now();
+      return Backend.setText("setting/thread_corrupted/" + ts, raw).then(function () { return ts; });
     },
     getSetting: function (k) { return Backend.getText("setting/" + k); },
     setSetting: function (k, v) { return Backend.setText("setting/" + k, v); },
@@ -625,9 +659,40 @@
       return Promise.all([Store.readThread(), Store.readThreadMtime()]).then(function (rs) {
         var r = rs[0], mt = rs[1];
         if (!r.ok && r.corrupt) {
-          return jsonResp({ status: "corrupt", history: [], baks: [], raw_bytes: r.raw_bytes, mtime: mt });
+          // 复刻桌面 test_history_corrupt_returns_modal_payload_and_rings:扫 bak.1..5 给前端 modal
+          return Store.listThreadBaks().then(function (baks) {
+            return jsonResp({
+              status: "corrupt", history: [], mtime: 0,
+              baks: baks, raw_bytes: r.raw_bytes,
+              message: "thread-history 解析失败,选 bak.N 恢复或从空开始",
+            });
+          });
         }
         return jsonResp({ history: r.history || [], mtime: mt });
+      });
+    },
+    // 复刻桌面 /api/thread/restore-from-bak(test_restore_from_bak_roundtrip + bad_index 400 + missing 404)
+    "POST /api/thread/restore-from-bak": function (req, u, body) {
+      var idx = parseInt(body && body.bak_index, 10);
+      if (isNaN(idx) || idx < 1 || idx > 5) return jsonResp({ ok: false, error: "bak_index 必须 1..5" }, 400);
+      return Store.readThreadBakAt(idx).then(function (raw) {
+        if (raw == null) return jsonResp({ ok: false, error: "bak." + idx + " 不存在" }, 404);
+        var hist;
+        try { hist = JSON.parse(raw); }
+        catch (e) { return jsonResp({ ok: false, error: "bak." + idx + " 内容也损坏了" }, 500); }
+        // 先把原损坏内容存档(若有),再写回
+        return Backend.getText("thread").then(function (cur) {
+          var archive = cur ? Store.archiveCorruptedThread(cur) : Promise.resolve(null);
+          return archive.then(function () {
+            var mt = Date.now();
+            return Promise.all([
+              Backend.setText("thread", JSON.stringify(hist)),
+              Backend.setText("setting/thread_mtime", String(mt)),
+            ]).then(function () {
+              return jsonResp({ ok: true, restored_from: "bak." + idx, count: Array.isArray(hist) ? hist.length : 0, mtime: mt });
+            });
+          });
+        });
       });
     },
     "POST /api/thread/save": function (req, u, body) {
