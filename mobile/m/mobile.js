@@ -507,6 +507,8 @@
       case "read_today_schedule": return "看今天日记";
       case "list_recent_days": return "看最近 " + (args.n || 7) + " 天";
       case "set_water_cup_image": return "换喝水图标";
+      case "append_journal_comment": return "给 " + (args.time || "?") + " 加评论";
+      case "manage_daily_task": return ((args.action || "add") === "delete" ? "删 " : "加 ") + (args.task_name || "?") + " 打卡";
       default: return name;
     }
   }

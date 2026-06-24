@@ -607,6 +607,16 @@
       parameters: { type: "object", properties: { n: { type: "integer", description: "几天,默认 7" } }}}},
     { type: "function", function: { name: "set_water_cup_image", description: "换喝水图标",
       parameters: { type: "object", properties: { image: { type: "string", description: "png base64 dataURL" } }, required: ["image"] }}},
+    // Group B 新增
+    { type: "function", function: { name: "append_journal_comment", description: "给某个时间块加 AI 评论(authorship 合法旁路,改不了 @user 块时用这个)",
+      parameters: { type: "object", properties: {
+        date: { type: "string" }, time: { type: "string" }, comment: { type: "string" },
+      }, required: ["time", "comment"] }}},
+    { type: "function", function: { name: "manage_daily_task", description: "加新打卡 task 到补剂段(每天追踪一项)",
+      parameters: { type: "object", properties: {
+        action: { type: "string", enum: ["add", "delete"], description: "默认 add" },
+        task_name: { type: "string" },
+      }, required: ["task_name"] }}},
   ];
   // tool_name → mobile-api endpoint dispatch
   // 注意:用 window.fetch(shim-hijacked)而不是 realFetch — /api/* 路径要走 shim
@@ -623,6 +633,11 @@
       case "read_today_schedule": return fch("/api/journal/today" + (args.date ? "?date=" + encodeURIComponent(args.date) : "")).then(function (r) { return r.json(); });
       case "list_recent_days": return fch("/api/journal/days?n=" + (args.n || 7)).then(function (r) { return r.json(); });
       case "set_water_cup_image": return fch("/api/water-cup", H).then(function (r) { return r.json(); });
+      // Group B
+      case "append_journal_comment": return fch("/api/journal/append-comment", H).then(function (r) { return r.json(); });
+      case "manage_daily_task":
+        var act = (args.action || "add");
+        return fch("/api/daily-tasks/" + (act === "delete" ? "delete" : "add"), H).then(function (r) { return r.json(); });
       default: return Promise.resolve({ error: "unknown tool: " + name });
     }
   }
@@ -841,6 +856,28 @@
       });
     },
     // 删 task:当天 md 补剂段删行 + 清 image + 清 meta(对齐 PC 端 /delete 三清)
+    // Group B:加新 task(写补剂段 - [ ] 名字)— AI 在 mobile session 用嘴加 task
+    "POST /api/daily-tasks/add": function (req, u, body) {
+      var name = body && body.task_name;
+      if (!name) return jsonResp({ ok: false, error: "缺 task_name" }, 400);
+      var today = todayIso();
+      return Store.readJournalMd(today).then(function (md) {
+        var lines = (md || "").split(/\r?\n/);
+        var end = suppRegionEnd(lines);
+        // 检查重名 — 已有则 ok no-op
+        for (var i = 0; i < end; i++) {
+          if (SUPP_SUB.test(lines[i])) continue;
+          var m = SUPP_TOP.exec(lines[i]);
+          if (m && m[4] === name) return jsonResp({ ok: true, task_name: name, existed: true });
+        }
+        // 插到补剂段末尾(end 之前)
+        var newLine = "- [ ] " + name;
+        var newLines = lines.slice(0, end).concat([newLine], lines.slice(end));
+        return Store.writeJournalMd(today, newLines.join("\n")).then(function () {
+          return jsonResp({ ok: true, task_name: name, added: true });
+        });
+      });
+    },
     "POST /api/daily-tasks/delete": function (req, u, body) {
       var date = (body && body.date) || todayIso();
       var name = (body && body.task_name) || "";
@@ -1061,6 +1098,38 @@
               });
             });
           }).catch(function (e) { return jsonResp({ skip: "error", err: String(e) }); });
+        });
+      });
+    },
+    // Group B:append_journal_comment — 给某块加 AI 评论(authorship 合法旁路,
+    // AI 不能改 @user 块但可以在 body 末尾加 *AI:* 评论)
+    "POST /api/journal/append-comment": function (req, u, body) {
+      var date = (body && body.date) || todayIso();
+      var time = body && body.time;
+      var comment = body && body.comment;
+      var author = (body && body.author) || "ai";
+      if (!time || !comment) return jsonResp({ error: "缺 time 或 comment" }, 400);
+      return Store.readJournalMd(date).then(function (md) {
+        if (md === null) return jsonResp({ error: "no file" }, 404);
+        var lines = md.split(/\r?\n/);
+        var pad = pad2(parseInt(time.split(":")[0], 10)) + ":" + time.split(":")[1];
+        var start = -1;
+        for (var i = 0; i < lines.length; i++) {
+          var tm = TIME_H1_RE.exec(lines[i]);
+          if (tm && (pad2(parseInt(tm[1], 10)) + ":" + tm[2]) === pad) { start = i; break; }
+        }
+        if (start === -1) return jsonResp({ error: "time block " + time + " not found" }, 404);
+        var end = lines.length;
+        for (var j = start + 1; j < lines.length; j++) {
+          if (TIME_H1_RE.test(lines[j]) || lines[j].trim() === "---") { end = j; break; }
+        }
+        // append 在 body 末尾(end 之前,去掉末尾空行)
+        var insertAt = end;
+        while (insertAt > start + 1 && lines[insertAt - 1].trim() === "") insertAt--;
+        var prefix = author === "ai" ? "*AI:* " : "";
+        var newLines = lines.slice(0, insertAt).concat(["", prefix + comment], lines.slice(insertAt));
+        return Store.writeJournalMd(date, newLines.join("\n")).then(function () {
+          return jsonResp({ ok: true, appended: time, file: isoToStem(date) + ".md" });
         });
       });
     },
