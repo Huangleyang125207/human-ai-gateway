@@ -185,8 +185,11 @@
       var inner = t.image_url
         ? '<img src="' + t.image_url + '" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">'
         : esc((t.name || "·").slice(0, 1));
-      var b = el("button", "gw-task" + (t.checked ? " on" : ""),
-        '<span class="gw-task-glyph">' + inner + '</span><span class="gw-task-name">' + esc(t.name) + '</span>');
+      // 余量徽标:days_left ≤3 上 .urgent 红色;catalog 没返字段(没填 meta)→ 不挂
+      var urgent = typeof t.days_left === "number" && t.days_left <= 3;
+      var badge = urgent ? '<span class="gw-task-badge">' + t.days_left + 'd</span>' : '';
+      var b = el("button", "gw-task" + (t.checked ? " on" : "") + (urgent ? " urgent" : ""),
+        '<span class="gw-task-glyph">' + inner + '</span><span class="gw-task-name">' + esc(t.name) + '</span>' + badge);
       if (state.readonly) b.disabled = true;
       var lp = null, didLong = false;
       // 长按改弹 action sheet(对齐 PC 右键菜单:换图/改 N 粒/看历史/删除)

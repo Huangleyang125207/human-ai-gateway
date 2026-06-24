@@ -576,6 +576,10 @@
               var meta = rs[1] ? JSON.parse(rs[1]) : {};
               if (meta.total_pills) t.total_pills = meta.total_pills;
               if (meta.daily_dose) t.daily_dose = meta.daily_dose;
+              // 余量徽标:days_left = floor(total/dose),≤3 在前端贴 .urgent 红徽
+              if (meta.total_pills && meta.daily_dose) {
+                t.days_left = Math.floor(meta.total_pills / Math.max(1, meta.daily_dose));
+              }
             } catch (e) {}
             try {
               var log = rs[2] ? JSON.parse(rs[2]) : {};

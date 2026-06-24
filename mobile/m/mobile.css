@@ -264,6 +264,16 @@
   font: 11px var(--sans); color: var(--gold);
 }
 .gw-task:active { transform: scale(0.96); }
+/* 余量徽标:days_left ≤3 朱砂红小数字,提醒补货(用 paper 系朱砂 #b14a2b) */
+.gw-task-badge {
+  position: absolute; top: 4px; right: 6px;
+  background: #b14a2b; color: #fff;
+  font: 600 9.5px var(--sans); letter-spacing: 0.02em;
+  padding: 1px 5px; border-radius: 8px;
+  line-height: 1.3; min-width: 14px; text-align: center;
+}
+.gw-task.urgent .gw-task-glyph { box-shadow: 0 0 0 1.5px #b14a2b; }
+.gw-task.urgent.on::after { color: #b14a2b; }
 
 /* ─────────────────── 时间线 entries ─────────────────── */
 .gw-stream { padding: 0 18px 28px; }
