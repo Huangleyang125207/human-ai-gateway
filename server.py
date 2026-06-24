@@ -33,6 +33,14 @@ from pathlib import Path
 
 import secrets
 
+# ── frozen-sidecar 双执行 guard(2026-06-24 实测必需)─────────────────────
+# PyInstaller onefile 把 server.py 当入口 → 运行时 __name__=='__main__',sys.modules 没有 'server'。
+# 抽出的模块(pulse_io / pulse_eval / 各 route 模块)做 `from server import X`,没这条 alias 会把
+# server.py 当新模块 'server' 二次执行 → 双 app/双锁/双 startup,且 pulse_io 顶层 from-server-import
+# 触发循环 import 直接崩(frozen build 启动即 ImportError)。alias 让 'server' = 正在跑的 __main__。
+# dev/pytest 下 server 以 'server' 名导入 → sys.modules['server'] 已存在 → setdefault 不动,安全。
+sys.modules.setdefault("server", sys.modules[__name__])
+
 log = logging.getLogger("gateway")
 log.setLevel(logging.INFO)  # 让 log.info 真的能出来,默认 WARNING 把 cache/quota 等观测吃掉
 if not log.handlers:
@@ -503,7 +511,7 @@ def list_model_profiles():
 # 身份无关 — 没邮箱 / IP / 系统识别,只为同设备纵向去重(同 client 多天反复
 # 触发 X 类 failure → 优先修)。
 # 永远不在 hook 里上报 vault 内容 / API key / 用户文件名。
-APP_VERSION = "0.1.38"  # 跟 tauri.conf.json sync;bump 时两处一起改
+APP_VERSION = "0.1.39"  # 跟 tauri.conf.json sync;bump 时两处一起改
 
 SILENT_FAILURES_LOG = DATA_DIR / "silent-failures.jsonl"
 CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
