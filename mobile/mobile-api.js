@@ -623,6 +623,14 @@
         query: { type: "string", description: "搜索关键词" },
         days: { type: "integer", description: "回看多少天,默认 30,最大 365" },
       }, required: ["query"] }}},
+    // ⑥ B widget 体系 — Group W
+    { type: "function", function: { name: "list_widgets", description: "列当前 mobile 端注册的 widget(返 id/title/slot/enabled)",
+      parameters: { type: "object", properties: {} }}},
+    { type: "function", function: { name: "set_widget_enabled", description: "启用/停用某个 widget(暂时隐藏不删数据)",
+      parameters: { type: "object", properties: {
+        id: { type: "string", description: "widget id" },
+        enabled: { type: "boolean" },
+      }, required: ["id", "enabled"] }}},
   ];
   // tool_name → mobile-api endpoint dispatch
   // 注意:用 window.fetch(shim-hijacked)而不是 realFetch — /api/* 路径要走 shim
@@ -647,6 +655,17 @@
       case "search_journal":
         return fch("/api/journal/search?query=" + encodeURIComponent(args.query || "") + "&days=" + (args.days || 30))
           .then(function (r) { return r.json(); });
+      // widget runtime tool — 直接调 window.gwWidgets,不走 endpoint(widget 是纯前端概念)
+      case "list_widgets":
+        return Promise.resolve((typeof window !== "undefined" && window.gwWidgets)
+          ? { ok: true, widgets: window.gwWidgets.list() }
+          : { error: "widget runtime 未就绪" });
+      case "set_widget_enabled":
+        if (typeof window !== "undefined" && window.gwWidgets && args.id) {
+          window.gwWidgets.setEnabled(args.id, !!args.enabled);
+          return Promise.resolve({ ok: true, id: args.id, enabled: !!args.enabled });
+        }
+        return Promise.resolve({ error: "widget runtime 未就绪或缺 id" });
       default: return Promise.resolve({ error: "unknown tool: " + name });
     }
   }

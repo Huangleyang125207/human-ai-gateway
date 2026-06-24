@@ -37,6 +37,53 @@
   var TODAY = todayIso();
   var state = { tab: "journal", date: TODAY, days: [], readonly: false, thread: [], filled: 0, undo: null, undoTimer: null, hintTimer: null };
 
+  // ── ⑥ B widget runtime — schema 兼容 PC (manifest 字段同源),runtime 独立 (mobile 自己实现)
+  // 提供 register / mountInto / list / unmount API + slot 概念 (PC manifest.slot 同款)
+  var gwWidgets = (function () {
+    var registry = {};  // id → { manifest, impl, enabled }
+    function register(id, manifest, impl) {
+      registry[id] = { manifest: manifest, impl: impl, enabled: manifest.default_loaded !== false };
+    }
+    function mountInto(container, slot, ctx) {
+      // 按 manifest.slot 过滤 + enabled 状态,顺序 = registry 注册顺序
+      Object.keys(registry).forEach(function (id) {
+        var e = registry[id];
+        if (!e.enabled || e.manifest.slot !== slot) return;
+        try {
+          var node = e.impl.render(ctx || {});
+          if (node) container.appendChild(node);
+        } catch (err) { console.error("widget render fail:", id, err); }
+      });
+    }
+    function list() {
+      return Object.keys(registry).map(function (id) {
+        return { id: id, manifest: registry[id].manifest, enabled: registry[id].enabled };
+      });
+    }
+    function setEnabled(id, on) { if (registry[id]) registry[id].enabled = !!on; }
+    return { register: register, mountInto: mountInto, list: list, setEnabled: setEnabled };
+  })();
+  if (typeof window !== "undefined") window.gwWidgets = gwWidgets;
+
+  // ── 注册核心 widget(schema 字段对齐 PC manifest:name/title/category/slot/script/default_loaded)
+  //    impl.render 是 lazy callback,buildCups/buildTasks function declaration 被 hoist 即可
+  gwWidgets.register("cups", {
+    name: "cups", title: "八杯水", category: "diary-core",
+    slot: "care", script: true, default_loaded: true,
+    data_source: { type: "md-pattern", file: "today.md", note: "顶部喝水勾选数 + setting/cup_image" },
+    mobile_actions: [
+      { id: "tap", label: "勾/取消" }, { id: "longpress", label: "换杯图标" }
+    ],
+  }, { render: function () { return buildCups(); } });
+  gwWidgets.register("tasks", {
+    name: "tasks", title: "今日打卡", category: "diary-core",
+    slot: "care", script: true, default_loaded: true,
+    data_source: { type: "md-pattern", file: "today.md", note: "顶部补剂段 - [x/ ] name 模式 + setting/taskmeta/taskintake/taskimg" },
+    mobile_actions: [
+      { id: "tap", label: "勾/取消" }, { id: "longpress", label: "管理(换图/改 N 粒/历史/删/想要新项)" }
+    ],
+  }, { render: function (ctx) { return buildTasks((ctx && ctx.tasks) || []); } });
+
   // ── 轻提示 ──
   function flash(msg) {
     var t = $("toasts");
@@ -123,10 +170,9 @@
   function renderJournal(j, t) {
     var v = $("journalView"); v.innerHTML = "";
     state.filled = (t && t.water_filled) || 0; // 从当天 md 喝水勾选数恢复八杯水进度
-    // care: 八杯水 + 打卡
+    // care: 八杯水 + 打卡 — 走 widget runtime,buildCups/buildTasks 注册为 widget impl
     var care = el("div", "gw-care");
-    care.appendChild(buildCups());
-    care.appendChild(buildTasks((t && t.tasks) || []));
+    gwWidgets.mountInto(care, "care", { tasks: (t && t.tasks) || [], j: j, t: t });
     v.appendChild(care);
     // 时间线
     var stream = el("div", "gw-stream");
@@ -510,6 +556,8 @@
       case "append_journal_comment": return "给 " + (args.time || "?") + " 加评论";
       case "manage_daily_task": return ((args.action || "add") === "delete" ? "删 " : "加 ") + (args.task_name || "?") + " 打卡";
       case "search_journal": return "搜 \"" + (args.query || "") + "\"";
+      case "list_widgets": return "看当前装的 widget";
+      case "set_widget_enabled": return ((args.enabled ? "启用 " : "停用 ") + (args.id || "?") + " widget");
       default: return name;
     }
   }
