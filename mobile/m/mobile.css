@@ -477,6 +477,11 @@
 .gw-msg.me .gw-bubble { background: var(--warm-2); border-bottom-right-radius: 5px; }
 /* AI 笔迹 = 文楷 */
 .gw-msg.ai .gw-bubble { background: var(--paper); border: 1px solid var(--line); border-bottom-left-radius: 5px; font-family: var(--kai); color: var(--ink-2); }
+/* 错误占位:朱砂边 + 低饱和底,跟成功消息一眼分清。
+   selector 写到 .gw-msg.ai .gw-bubble.err 提 specificity 压过上面 .gw-msg.ai .gw-bubble */
+.gw-msg.err .who { color: #b14a2b; }
+.gw-msg.ai .gw-bubble.err,
+.gw-msg.me .gw-bubble.err { border: 1px solid rgba(177, 74, 43, 0.4); background: rgba(177, 74, 43, 0.04); color: var(--ink-3); font-style: italic; }
 /* @引用卡（拉进对话的条目）*/
 .gw-ref {
   align-self: flex-end; max-width: 86%;

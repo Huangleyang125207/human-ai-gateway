@@ -450,9 +450,9 @@
     state.thread.forEach(function (m) {
       if (m.kind === "ref") { box.appendChild(el("div", "gw-ref", '<div class="rk">' + esc(m.refKind) + '</div><div class="rt">' + esc(m.refText) + '</div>')); return; }
       if (m.kind === "note") { box.appendChild(el("div", "gw-note", '<div class="gw-note-time">' + esc(m.time || "") + '</div><div class="gw-note-body">' + md(m.body) + '</div><div class="gw-note-sig">' + esc(m.sig || "") + '</div>')); return; }
-      var msg = el("div", "gw-msg " + (m.who === "ai" ? "ai" : "me"),
-        '<span class="who">' + (m.who === "ai" ? "Gateway" : "我") + '</span>' +
-        '<div class="gw-bubble' + (m.streaming ? " gw-cursor" : "") + '">' + (m.who === "ai" ? md(m.text) : esc(m.text)) + '</div>');
+      var msg = el("div", "gw-msg " + (m.who === "ai" ? "ai" : "me") + (m.err ? " err" : ""),
+        '<span class="who">' + (m.who === "ai" ? "Gateway" : "我") + (m.err ? " · 失败" : "") + '</span>' +
+        '<div class="gw-bubble' + (m.streaming ? " gw-cursor" : "") + (m.err ? " err" : "") + '">' + (m.who === "ai" ? md(m.text) : esc(m.text)) + '</div>');
       box.appendChild(msg);
     });
     if (grinding) box.appendChild(el("div", "gw-grind", '<span class="gw-grind-stone"></span><span class="gw-grind-text">磨墨中…</span>'));
@@ -474,14 +474,25 @@
             try {
               var ev = JSON.parse(line.slice(5).trim());
               if (ev.type === "delta") { if (!aiMsg) { aiMsg = { kind: "msg", who: "ai", text: "", streaming: true }; state.thread.push(aiMsg); } aiMsg.text += ev.text; renderThread(); }
-              else if (ev.type === "error") { if (!aiMsg) { aiMsg = { kind: "msg", who: "ai", text: "" }; state.thread.push(aiMsg); } aiMsg.text += "（出错：" + ev.text + "）"; }
+              else if (ev.type === "error") {
+                // 错误进 history 占位:err=true 让 saveThread 持久化 + UI 染红;
+                // 下次 sendChat 取 hist 时这条仍 push,AI 看到"(出错: xxx)"知道上轮失败
+                if (!aiMsg) { aiMsg = { kind: "msg", who: "ai", text: "" }; state.thread.push(aiMsg); }
+                aiMsg.text += "（出错：" + ev.text + "）"; aiMsg.err = true; aiMsg.streaming = false;
+                saveThread(); renderThread();
+              }
             } catch (x) {}
           });
           return pump();
         });
       }
       return pump();
-    }).catch(function () { renderThread(); });
+    }).catch(function (e) {
+      // fetch reject(网络断/CORS/超时)进 history 占位,防 AI "失忆":用户问了 A,网络断,
+      // 下次问 B 时 AI 看 history 也知道 A 那轮失败,不会以为 user 没说话过
+      state.thread.push({ kind: "msg", who: "ai", text: "（消息发送失败：" + (e && e.message || "网络异常") + "）", err: true });
+      saveThread(); renderThread();
+    });
   }
 
   // ── 底栏 ──
