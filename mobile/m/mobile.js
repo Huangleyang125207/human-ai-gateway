@@ -61,9 +61,30 @@
       });
     }
     var onChangeCallbacks = [];
+    // 持久化 enable/disable 状态:setting/widget_states 存 {id: enabled} map
+    function loadEnabledStates() {
+      try {
+        var raw = localStorage.getItem("gateway.mobile.setting/widget_states");
+        return raw ? JSON.parse(raw) : {};
+      } catch (e) { return {}; }
+    }
+    function saveEnabledState(id, on) {
+      try {
+        var s = loadEnabledStates();
+        s[id] = !!on;
+        localStorage.setItem("gateway.mobile.setting/widget_states", JSON.stringify(s));
+      } catch (e) {}
+    }
+    function applyPersistedEnabled() {
+      var s = loadEnabledStates();
+      Object.keys(registry).forEach(function (id) {
+        if (s.hasOwnProperty(id)) registry[id].enabled = !!s[id];
+      });
+    }
     function setEnabled(id, on) {
       if (registry[id]) {
         registry[id].enabled = !!on;
+        saveEnabledState(id, on);
         onChangeCallbacks.forEach(function (cb) { try { cb({ id: id, enabled: !!on }); } catch (e) {} });
       }
     }
@@ -103,7 +124,7 @@
       // fresh add → 自动触发 onChange 让 mobile.js 重 render
       if (fresh) onChangeCallbacks.forEach(function (cb) { try { cb({ id: manifest.id, added: true }); } catch (e) {} });
     }
-    return { register: register, mountInto: mountInto, list: list, setEnabled: setEnabled, onChange: onChange, registerDynamic: registerDynamic, unregister: unregister };
+    return { register: register, mountInto: mountInto, list: list, setEnabled: setEnabled, onChange: onChange, registerDynamic: registerDynamic, unregister: unregister, applyPersistedEnabled: applyPersistedEnabled };
   })();
   if (typeof window !== "undefined") window.gwWidgets = gwWidgets;
 
@@ -975,7 +996,12 @@
       ((r && r.widgets) || []).forEach(function (m) {
         try { if (window.gwWidgets && window.gwWidgets.registerDynamic) window.gwWidgets.registerDynamic(m); } catch (e) {}
       });
-    }).catch(function () {}).finally(function () { loadDateband().then(loadDay); });
+    }).catch(function () {}).finally(function () {
+      // ⑥ B Turn 6:动态 widget 注册回 + 核心 widget 都 ready 后,
+      // 把 setting/widget_states 里的 enable/disable 状态 apply 上去
+      try { if (window.gwWidgets && window.gwWidgets.applyPersistedEnabled) window.gwWidgets.applyPersistedEnabled(); } catch (e) {}
+      loadDateband().then(loadDay);
+    });
     // widget enable/disable 自动重 render journal(让 AI 切 widget 状态用户立刻看到)
     if (window.gwWidgets && typeof window.gwWidgets.onChange === "function") {
       window.gwWidgets.onChange(function () { if (state.tab === "journal") loadDay(); });
