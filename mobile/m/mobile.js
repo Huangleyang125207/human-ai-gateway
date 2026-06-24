@@ -97,8 +97,11 @@
   // ── 日记页 ──
   function loadDay() {
     state.readonly = state.date < TODAY;
-    Promise.all([api("/api/journal/today?date=" + state.date), api("/api/daily-tasks?date=" + state.date)])
-      .then(function (rs) { renderJournal(rs[0], rs[1]); });
+    Promise.all([
+      api("/api/journal/today?date=" + state.date),
+      api("/api/daily-tasks?date=" + state.date),
+      api("/api/water-cup"),
+    ]).then(function (rs) { state.cupImg = (rs[2] && rs[2].image_url) || null; renderJournal(rs[0], rs[1]); });
   }
   function renderJournal(j, t) {
     var v = $("journalView"); v.innerHTML = "";
@@ -121,28 +124,55 @@
     v.appendChild(stream);
   }
 
-  // 八杯水(滑动点亮,触点放大;本地态,持久化留后续批次)
+  // 八杯水(滑动点亮 + 长按换杯图;喝水落 md,水杯图落 Preferences 对齐 PC 端)
   function buildCups() {
-    var N = 8, block = el("div", "gw-care-block", '<div class="gw-care-label">八杯水</div>');
+    var N = 8, block = el("div", "gw-care-block", '<div class="gw-care-label">八杯水 <span style="opacity:.55">· 长按换杯</span></div>');
     var row = el("div", "gw-cups");
     var cups = [];
-    for (var i = 0; i < N; i++) { var c = el("div", "gw-cup", '<div class="gw-cup-fill"></div>'); cups.push(c); row.appendChild(c); }
+    var hasImg = !!state.cupImg;
+    for (var i = 0; i < N; i++) {
+      var inner = hasImg ? '<img src="' + state.cupImg + '" alt="" class="gw-cup-img">' : '<div class="gw-cup-fill"></div>';
+      var c = el("div", "gw-cup" + (hasImg ? " with-image" : ""), inner);
+      cups.push(c); row.appendChild(c);
+    }
     var count = el("div", "gw-cups-count");
     function paint(focus) {
       cups.forEach(function (c, i) {
-        c.className = "gw-cup" + (i < state.filled ? " filled" : "") +
+        c.className = "gw-cup" + (hasImg ? " with-image" : "") + (i < state.filled ? " filled" : "") +
           (i === focus ? " cup-focus" : (focus >= 0 && Math.abs(i - focus) === 1 ? " cup-near" : ""));
       });
-      count.innerHTML = "<b>" + state.filled + "</b> / " + N + " 杯 · " + (state.readonly ? "历史日只读" : "滑过杯子点亮");
+      count.innerHTML = "<b>" + state.filled + "</b> / " + N + " 杯 · " + (state.readonly ? "历史日只读" : "滑过杯子点亮 · 长按换杯");
     }
     function idxAt(x) { var best = -1, bd = 1e9; cups.forEach(function (c, i) { var r = c.getBoundingClientRect(); var d = Math.abs(x - (r.left + r.width / 2)); if (d < bd) { bd = d; best = i; } }); return best; }
     function apply(x) { if (state.readonly) return; var i = idxAt(x); if (i < 0) return; var was = state.filled; state.filled = i + 1; paint(i); if (i + 1 > was) cups[i].classList.add("just"); }
-    row.addEventListener("pointerdown", function (e) { if (state.readonly) return; try { row.setPointerCapture(e.pointerId); } catch (x) {} apply(e.clientX); });
-    row.addEventListener("pointermove", function (e) { if (state.readonly || !row.hasPointerCapture || !row.hasPointerCapture(e.pointerId)) return; apply(e.clientX); });
-    row.addEventListener("pointerup", function () {
+    // tap/swipe/longpress 三态:长按 480ms 不动 → 换杯图;一动 → swipe 喝水;tap 释放 → 单杯 commit
+    var st = { sx: 0, sy: 0, mode: null, timer: null, captured: false };
+    function clearT() { if (st.timer) { clearTimeout(st.timer); st.timer = null; } }
+    row.addEventListener("pointerdown", function (e) {
+      if (state.readonly) return;
+      st = { sx: e.clientX, sy: e.clientY, mode: null, timer: null, captured: false };
+      st.timer = setTimeout(function () {
+        if (st.mode === null) { st.mode = "lp"; if (navigator.vibrate) navigator.vibrate(12); pickWaterCupImage(); }
+      }, 480);
+    });
+    row.addEventListener("pointermove", function (e) {
+      if (state.readonly || st.mode === "lp") return;
+      var adx = e.clientX - st.sx, ady = e.clientY - st.sy;
+      if (st.mode === null && (Math.abs(adx) > 8 || Math.abs(ady) > 8)) {
+        clearT(); st.mode = "swipe";
+        try { row.setPointerCapture(e.pointerId); st.captured = true; } catch (x) {}
+      }
+      if (st.mode === "swipe") apply(e.clientX);
+    });
+    row.addEventListener("pointerup", function (e) {
+      clearT();
+      if (st.mode === "lp") { st.mode = null; return; }                  // 长按已 fire,不喝水
+      if (st.mode === null) apply(e.clientX);                            // tap = 单杯 commit
       paint(-1);
       if (!state.readonly) api("/api/daily-tasks/water", { method: "POST", body: JSON.stringify({ date: state.date, filled: state.filled }) });
+      st.mode = null;
     });
+    row.addEventListener("pointercancel", function () { clearT(); st.mode = null; paint(-1); });
     paint(-1);
     block.appendChild(row); block.appendChild(count); return block;
   }
@@ -159,7 +189,8 @@
         '<span class="gw-task-glyph">' + inner + '</span><span class="gw-task-name">' + esc(t.name) + '</span>');
       if (state.readonly) b.disabled = true;
       var lp = null, didLong = false;
-      b.addEventListener("pointerdown", function () { if (state.readonly) return; didLong = false; lp = setTimeout(function () { didLong = true; if (navigator.vibrate) navigator.vibrate(12); pickTaskImage(t); }, 480); });
+      // 长按改弹 action sheet(对齐 PC 右键菜单:换图/改 N 粒/看历史/删除)
+      b.addEventListener("pointerdown", function () { if (state.readonly) return; didLong = false; lp = setTimeout(function () { didLong = true; if (navigator.vibrate) navigator.vibrate(12); openTaskSheet(t); }, 480); });
       ["pointerup", "pointercancel", "pointerleave"].forEach(function (ev) { b.addEventListener(ev, function () { clearTimeout(lp); }); });
       b.addEventListener("click", function () {
         if (state.readonly || didLong) { didLong = false; return; }
@@ -184,6 +215,112 @@
         var p = cut ? cut.cutout({ image: dataUrl }).then(function (r) { return r.png; }).catch(function () { flash("没抠出主体 · 先用原图"); return dataUrl; }) : Promise.resolve(dataUrl);
         p.then(function (png) {
           api("/api/daily-tasks/set-image", { method: "POST", body: JSON.stringify({ task_name: task.name, image: png }) }).then(function () { flash("图标已换 ✦"); loadDay(); });
+        });
+      };
+      rd.readAsDataURL(f);
+    });
+    inp.click();
+  }
+  // 对齐 PC 右键菜单:长按打卡 → 弹 sheet 选 换图 / 改 N 粒 / 看历史 / 删除
+  function openTaskSheet(task) {
+    var layer = $("cardLayer"); layer.innerHTML = "";
+    var scrim = el("div", "gw-scrim");
+    var card = el("div", "gw-card sheet gw-task-sheet", '');
+    function setView(html) { card.innerHTML = html; }
+    function close() { scrim.classList.remove("on"); card.classList.remove("on"); setTimeout(function () { layer.innerHTML = ""; }, 460); }
+
+    function viewMain() {
+      setView(
+        '<div class="gw-card-grip"></div>' +
+        '<div class="gw-card-head"><span class="gw-card-kicker">' + esc(task.name) + '</span><button class="gw-card-x">×</button></div>' +
+        '<div class="gw-ts-list">' +
+          '<button class="gw-ts-row" data-a="img"><span>🖼</span><span class="gw-ts-lab">换图标</span></button>' +
+          '<button class="gw-ts-row" data-a="meta"><span>💊</span><span class="gw-ts-lab">改每天 N 粒 / 瓶装颗数</span></button>' +
+          '<button class="gw-ts-row" data-a="hist"><span>📅</span><span class="gw-ts-lab">看本周完成率</span></button>' +
+          '<button class="gw-ts-row danger" data-a="del"><span>🗑</span><span class="gw-ts-lab">删除这条打卡</span></button>' +
+        '</div>');
+      card.querySelector(".gw-card-x").addEventListener("click", close);
+      card.querySelectorAll(".gw-ts-row").forEach(function (b) {
+        b.addEventListener("click", function () {
+          var a = b.dataset.a;
+          if (a === "img") { close(); pickTaskImage(task); }
+          else if (a === "meta") viewMeta();
+          else if (a === "hist") viewHist();
+          else if (a === "del") viewDel();
+        });
+      });
+    }
+
+    function viewMeta() {
+      var cur_total = task.total_pills || "", cur_dose = task.daily_dose || 1;
+      setView(
+        '<div class="gw-card-grip"></div>' +
+        '<div class="gw-card-head"><button class="gw-ts-back">‹</button><span class="gw-card-kicker">改 ' + esc(task.name) + '</span><button class="gw-card-x">×</button></div>' +
+        '<div class="gw-field"><div class="gw-field-lab">每天吃几粒</div><input type="number" min="1" id="tsDose" value="' + cur_dose + '" class="gw-ts-num"></div>' +
+        '<div class="gw-field"><div class="gw-field-lab">瓶装多少颗(空 = 不追踪剩余)</div><input type="number" min="1" id="tsTotal" placeholder="例 60" value="' + cur_total + '" class="gw-ts-num"></div>' +
+        '<div class="gw-card-foot"><span class="gw-card-hint">MD 是真相 · meta 单独存</span><button class="gw-card-save" id="tsSave">保存</button></div>');
+      card.querySelector(".gw-ts-back").addEventListener("click", viewMain);
+      card.querySelector(".gw-card-x").addEventListener("click", close);
+      card.querySelector("#tsSave").addEventListener("click", function () {
+        var body = { task_name: task.name, daily_dose: parseInt(card.querySelector("#tsDose").value || "1", 10), total_pills: card.querySelector("#tsTotal").value || null };
+        api("/api/daily-tasks/meta", { method: "POST", body: JSON.stringify(body) }).then(function () { close(); flash("已存 · " + body.daily_dose + " 粒/天"); loadDay(); });
+      });
+    }
+
+    function viewHist() {
+      setView(
+        '<div class="gw-card-grip"></div>' +
+        '<div class="gw-card-head"><button class="gw-ts-back">‹</button><span class="gw-card-kicker">' + esc(task.name) + ' · 14 天</span><button class="gw-card-x">×</button></div>' +
+        '<div class="gw-ts-hist" id="tsHist">加载中…</div>');
+      card.querySelector(".gw-ts-back").addEventListener("click", viewMain);
+      card.querySelector(".gw-card-x").addEventListener("click", close);
+      api("/api/daily-tasks/history?days=14&name=" + encodeURIComponent(task.name)).then(function (r) {
+        if (!r || !r.history) { card.querySelector("#tsHist").textContent = "无历史"; return; }
+        var dots = r.history.slice().reverse().map(function (h) {
+          var cls = h.checked === true ? "on" : (h.checked === false ? "miss" : "skip");
+          return '<span class="gw-ts-dot ' + cls + '" title="' + h.date + '"></span>';
+        }).join("");
+        var rate = r.recorded_days ? Math.round(r.checked_days / r.recorded_days * 100) : 0;
+        card.querySelector("#tsHist").innerHTML =
+          '<div class="gw-ts-rate"><b>' + r.checked_days + '</b> / ' + r.recorded_days + ' 天 · ' + rate + '%</div>' +
+          '<div class="gw-ts-dots">' + dots + '</div>' +
+          '<div class="gw-ts-legend">绿 = 打了 · 灰 = 漏 · 空 = 无记录</div>';
+      });
+    }
+
+    function viewDel() {
+      setView(
+        '<div class="gw-card-grip"></div>' +
+        '<div class="gw-card-head"><button class="gw-ts-back">‹</button><span class="gw-card-kicker">删除 ' + esc(task.name) + '?</span><button class="gw-card-x">×</button></div>' +
+        '<div class="gw-ts-warn">这条打卡会从当天 md 顶部彻底删除,图标也会清。历史日的打卡记录不动。</div>' +
+        '<div class="gw-card-foot"><span class="gw-card-hint">点删除 = 立刻执行</span><button class="gw-card-save danger" id="tsDel">确认删除</button></div>');
+      card.querySelector(".gw-ts-back").addEventListener("click", viewMain);
+      card.querySelector(".gw-card-x").addEventListener("click", close);
+      card.querySelector("#tsDel").addEventListener("click", function () {
+        api("/api/daily-tasks/delete", { method: "POST", body: JSON.stringify({ task_name: task.name, date: state.date }) }).then(function () { close(); flash("已删除 · " + task.name); loadDay(); });
+      });
+    }
+
+    layer.appendChild(scrim); layer.appendChild(card);
+    scrim.addEventListener("pointerdown", close);
+    viewMain();
+    requestAnimationFrame(function () { scrim.classList.add("on"); card.classList.add("on"); });
+  }
+
+  // 对齐 PC 端 uploadForCup:选图 → 端侧抠图 → POST /api/water-cup 落 base64 → 8 个杯子都变这张图
+  function pickWaterCupImage() {
+    var inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+    document.body.appendChild(inp);
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; if (inp.parentNode) document.body.removeChild(inp); if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        var dataUrl = rd.result;
+        var cut = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Cutout;
+        if (cut) flash("抠图中…");
+        var p = cut ? cut.cutout({ image: dataUrl }).then(function (r) { return r.png; }).catch(function () { flash("没抠出主体 · 先用原图"); return dataUrl; }) : Promise.resolve(dataUrl);
+        p.then(function (png) {
+          api("/api/water-cup", { method: "POST", body: JSON.stringify({ image: png }) }).then(function () { flash("水杯已换 ✦"); loadDay(); });
         });
       };
       rd.readAsDataURL(f);

@@ -246,6 +246,18 @@
     }
     return lines.join("\n");
   }
+  // 删 task:删顶层项行 + 其下所有缩进子项(对齐 PC 端从补剂段彻底清掉)
+  function removeSupplement(dayMd, name) {
+    var lines = (dayMd || "").split(/\r?\n/), end = suppRegionEnd(lines), out = [], skipChildren = false;
+    for (var i = 0; i < lines.length; i++) {
+      if (i >= end) { out.push(lines[i]); continue; }
+      if (skipChildren) { if (SUPP_SUB.test(lines[i])) continue; skipChildren = false; }
+      var m = SUPP_SUB.test(lines[i]) ? null : SUPP_TOP.exec(lines[i]);
+      if (m && m[4] === name) { skipChildren = true; continue; }   // 删本行 + 触发跳子项
+      out.push(lines[i]);
+    }
+    return out.join("\n");
+  }
   function setWaterFilled(dayMd, filled) { // 喝水子杯 1..8:序号<=filled 勾上;父项 filled>=8 勾上
     var lines = (dayMd || "").split(/\r?\n/), end = suppRegionEnd(lines), inWater = false, idx = 0;
     for (var i = 0; i < end; i++) {
@@ -381,7 +393,13 @@
       return jsonResp({ needs_consent: false, failures: false, heartbeat: false, consented_at: null, client_id: "mobile", silent_failures_local: 0 });
     },
     "GET /api/user-widgets": function () { return jsonResp({ active: [] }); },
-    "GET /api/water-cup": function () { return jsonResp({ image_url: null }); },
+    "GET /api/water-cup": function () {
+      return Store.getSetting("water_cup_img").then(function (img) { return jsonResp({ image_url: img || null }); });
+    },
+    // 同 daily-tasks/set-image:存 base64 dataUrl 到 Preferences,客户端已端侧抠图过
+    "POST /api/water-cup": function (req, u, body) {
+      return Store.setSetting("water_cup_img", (body && body.image) || "").then(function () { return jsonResp({ ok: true }); });
+    },
     "GET /api/journal/tag-stats": function () { return jsonResp({ tags: [] }); },
     // 移动端无 vault 文件漂移概念;返 0 漂移,vault-audit.js 据此不弹横幅
     "GET /api/vault/audit": function () { return jsonResp({ total_drift: 0, image_recoverable: [], image_orphans: [], meta_orphans: [], aggregate_broken_links: [] }); },
@@ -417,8 +435,20 @@
       var date = qsDate(u) || todayIso();
       return Store.readJournalMd(date).then(function (md) {
         var tasks = parseSupplements(md), water = parseWaterFilled(md);
+        // 并发拉 image + meta(对齐 PC 端 task 多带 total_pills/daily_dose)
         return Promise.all(tasks.map(function (t) {
-          return Store.getSetting("taskimg/" + t.name).then(function (img) { t.image_url = img || null; return t; });
+          return Promise.all([
+            Store.getSetting("taskimg/" + t.name),
+            Store.getSetting("taskmeta/" + t.name),
+          ]).then(function (rs) {
+            t.image_url = rs[0] || null;
+            try {
+              var meta = rs[1] ? JSON.parse(rs[1]) : {};
+              if (meta.total_pills) t.total_pills = meta.total_pills;
+              if (meta.daily_dose) t.daily_dose = meta.daily_dose;
+            } catch (e) {}
+            return t;
+          });
         })).then(function (ts) {
           return jsonResp({ tasks: ts, water_filled: water, date: date, is_today: date === todayIso(), is_writable: date >= todayIso() });
         });
@@ -428,6 +458,61 @@
     "POST /api/daily-tasks/set-image": function (req, u, body) {
       if (!(body && body.task_name)) return jsonResp({ ok: false, error: "缺 task_name" });
       return Store.setSetting("taskimg/" + body.task_name, body.image || "").then(function () { return jsonResp({ ok: true }); });
+    },
+    // 改 meta:total_pills(瓶装颗数)/ daily_dose(每天 N 粒),对齐 PC 端 /meta
+    "POST /api/daily-tasks/meta": function (req, u, body) {
+      var name = (body && body.task_name) || "";
+      if (!name) return jsonResp({ ok: false, error: "缺 task_name" }, 400);
+      return Store.getSetting("taskmeta/" + name).then(function (raw) {
+        var meta = {}; try { meta = raw ? JSON.parse(raw) : {}; } catch (e) {}
+        if ("total_pills" in body) {
+          var v = body.total_pills;
+          if (v === null || v === "" || v === 0) delete meta.total_pills;
+          else meta.total_pills = Math.max(1, parseInt(v, 10) || 0);
+        }
+        if ("daily_dose" in body) meta.daily_dose = Math.max(1, parseInt(body.daily_dose, 10) || 1);
+        return Store.setSetting("taskmeta/" + name, JSON.stringify(meta)).then(function () {
+          return jsonResp({ ok: true, task_name: name, total_pills: meta.total_pills || null, daily_dose: meta.daily_dose || 1 });
+        });
+      });
+    },
+    // 删 task:当天 md 补剂段删行 + 清 image + 清 meta(对齐 PC 端 /delete 三清)
+    "POST /api/daily-tasks/delete": function (req, u, body) {
+      var date = (body && body.date) || todayIso();
+      var name = (body && body.task_name) || "";
+      if (!name) return jsonResp({ ok: false, error: "缺 task_name" }, 400);
+      return Store.readJournalMd(date).then(function (md) {
+        var p = [];
+        if (md !== null) p.push(Store.writeJournalMd(date, removeSupplement(md, name)));
+        p.push(Store.remove("setting/taskimg/" + name));
+        p.push(Store.remove("setting/taskmeta/" + name));
+        return Promise.all(p).then(function () { return jsonResp({ ok: true, task_name: name }); });
+      });
+    },
+    // 历史:近 N 天每天是否打勾,对齐 PC 端 /history(query: name + days)
+    "GET /api/daily-tasks/history": function (req, u) {
+      var url = new URL(u, "http://x");
+      var name = url.searchParams.get("name") || "";
+      var days = Math.max(1, Math.min(parseInt(url.searchParams.get("days") || "14", 10), 60));
+      if (!name) return jsonResp({ ok: false, error: "需 name query" }, 400);
+      var today = new Date();
+      var dates = [];
+      for (var i = 0; i < days; i++) {
+        var d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+        dates.push(d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()));
+      }
+      return Promise.all(dates.map(function (dt) {
+        return Store.readJournalMd(dt).then(function (md) {
+          if (md === null) return { date: dt, checked: null };  // 没文件 = 未记录
+          var tasks = parseSupplements(md);
+          var found = tasks.filter(function (t) { return t.name === name; })[0];
+          return { date: dt, checked: found ? found.checked : null };
+        });
+      })).then(function (history) {
+        var checked_days = history.filter(function (h) { return h.checked === true; }).length;
+        var recorded_days = history.filter(function (h) { return h.checked !== null; }).length;
+        return jsonResp({ ok: true, name: name, days: days, history: history, checked_days: checked_days, recorded_days: recorded_days });
+      });
     },
     "POST /api/daily-tasks/check": function (req, u, body) {
       var date = (body && body.date) || todayIso();
