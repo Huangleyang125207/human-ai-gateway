@@ -81,6 +81,16 @@
         return ks.map(function (k) { return k.slice("journal/".length); }).sort();
       });
     },
+    // ⑥ B Turn 5:AI 动态 widget manifest 持久化 setting/widgets/<id>
+    listWidgetManifests: function () {
+      return Backend.keys("setting/widgets/").then(function (ks) {
+        return Promise.all(ks.map(function (k) {
+          return Backend.getText(k).then(function (s) {
+            try { return JSON.parse(s); } catch (e) { return null; }
+          });
+        })).then(function (rs) { return rs.filter(Boolean); });
+      });
+    },
     readDailyTasksMd: function () { return Backend.getText("daily-tasks"); },
     writeDailyTasksMd: function (md) { return Backend.setText("daily-tasks", md); },
     // 5.17 教训:损坏返 sentinel,绝不空 [] 当真覆盖(test_thread_routes corrupt 锁)
@@ -631,6 +641,18 @@
         id: { type: "string", description: "widget id" },
         enabled: { type: "boolean" },
       }, required: ["id", "enabled"] }}},
+    { type: "function", function: { name: "add_widget",
+      description: "动态加一个新 widget(纯展示型,显示 mobile 本机派生数据)。template 是 HTML 字符串可用 {{var}} 插值。可用变量:" +
+        "tasks_done, tasks_total, water_filled, entries_count, date, minutes_to_2130, note_state",
+      parameters: { type: "object", properties: {
+        id: { type: "string", description: "唯一 id" },
+        title: { type: "string" },
+        slot: { type: "string", description: "目前支持 care", enum: ["care"] },
+        template: { type: "string", description: "HTML 模板,如 '<div>今天 {{tasks_done}}/{{tasks_total}} 完成</div>'" },
+      }, required: ["id", "title", "template"] }}},
+    { type: "function", function: { name: "remove_widget",
+      description: "删除一个动态注册的 widget(只能删 AI add 的,不能删核心 cups/tasks/pulse)",
+      parameters: { type: "object", properties: { id: { type: "string" }}, required: ["id"] }}},
   ];
   // tool_name → mobile-api endpoint dispatch
   // 注意:用 window.fetch(shim-hijacked)而不是 realFetch — /api/* 路径要走 shim
@@ -666,6 +688,26 @@
           return Promise.resolve({ ok: true, id: args.id, enabled: !!args.enabled });
         }
         return Promise.resolve({ error: "widget runtime 未就绪或缺 id" });
+      case "add_widget":
+        if (!args.id || !args.template) return Promise.resolve({ error: "缺 id 或 template" });
+        // 核心 widget 名保留,AI 不能覆盖
+        if (["cups", "tasks", "pulse"].indexOf(args.id) >= 0) return Promise.resolve({ error: "id 已被核心 widget 占用" });
+        var manifest = { id: args.id, title: args.title || args.id, slot: args.slot || "care", template: args.template, source: "ai-added" };
+        return Store.setSetting("widgets/" + args.id, JSON.stringify(manifest)).then(function () {
+          if (typeof window !== "undefined" && window.gwWidgets && window.gwWidgets.registerDynamic) {
+            window.gwWidgets.registerDynamic(manifest);
+          }
+          return { ok: true, id: args.id, manifest: manifest };
+        });
+      case "remove_widget":
+        if (!args.id) return Promise.resolve({ error: "缺 id" });
+        if (["cups", "tasks", "pulse"].indexOf(args.id) >= 0) return Promise.resolve({ error: "不能删核心 widget" });
+        return Store.removeSetting("widgets/" + args.id).then(function () {
+          if (typeof window !== "undefined" && window.gwWidgets && window.gwWidgets.unregister) {
+            window.gwWidgets.unregister(args.id);
+          }
+          return { ok: true, id: args.id, removed: true };
+        });
       default: return Promise.resolve({ error: "unknown tool: " + name });
     }
   }
@@ -1076,6 +1118,12 @@
         var blockMd = "# " + h + "：" + mm + "\n\n" + h2 + "\n" + (body.body || "") + "\n\n---\n";
         Store.writeJournalMd(date, (md ? md.replace(/\s*$/, "\n\n") : "") + blockMd);
         return jsonResp({ ok: true, inserted: "# " + h + "：" + mm, file: isoToStem(date) + ".md" });
+      });
+    },
+    // ⑥ B Turn 5:列 AI 动态注册的 widget manifest(从 setting/widgets/* 持久化读)
+    "GET /api/widgets/list": function () {
+      return Store.listWidgetManifests().then(function (manifests) {
+        return jsonResp({ ok: true, widgets: manifests });
       });
     },
     // ③ C 简化版 lazy 纸条 — 用户打开 app 时如果当天 # 21：30 H2 块是占位 ##,

@@ -68,7 +68,42 @@
       }
     }
     function onChange(cb) { if (typeof cb === "function") onChangeCallbacks.push(cb); }
-    return { register: register, mountInto: mountInto, list: list, setEnabled: setEnabled, onChange: onChange };
+    function unregister(id) {
+      if (registry[id]) { delete registry[id]; onChangeCallbacks.forEach(function (cb) { try { cb({ id: id, removed: true }); } catch (e) {} }); }
+    }
+    // AI 动态 add — manifest 含 template HTML 字符串,渲染时插值
+    // 安全限制:只允许预定义变量插值,绝不 eval AI 提供的 JS
+    function registerDynamic(manifest) {
+      var fresh = !registry[manifest.id];
+      register(manifest.id, manifest, {
+        render: function (ctx) {
+          var vars = {
+            tasks_done: (ctx.tasks || []).filter(function (t) { return t.checked; }).length,
+            tasks_total: (ctx.tasks || []).length,
+            water_filled: ctx.water_filled | 0,
+            entries_count: (ctx.j && ctx.j.blocks)
+              ? ctx.j.blocks.reduce(function (a, b) { return a + (b.h2 || []).filter(function (h) { return h && (h.title || (h.body && h.body.trim())); }).length; }, 0) : 0,
+            date: ctx.date || "",
+            note_state: (ctx.j && ctx.j.has_note) ? "已写" : "待写",
+          };
+          var now = new Date();
+          var nowMin = now.getHours() * 60 + now.getMinutes();
+          vars.minutes_to_2130 = Math.max(0, 21 * 60 + 30 - nowMin);
+          // template 插值:{{key}} → 转义后插入(防 XSS)
+          function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+          var html = String(manifest.template || "").replace(/\{\{(\w+)\}\}/g, function (_, k) { return esc(vars[k]); });
+          var block = el("div", "gw-care-block gw-widget-dyn",
+            (manifest.title ? '<div class="gw-care-label">' + esc(manifest.title) + '</div>' : ""));
+          var body = el("div", "gw-widget-body");
+          body.innerHTML = html;
+          block.appendChild(body);
+          return block;
+        }
+      });
+      // fresh add → 自动触发 onChange 让 mobile.js 重 render
+      if (fresh) onChangeCallbacks.forEach(function (cb) { try { cb({ id: manifest.id, added: true }); } catch (e) {} });
+    }
+    return { register: register, mountInto: mountInto, list: list, setEnabled: setEnabled, onChange: onChange, registerDynamic: registerDynamic, unregister: unregister };
   })();
   if (typeof window !== "undefined") window.gwWidgets = gwWidgets;
 
@@ -633,6 +668,8 @@
       case "search_journal": return "搜 \"" + (args.query || "") + "\"";
       case "list_widgets": return "看当前装的 widget";
       case "set_widget_enabled": return ((args.enabled ? "启用 " : "停用 ") + (args.id || "?") + " widget");
+      case "add_widget": return "装新 widget · " + (args.title || args.id || "?");
+      case "remove_widget": return "卸 widget · " + (args.id || "?");
       default: return name;
     }
   }
@@ -933,7 +970,12 @@
 
   function startApp() {
     renderBottom();
-    loadDateband().then(loadDay);
+    // 拉持久化的 AI 动态 widget(setting/widgets/*),注册回 runtime
+    api("/api/widgets/list").then(function (r) {
+      ((r && r.widgets) || []).forEach(function (m) {
+        try { if (window.gwWidgets && window.gwWidgets.registerDynamic) window.gwWidgets.registerDynamic(m); } catch (e) {}
+      });
+    }).catch(function () {}).finally(function () { loadDateband().then(loadDay); });
     // widget enable/disable 自动重 render journal(让 AI 切 widget 状态用户立刻看到)
     if (window.gwWidgets && typeof window.gwWidgets.onChange === "function") {
       window.gwWidgets.onChange(function () { if (state.tab === "journal") loadDay(); });
