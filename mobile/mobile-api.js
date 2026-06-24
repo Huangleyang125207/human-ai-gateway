@@ -326,6 +326,41 @@
     }
     return lines.join("\n");
   }
+  // 复刻桌面 _ensure_md_progress_children:dose>=2 的 task 在父行下挂 N 个子 box,
+  // 前 intake 个 [x] 其余 [ ];父行 intake>=dose 才 [x]。dose<2 直接返(单行够,展开碍眼)。
+  // 幂等:已 in sync → 字节级不动。
+  function setSupplementProgress(dayMd, name, dose, intake) {
+    if ((dose | 0) < 2) return dayMd;
+    var lines = (dayMd || "").split(/\r?\n/);
+    var end = suppRegionEnd(lines);
+    var parentIdx = -1, parentM = null;
+    for (var i = 0; i < end; i++) {
+      if (SUPP_SUB.test(lines[i])) continue;
+      var m = SUPP_TOP.exec(lines[i]);
+      if (m && m[4] === name) { parentIdx = i; parentM = m; break; }
+    }
+    if (parentIdx === -1) return dayMd;
+    var childEnd = parentIdx + 1;
+    while (childEnd < end && /^\s+-\s*\[[ xX]\]/.test(lines[childEnd])) childEnd++;
+    var clamp = Math.max(0, Math.min(intake | 0, dose | 0));
+    var desired = [];
+    for (var k = 1; k <= dose; k++) {
+      desired.push("  - [" + (k <= clamp ? "x" : " ") + "] " + k);
+    }
+    var parentBox = clamp >= dose ? "x" : " ";
+    var newParent = parentM[1] + parentBox + parentM[3] + parentM[4] + (parentM[5] || "");
+    var existingChildren = lines.slice(parentIdx + 1, childEnd);
+    if (lines[parentIdx] === newParent && existingChildren.length === desired.length) {
+      var match = true;
+      for (var j = 0; j < desired.length; j++) {
+        if (existingChildren[j] !== desired[j]) { match = false; break; }
+      }
+      if (match) return dayMd;
+    }
+    return lines.slice(0, parentIdx)
+      .concat([newParent], desired, lines.slice(childEnd))
+      .join("\n");
+  }
   // 删 task:删顶层项行 + 其下所有缩进子项(对齐 PC 端从补剂段彻底清掉)
   function removeSupplement(dayMd, name) {
     var lines = (dayMd || "").split(/\r?\n/), end = suppRegionEnd(lines), out = [], skipChildren = false;
@@ -649,7 +684,12 @@
         }
         var checked = next >= dose;
         if (next === 0) delete log[date]; else log[date] = next;
-        var p = [Store.writeJournalMd(date, setSupplementChecked(md, name, checked))];
+        // dose>=2 走 setSupplementProgress 同步父行 + 子 box(桌面 _ensure_md_progress_children
+        // 真值);dose<2 走 setSupplementChecked 只改顶层(单行够,展开碍眼)
+        var newMd = (dose >= 2)
+          ? setSupplementProgress(md, name, dose, next)
+          : setSupplementChecked(md, name, checked);
+        var p = [Store.writeJournalMd(date, newMd)];
         if (Object.keys(log).length === 0) p.push(Store.removeSetting("taskintake/" + name));
         else p.push(Store.setSetting("taskintake/" + name, JSON.stringify(log)));
         return Promise.all(p).then(function () {
