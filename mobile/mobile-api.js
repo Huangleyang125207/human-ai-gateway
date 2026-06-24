@@ -89,6 +89,7 @@
     writeThread: function (arr) { return Backend.setText("thread", JSON.stringify(arr || [])); },
     getSetting: function (k) { return Backend.getText("setting/" + k); },
     setSetting: function (k, v) { return Backend.setText("setting/" + k, v); },
+    removeSetting: function (k) { return Backend.remove("setting/" + k); },
   };
 
   // ── 工具:日期 ───────────────────────────────────────
@@ -484,8 +485,8 @@
       return Store.readJournalMd(date).then(function (md) {
         var p = [];
         if (md !== null) p.push(Store.writeJournalMd(date, removeSupplement(md, name)));
-        p.push(Store.remove("setting/taskimg/" + name));
-        p.push(Store.remove("setting/taskmeta/" + name));
+        p.push(Store.removeSetting("taskimg/" + name));
+        p.push(Store.removeSetting("taskmeta/" + name));
         return Promise.all(p).then(function () { return jsonResp({ ok: true, task_name: name }); });
       });
     },
