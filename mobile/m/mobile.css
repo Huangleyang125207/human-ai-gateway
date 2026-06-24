@@ -507,24 +507,18 @@
 .gw-note-time { font: 10px var(--sans); color: var(--tan); letter-spacing: 0.18em; margin-bottom: 8px; }
 .gw-note-body { font: 16px/1.95 var(--kai); color: var(--ink); text-wrap: pretty; }
 .gw-note-sig { font: 12px var(--kai); color: var(--ink-3); margin-top: 12px; text-align: right; }
-/* 磨墨等待（AI 处理态）：墨点晕开呼吸 */
+/* AI 在想态：brand/logo-animated.svg 直出(Si-C 共价键 + 电子绕外圈),代替老的磨墨石 */
 .gw-grind {
   display: inline-flex; align-items: center; gap: 12px;
-  padding: 10px 16px; border-radius: 14px;
+  padding: 8px 14px 8px 8px; border-radius: 14px;
   background: rgba(168,110,70,0.06); align-self: flex-start;
 }
-.gw-grind-stone {
-  width: 26px; height: 26px; border-radius: 50%;
-  background: radial-gradient(circle at 50% 42%, var(--ink-3), var(--ink) 72%);
-  position: relative; animation: gw-grind-spin 2.6s linear infinite;
+.gw-grind-logo {
+  width: 32px; height: 32px; border-radius: 50%;
+  mix-blend-mode: multiply; opacity: 0.92;
+  animation: gw-grind-breath 3.2s ease-in-out infinite;
 }
-.gw-grind-stone::after {
-  content: ""; position: absolute; inset: 5px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(251,246,236,0.35), transparent 60%);
-  animation: gw-grind-bleed 2.2s ease-in-out infinite;
-}
-@keyframes gw-grind-spin { to { transform: rotate(360deg); } }
-@keyframes gw-grind-bleed { 0%,100% { opacity: 0.3; transform: scale(0.8); } 50% { opacity: 0.7; transform: scale(1.15); } }
+@keyframes gw-grind-breath { 0%,100% { opacity: 0.78; transform: scale(0.96); } 50% { opacity: 1; transform: scale(1.04); } }
 .gw-grind-text { font: 13px var(--kai); color: var(--ink-3); letter-spacing: 0.04em; }
 .gw-cursor::after { content: "▌"; color: var(--cinnabar); margin-left: 2px; animation: gw-blink 1s steps(2) infinite; }
 @keyframes gw-blink { 0%,50%{opacity:1} 51%,100%{opacity:0} }

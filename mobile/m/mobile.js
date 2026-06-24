@@ -455,7 +455,9 @@
         '<div class="gw-bubble' + (m.streaming ? " gw-cursor" : "") + (m.err ? " err" : "") + '">' + (m.who === "ai" ? md(m.text) : esc(m.text)) + '</div>');
       box.appendChild(msg);
     });
-    if (grinding) box.appendChild(el("div", "gw-grind", '<span class="gw-grind-stone"></span><span class="gw-grind-text">磨墨中…</span>'));
+    // AI 在想动画:brand/logo-animated.svg 是 Si-C 共价键(电子绕外圈 40s 一圈 +
+    // 朱砂键 4s 脉动),设计 brief 的"AI 思考中,日记仍在呼吸"的视觉锚点
+    if (grinding) box.appendChild(el("div", "gw-grind", '<img class="gw-grind-logo" src="../../brand/logo-animated.svg" alt=""><span class="gw-grind-text">AI 在想…</span>'));
     v.appendChild(box);
     var sc = $("scroll"); sc.scrollTop = sc.scrollHeight;
   }
