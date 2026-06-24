@@ -507,6 +507,13 @@
 .gw-note-time { font: 10px var(--sans); color: var(--tan); letter-spacing: 0.18em; margin-bottom: 8px; }
 .gw-note-body { font: 16px/1.95 var(--kai); color: var(--ink); text-wrap: pretty; }
 .gw-note-sig { font: 12px var(--kai); color: var(--ink-3); margin-top: 12px; text-align: right; }
+/* mood widget — 7 emoji 横滑选今天心情(对齐 PC widgets/mood reference) */
+.gw-mood-block {}
+.gw-mood-row { display: flex; gap: 6px; padding: 4px 0; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; }
+.gw-mood-row::-webkit-scrollbar { display: none; }
+.gw-mood-opt { flex: 0 0 auto; width: 38px; height: 38px; appearance: none; background: var(--bg-2); border: 1px solid var(--line); border-radius: 50%; font: 18px var(--sans); cursor: pointer; transition: transform .12s, border-color .12s, background .12s; }
+.gw-mood-opt:active { transform: scale(0.93); }
+.gw-mood-opt.on { background: var(--peach); border-color: var(--peach); transform: scale(1.08); }
 /* mobile pulse widget — 本机派生的"今日状态"汇总,4 cell 横排紧凑 */
 .gw-pulse-mobile {}
 .gw-pulse-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 4px 0; font: 12.5px var(--sans); color: var(--ink-3); }

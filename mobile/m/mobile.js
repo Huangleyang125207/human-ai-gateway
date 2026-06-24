@@ -146,6 +146,35 @@
       { id: "tap", label: "勾/取消" }, { id: "longpress", label: "管理(换图/改 N 粒/历史/删/想要新项)" }
     ],
   }, { render: function (ctx) { return buildTasksPure(ctx || {}); } });
+  // ⑥ B Turn 7 — mood widget(对齐 PC widgets/mood reference,mobile 视口适配)
+  // emoji 选今天心情,落 setting/mood/<date>,默认关让用户 / AI 启用
+  gwWidgets.register("mood", {
+    name: "mood", title: "今天心情", category: "diary-core",
+    slot: "care", script: true, default_loaded: false,
+    data_source: { type: "setting", key: "mood/<date>", note: "本机 mobile-only" },
+    mobile_actions: [{ id: "tap", label: "选 emoji" }],
+  }, { render: function (ctx) { return buildMoodPure(ctx || {}); } });
+  function buildMoodPure(ctx) {
+    var MOODS = ["😴", "🙂", "😐", "😟", "😣", "🤔", "🤩"];
+    var date = ctx.date || "";
+    var key = "gateway.mobile.setting/mood/" + date;
+    var cur = "";
+    try { cur = localStorage.getItem(key) || ""; } catch (e) {}
+    var block = el("div", "gw-care-block gw-mood-block",
+      '<div class="gw-care-label">今天心情 <span style="opacity:.55">· 点一下选</span></div>');
+    var row = el("div", "gw-mood-row");
+    MOODS.forEach(function (m) {
+      var b = el("button", "gw-mood-opt" + (m === cur ? " on" : ""), m);
+      b.addEventListener("click", function () {
+        if (m === cur) { try { localStorage.removeItem(key); } catch (e) {} cur = ""; }
+        else { try { localStorage.setItem(key, m); } catch (e) {} cur = m; }
+        row.querySelectorAll(".gw-mood-opt").forEach(function (x) { x.classList.toggle("on", x.textContent === cur); });
+      });
+      row.appendChild(b);
+    });
+    block.appendChild(row);
+    return block;
+  }
   // mobile pulse widget — 本机状态汇总(对齐桌面 .gw-pulse 镜像但内容是 mobile 本机派生:
   //   今日打卡完成度 + 喝水进度 + 写了多少 entry + 距 21:30 还有多久/纸条状态)
   gwWidgets.register("pulse", {
