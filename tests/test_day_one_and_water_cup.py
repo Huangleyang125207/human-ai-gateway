@@ -146,7 +146,8 @@ def test_workflow_hint_includes_water_cup_path():
     """vision-pre-router workflow hint 字符串必含水杯引导,不然 DeepSeek 又调不动。
     今天 user dogfood 报"DeepSeek 不调 set_water_cup_image" 的根治。
     """
-    src = (ROOT / "server.py").read_text()
+    # workflow hint 6.24 随 chat() 抽到 chat_routes.py;源码级断言读两处合并
+    src = (ROOT / "server.py").read_text() + (ROOT / "chat_routes.py").read_text()
     # 关键字三连击:'水杯' + 'set_water_cup_image' + 触发词列表
     assert "水杯" in src, "源码必有'水杯'字 — 它在 workflow hint 里"
     assert "set_water_cup_image" in src

@@ -111,10 +111,11 @@ def test_upload_image_returns_relative_url():
     """源码级断言:upload 路由所有 return 分支的 url 字段都必须是相对路径。
     避免任何"为了 dev 方便加了 http://localhost:NNNN"的回归。
     """
-    src = (ROOT / "server.py").read_text()
-    # 抓 upload-image 路由的整个函数体到下个 @app 装饰器之前
+    # upload-image 路由 6.24 抽到 chat_routes.py(@router.post);源码级断言跟去那
+    src = (ROOT / "chat_routes.py").read_text()
+    # 抓 upload-image 路由的整个函数体到下个 @router 装饰器(或文件尾)之前
     m = re.search(
-        r'@app\.post\("/api/chat/upload-image"\).*?(?=@app\.)',
+        r'@router\.post\("/api/chat/upload-image"\).*?(?=@router\.|\Z)',
         src, re.DOTALL,
     )
     assert m, "找不到 upload-image 路由"

@@ -17,6 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import chat_routes as cr  # noqa: E402  — moved 后这些符号住 chat_routes(patch-where-used)
 
 # U+FF5C 全角竖线 —— DSML 命名空间的字节,正则脆弱点,测试必须用真字节
 BAR = "｜"
@@ -79,7 +80,7 @@ def test_stream_no_raw_dsml_in_any_delta_split_chunks(monkeypatch):
     # 把 DSML 切成 3 段(marker 被切两半),再来一轮干净收尾
     mid = len(DSML_INVOKE) // 2
     rounds = [["好的我记一下。", DSML_INVOKE[:mid], DSML_INVOKE[mid:]], ["记好了"]]
-    ev = _events(server._stream_final_reply(_StreamClient(rounds), "m", [], set(), {}, []))
+    ev = _events(cr._stream_final_reply(_StreamClient(rounds), "m", [], set(), {}, []))
     deltas = [e["text"] for e in ev if e["type"] == "delta"]
     for t in deltas:
         assert "DSML" not in t and BAR not in t and "<function_calls" not in t
@@ -93,7 +94,7 @@ def test_stream_malformed_dsml_still_no_leak(monkeypatch):
     """畸形 DSML(抠不出 call)→ 仍绝不漏 raw,至少吐清理后的文本。"""
     monkeypatch.setattr(server, "_dispatch_tool", lambda *a: {"ok": True})
     broken = f"前文 <{BAR}{BAR}DSML{BAR}{BAR}tool_calls> 坏的没闭合"
-    ev = _events(server._stream_final_reply(_StreamClient([[broken]]), "m", [], set(), {}, []))
+    ev = _events(cr._stream_final_reply(_StreamClient([[broken]]), "m", [], set(), {}, []))
     for e in ev:
         if e["type"] == "delta":
             assert "DSML" not in e["text"] and BAR not in e["text"]
@@ -102,7 +103,7 @@ def test_stream_malformed_dsml_still_no_leak(monkeypatch):
 # ══ ★ SSE 事件序列契约 ════════════════════════════════════════════════
 
 def test_stream_clean_text_sequence_ping_delta_done():
-    ev = _events(server._stream_final_reply(_StreamClient([["你好", "世界"]]), "gpt-x", [], set(), {}, []))
+    ev = _events(cr._stream_final_reply(_StreamClient([["你好", "世界"]]), "gpt-x", [], set(), {}, []))
     types = [e["type"] for e in ev]
     assert types[0] == "ping"
     assert "delta" in types
@@ -113,7 +114,7 @@ def test_stream_clean_text_sequence_ping_delta_done():
 
 
 def test_stream_reasoning_content_threaded_to_done():
-    ev = _events(server._stream_final_reply(_StreamClient([[("回复", "思考中")]]), "m", [], set(), {}, []))
+    ev = _events(cr._stream_final_reply(_StreamClient([[("回复", "思考中")]]), "m", [], set(), {}, []))
     assert ev[-1].get("reasoning_content") == "思考中"
 
 
@@ -121,7 +122,7 @@ def test_stream_llm_error_emits_error_event_no_done(monkeypatch):
     rung = []
     monkeypatch.setattr(server, "_report_silent_failure",
                         lambda et, *a, **k: rung.append(et))
-    ev = _events(server._stream_final_reply(_StreamClient([["x"]], raise_on=0), "m", [], set(), {}, []))
+    ev = _events(cr._stream_final_reply(_StreamClient([["x"]], raise_on=0), "m", [], set(), {}, []))
     assert ev[-1]["type"] == "error"
     assert not any(e["type"] == "done" for e in ev)
     assert "chat_llm_call_failed" in rung           # 分桶上报
@@ -131,14 +132,14 @@ def test_stream_llm_error_emits_error_event_no_done(monkeypatch):
 
 def test_stream_claim_disclaimer_when_claim_and_no_actions():
     """流式收尾:claim 措辞 + actions 空 → 吐 _CLAIM_DISCLAIMER(跟非流 helper 同一对象)。"""
-    ev = _events(server._stream_final_reply(_StreamClient([["已经记进 17:30 了"]]), "m", [], set(), {}, []))
+    ev = _events(cr._stream_final_reply(_StreamClient([["已经记进 17:30 了"]]), "m", [], set(), {}, []))
     joined = "".join(e["text"] for e in ev if e["type"] == "delta")
-    assert server._CLAIM_DISCLAIMER.strip() in joined
+    assert cr._CLAIM_DISCLAIMER.strip() in joined
 
 
 def test_claim_audit_helper_and_stream_share_disclaimer():
     # helper 版:claim + 空 actions → 加;有 action → 不加
-    assert server._audit_unauthorized_claim("已写入了", []).endswith(server._CLAIM_DISCLAIMER)
+    assert server._audit_unauthorized_claim("已写入了", []).endswith(cr._CLAIM_DISCLAIMER)
     assert server._audit_unauthorized_claim("已写入了", [{"name": "x"}]) == "已写入了"
     assert server._audit_unauthorized_claim("普通回复", []) == "普通回复"
 
@@ -183,7 +184,7 @@ def test_mutable_state_loaded_groups_threads_by_identity(monkeypatch):
             return SimpleNamespace(choices=[SimpleNamespace(message=_NS("", None))])
 
     my_groups = set()
-    ev = _events(server._chat_stream_generator(_Mixed(), "m", [{"role": "user", "content": "记一下"}], my_groups, {}))
+    ev = _events(cr._chat_stream_generator(_Mixed(), "m", [{"role": "user", "content": "记一下"}], my_groups, {}))
     assert "write_journal" in my_groups                 # 传入的同一 set 被真改了
     assert len(set(seen_ids)) == 1                       # 每轮 dispatch 拿的都是同一个 id
     assert ev[-1]["type"] == "done"
@@ -202,7 +203,7 @@ def test_dispatch_wiring_present():
 
 def test_extract_synthetic_tool_calls_byte_level():
     content = f"前 {DSML_INVOKE} 后"
-    stripped, calls = server._extract_synthetic_tool_calls(content)
+    stripped, calls = cr._extract_synthetic_tool_calls(content)
     assert len(calls) == 1
     assert calls[0]["name"] == "check_daily_task"
     assert calls[0]["args"] == {"task_name": "鱼油"}
@@ -211,16 +212,16 @@ def test_extract_synthetic_tool_calls_byte_level():
 
 
 def test_extract_no_dsml_passthrough():
-    assert server._extract_synthetic_tool_calls("普通文本") == ("普通文本", [])
+    assert cr._extract_synthetic_tool_calls("普通文本") == ("普通文本", [])
 
 
 # ══ 纯 helper ═════════════════════════════════════════════════════════
 
 def test_truncate_tool_result():
     short = "x" * 100
-    assert server._truncate_tool_result(short) == short
+    assert cr._truncate_tool_result(short) == short
     big = "y" * 6000
-    out = server._truncate_tool_result(big)
+    out = cr._truncate_tool_result(big)
     assert len(out) < 6000 and "truncated" in out
 
 
@@ -232,7 +233,7 @@ def test_trim_history_drops_orphan_tool_calls():
         {"role": "assistant", "tool_calls": [{"id": "b"}], "content": ""},
         {"role": "tool", "tool_call_id": "b", "content": "short"},
     ]
-    out = server._trim_history_tool_volume(hist, max_tool_chars=100)
+    out = cr._trim_history_tool_volume(hist, max_tool_chars=100)
     # 大 tool 'a' 被丢;留下的任何 assistant 不能带孤儿 tool_call_id 'a'
     ids_in_tool = {m["tool_call_id"] for m in out if m.get("role") == "tool"}
     for m in out:
