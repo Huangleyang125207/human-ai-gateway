@@ -411,7 +411,20 @@
     var hist = (body && body.history) || [], out = [];
     for (var i = 0; i < hist.length; i++) {
       var h = hist[i]; if (!h) continue;
-      var role = h.role === "ai" || h.role === "assistant" ? "assistant" : "user";
+      // ref(用户拉日记 entry 进对话)→ 当 user 上下文,让 AI 知道用户在指什么
+      if (h.kind === "ref") {
+        var label = "[" + (h.refKind || "引用") + "] " + (h.refText || "");
+        out.push({ role: "user", content: label });
+        continue;
+      }
+      // note(21:30 AI 纸条 / 之前留的便签)→ 当 AI 之前发的 assistant 消息
+      if (h.kind === "note") {
+        var nb = (h.body || "").trim();
+        if (nb) out.push({ role: "assistant", content: nb });
+        continue;
+      }
+      // 普通 msg(无 kind 或 kind:'msg')
+      var role = (h.role === "ai" || h.role === "assistant" || h.who === "ai") ? "assistant" : "user";
       var content = typeof h.content === "string" ? h.content : (h.text || "");
       if (content) out.push({ role: role, content: content });
     }
@@ -833,7 +846,36 @@
       if (body && body.dashscope_api_key) p.push(Store.setSetting("dashscope_key", body.dashscope_api_key));
       return Promise.all(p).then(function () { return jsonResp({ ok: true }); });
     },
-    "POST /api/setup/save-partial": function () { return jsonResp({ ok: true }); },
+    // 复刻 test_save_partial_updates_and_clears 契约:body 字段路由到对应 setting,
+    // 空字符串值 → pop 整 key(不是存空串)。允许逐字段改而不带全套 models。
+    "POST /api/setup/save-partial": function (req, u, body) {
+      if (!body) return jsonResp({ ok: true });
+      var p = [];
+      if (Array.isArray(body.models) && body.models[0]) {
+        var k = body.models[0].api_key || body.models[0].apiKey || "";
+        var m = body.models[0].id || body.models[0].model || "";
+        if (k) p.push(Store.setSetting("deepseek_key", k));
+        if (m) p.push(Store.setSetting("deepseek_model", m));
+      }
+      // 单字段:有值 set,空字符串 pop(对齐 test_save_partial)
+      var SINGLES = [
+        ["dashscope_api_key", "dashscope_key"],
+        ["dashscope_base_url", "dashscope_base_url"],
+        ["dashscope_vision_model", "dashscope_vision_model"],
+        ["deepseek_api_key", "deepseek_key"],
+        ["deepseek_base_url", "deepseek_base_url"],
+        ["deepseek_default_model", "deepseek_model"],
+        ["baidu_cutout_api_key", "baidu_cutout_api_key"],
+        ["baidu_cutout_secret_key", "baidu_cutout_secret_key"],
+      ];
+      SINGLES.forEach(function (pair) {
+        var field = pair[0], slot = pair[1];
+        if (field in body) {
+          p.push(body[field] ? Store.setSetting(slot, body[field]) : Store.removeSetting(slot));
+        }
+      });
+      return Promise.all(p).then(function () { return jsonResp({ ok: true }); });
+    },
     // 真机无法在 webview 里 CORS 自测 key,乐观返 ok;真验证发生在第一次聊天
     "POST /api/setup/test": function () { return jsonResp({ ok: true, model: "deepseek-chat" }); },
   };

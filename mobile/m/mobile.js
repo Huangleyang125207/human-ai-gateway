@@ -412,8 +412,14 @@
   }
   function doUndo() {
     if (!state.undo) return; var e = state.undo.e, date = state.undo.date;
-    var tag = (e.h.tags || [])[0] || "";
-    api("/api/journal/insert-block", { method: "POST", body: JSON.stringify({ date: date, time: e.time, tag: tag, title: e.h.title || "", body: e.h.body || "" }) }).then(function () {
+    // critic 推回:旧路径 insert-block 把删的 entry 加到 md 末尾,丢 commits 注解 +
+    // 也跟原占位 ## 块共存(同一时间 # H：MM 出现两次)。改 patch 同位回填:
+    // 把删时留的 "##" 占位 H2 替换成原 H2 + body + commits 三件套。
+    var tags = (e.h.tags || []).map(function (t) { return "#" + t; }).join(" ");
+    var h2 = "## " + tags + (tags && e.h.title ? " " : "") + (e.h.title || "") + " @user";
+    var commits = (e.h.commits || []).join("\n");
+    var new_md = h2 + "\n\n" + (e.h.body || "") + (commits ? "\n\n" + commits : "");
+    api("/api/journal/patch", { method: "POST", body: JSON.stringify({ date: date, time: e.time, new_md: new_md, author: "user" }) }).then(function () {
       state.undo = null; clearTimeout(state.undoTimer);
       var u = $("toasts").querySelector(".gw-undo"); if (u) u.remove();
       if (date === state.date) loadDay();
