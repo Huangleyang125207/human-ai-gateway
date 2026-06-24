@@ -13,6 +13,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import web_tools  # noqa: E402
+
+# patch 目标:_do_web_search 住在 web_tools,内部 lookup 走 web_tools namespace
+# (search 后端函数 patch web_tools);_report_silent_failure 是函数体内 lazy
+# `from server import _report_silent_failure` → 每次调用读 server 当前态,
+# 测试 patch server 即可生效。
 
 
 def test_360_lxml_crash_degrades_to_bailian_not_escape(monkeypatch):
@@ -22,8 +28,8 @@ def test_360_lxml_crash_degrades_to_bailian_not_escape(monkeypatch):
     # 模拟生产真症状:_360_search 顶部 import lxml 崩
     def boom(*a, **k):
         raise ModuleNotFoundError("No module named 'lxml'")
-    monkeypatch.setattr(server, "_360_search", boom)
-    monkeypatch.setattr(server, "_bailian_web_search", lambda q: "百炼真结果")
+    monkeypatch.setattr(web_tools, "_360_search", boom)
+    monkeypatch.setattr(web_tools, "_bailian_web_search", lambda q: "百炼真结果")
     # 不该抛异常,且降级到百炼
     out = server._do_web_search("test query", 3, "general")
     assert out == "百炼真结果", "360 崩应降级到百炼,而不是把异常抛给 tool"
@@ -32,11 +38,11 @@ def test_360_lxml_crash_degrades_to_bailian_not_escape(monkeypatch):
 
 def test_360_and_bailian_both_fail_falls_to_ddgs(monkeypatch):
     monkeypatch.setattr(server, "_report_silent_failure", lambda *a, **k: None)
-    monkeypatch.setattr(server, "_360_search",
+    monkeypatch.setattr(web_tools, "_360_search",
                         lambda *a, **k: (_ for _ in ()).throw(ModuleNotFoundError("lxml")))
-    monkeypatch.setattr(server, "_bailian_web_search",
+    monkeypatch.setattr(web_tools, "_bailian_web_search",
                         lambda q: (_ for _ in ()).throw(RuntimeError("no key")))
-    monkeypatch.setattr(server, "_ddgs_search", lambda q, n: "[ddgs 兜底结果]")
+    monkeypatch.setattr(web_tools, "_ddgs_search", lambda q, n: "[ddgs 兜底结果]")
     out = server._do_web_search("q", 3, "general")
     assert out == "[ddgs 兜底结果]", "360+百炼都崩应落到 ddgs,全程不抛"
 
@@ -45,7 +51,7 @@ def test_wechat_lxml_crash_returns_clean_not_escape(monkeypatch):
     reported = []
     monkeypatch.setattr(server, "_report_silent_failure",
                         lambda et, msg="", context=None: reported.append(et))
-    monkeypatch.setattr(server, "_sogou_wechat_search",
+    monkeypatch.setattr(web_tools, "_sogou_wechat_search",
                         lambda *a, **k: (_ for _ in ()).throw(ModuleNotFoundError("lxml")))
     out = server._do_web_search("q", 3, "wechat")
     assert out.startswith("[公众号搜索暂不可用"), "wechat 崩应返干净提示,不抛异常"
