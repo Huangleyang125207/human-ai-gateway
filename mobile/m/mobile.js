@@ -458,6 +458,16 @@
     state.thread.forEach(function (m) {
       if (m.kind === "ref") { box.appendChild(el("div", "gw-ref", '<div class="rk">' + esc(m.refKind) + '</div><div class="rt">' + esc(m.refText) + '</div>')); return; }
       if (m.kind === "note") { box.appendChild(el("div", "gw-note", '<div class="gw-note-time">' + esc(m.time || "") + '</div><div class="gw-note-body">' + md(m.body) + '</div><div class="gw-note-sig">' + esc(m.sig || "") + '</div>')); return; }
+      // tool_call chip:AI 在 mobile 端调 tool,自然句显示不让用户看 raw JSON
+      if (m.kind === "tool") {
+        var label = toolLabel(m.name, m.args);
+        var stateCls = m.state === "ok" ? "ok" : (m.state === "fail" ? "fail" : "doing");
+        var icon = m.state === "ok" ? "✓" : (m.state === "fail" ? "✗" : "·");
+        box.appendChild(el("div", "gw-tool " + stateCls,
+          '<span class="gw-tool-ico">' + icon + '</span>' +
+          '<span class="gw-tool-lab">' + esc(label) + '</span>'));
+        return;
+      }
       var msg = el("div", "gw-msg " + (m.who === "ai" ? "ai" : "me") + (m.err ? " err" : ""),
         '<span class="who">' + (m.who === "ai" ? "Gateway" : "我") + (m.err ? " · 失败" : "") + '</span>' +
         '<div class="gw-bubble' + (m.streaming ? " gw-cursor" : "") + (m.err ? " err" : "") + '">' + (m.who === "ai" ? md(m.text) : esc(m.text)) + '</div>');
@@ -468,6 +478,20 @@
     if (grinding) box.appendChild(el("div", "gw-grind", '<img class="gw-grind-logo" src="../../brand/logo-animated.svg" alt=""><span class="gw-grind-text">AI 在想…</span>'));
     v.appendChild(box);
     var sc = $("scroll"); sc.scrollTop = sc.scrollHeight;
+  }
+  // tool_call.name + args → 自然句翻译,不让用户看 raw JSON
+  function toolLabel(name, args) {
+    args = args || {};
+    switch (name) {
+      case "patch_journal_block": return "改 " + (args.time || "?") + " 那条";
+      case "insert_journal_block": return "加 " + (args.time || "?") + (args.title ? " · " + args.title : "");
+      case "check_daily_task": return "打 " + (args.task_name || "?") + " 卡";
+      case "set_daily_task_meta": return "改 " + (args.task_name || "?") + " 的设置";
+      case "read_today_schedule": return "看今天日记";
+      case "list_recent_days": return "看最近 " + (args.n || 7) + " 天";
+      case "set_water_cup_image": return "换喝水图标";
+      default: return name;
+    }
   }
   function sendChat(text) {
     // ⑥ F 隐式信号:扫词后再发,不阻塞 chat 流程(emitSignal 自身 fire-and-forget)
@@ -486,6 +510,26 @@
             try {
               var ev = JSON.parse(line.slice(5).trim());
               if (ev.type === "delta") { if (!aiMsg) { aiMsg = { kind: "msg", who: "ai", text: "", streaming: true }; state.thread.push(aiMsg); } aiMsg.text += ev.text; renderThread(); }
+              else if (ev.type === "tool_call") {
+                // AI 在调 tool,push 一个 doing 状态的 chip,等 tool_result 来更新
+                state.thread.push({ kind: "tool", id: ev.id, name: ev.name, args: ev.args, state: "doing" });
+                renderThread();
+              }
+              else if (ev.type === "tool_result") {
+                // 找之前 push 的 tool chip 更新 state
+                for (var ti = state.thread.length - 1; ti >= 0; ti--) {
+                  var t = state.thread[ti];
+                  if (t.kind === "tool" && t.id === ev.id) {
+                    t.state = ev.ok ? "ok" : "fail";
+                    t.result = ev.result;
+                    if (ev.error) t.error = ev.error;
+                    break;
+                  }
+                }
+                renderThread();
+                // tool 改了 mobile vault → loadDay 让日记页重读
+                if (ev.ok) try { loadDay(); } catch (e) {}
+              }
               else if (ev.type === "error") {
                 // 错误进 history 占位:err=true 让 saveThread 持久化 + UI 染红;
                 // 下次 sendChat 取 hist 时这条仍 push,AI 看到"(出错: xxx)"知道上轮失败

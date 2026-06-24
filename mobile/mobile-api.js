@@ -527,24 +527,138 @@
     }
     return out;
   }
+  // ── Tool calling — Group A 7 个 mobile 本机 endpoint 对应 tool ──
+  // OpenAI-compatible function calling spec(DeepSeek 同协议)
+  var TOOL_SPECS = [
+    { type: "function", function: { name: "patch_journal_block", description: "改某个时间块的内容,替换 H2 + body 一段。改标题时传 allow_h2_rename:true",
+      parameters: { type: "object", properties: {
+        date: { type: "string", description: "yyyy-mm-dd,不传默认今天" },
+        time: { type: "string", description: "时间块,如 '14:00'" },
+        new_md: { type: "string", description: "新内容,从 ## H2 行开始" },
+        allow_h2_rename: { type: "boolean", description: "改 H2 标题时传 true,否则会被 guard 拒" },
+      }, required: ["time", "new_md"] }}},
+    { type: "function", function: { name: "insert_journal_block", description: "在指定时间块**插入新条目**(写在空 H2 占位上)。已有 entry 用 patch",
+      parameters: { type: "object", properties: {
+        date: { type: "string" }, time: { type: "string" }, tag: { type: "string" }, title: { type: "string" }, body: { type: "string" },
+      }, required: ["time"] }}},
+    { type: "function", function: { name: "check_daily_task", description: "打卡(吃药/补剂)。优先级 intake > increment > checked > toggle",
+      parameters: { type: "object", properties: {
+        task_name: { type: "string" }, date: { type: "string" },
+        intake: { type: "integer", description: "今天吃了几粒(优先级最高)" },
+        increment: { type: "integer", description: "增量,如 +1" },
+        checked: { type: "boolean", description: "直接勾/取消" },
+      }, required: ["task_name"] }}},
+    { type: "function", function: { name: "set_daily_task_meta", description: "改打卡 meta(每天 N 粒/瓶装颗数)",
+      parameters: { type: "object", properties: {
+        task_name: { type: "string" }, daily_dose: { type: "integer" }, total_pills: { type: "integer" },
+      }, required: ["task_name"] }}},
+    { type: "function", function: { name: "read_today_schedule", description: "读今天的 schedule md 原文",
+      parameters: { type: "object", properties: { date: { type: "string" } }}}},
+    { type: "function", function: { name: "list_recent_days", description: "列最近几天的 schedule 文件名",
+      parameters: { type: "object", properties: { n: { type: "integer", description: "几天,默认 7" } }}}},
+    { type: "function", function: { name: "set_water_cup_image", description: "换喝水图标",
+      parameters: { type: "object", properties: { image: { type: "string", description: "png base64 dataURL" } }, required: ["image"] }}},
+  ];
+  // tool_name → mobile-api endpoint dispatch
+  // 注意:用 window.fetch(shim-hijacked)而不是 realFetch — /api/* 路径要走 shim
+  // 路由到本机 handler,realFetch 是绕开 shim 调外部 URL 用的(DeepSeek 等)
+  function dispatchTool(name, args) {
+    args = args || {};
+    var fch = (typeof window !== "undefined") ? window.fetch : realFetch;
+    var H = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(args) };
+    switch (name) {
+      case "patch_journal_block": return fch("/api/journal/patch", H).then(function (r) { return r.json(); });
+      case "insert_journal_block": return fch("/api/journal/insert-block", H).then(function (r) { return r.json(); });
+      case "check_daily_task": return fch("/api/daily-tasks/check", H).then(function (r) { return r.json(); });
+      case "set_daily_task_meta": return fch("/api/daily-tasks/meta", H).then(function (r) { return r.json(); });
+      case "read_today_schedule": return fch("/api/journal/today" + (args.date ? "?date=" + encodeURIComponent(args.date) : "")).then(function (r) { return r.json(); });
+      case "list_recent_days": return fch("/api/journal/days?n=" + (args.n || 7)).then(function (r) { return r.json(); });
+      case "set_water_cup_image": return fch("/api/water-cup", H).then(function (r) { return r.json(); });
+      default: return Promise.resolve({ error: "unknown tool: " + name });
+    }
+  }
+  // expose for tests + future overrides
+  if (typeof window !== "undefined") { window.__gwTool = { specs: TOOL_SPECS, dispatch: dispatchTool }; }
+
   function pickReply(d) { return d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content; }
+  // 多轮 tool 调用 loop:DeepSeek 返 tool_calls → dispatch → result push 回 → 再调,
+  // 直到无 tool_calls 或达 maxRounds 上限(防 infinite loop)。
+  // 最后一轮 force-no-tool(不传 tools)防 AI 永远在调用 tool 不出回应。
   function chatViaDeepseek(body, key, model) {
     return Store.readJournalMd(todayIso()).then(function (todayMd) {
-      var sys = "你是用户的日记协作 AI,语气温和、像深夜台灯下说话。这是今天的日记:\n\n" + (todayMd || "(今天还没写)");
+      var sys = "你是用户的日记协作 AI,语气温和、像深夜台灯下说话。\n\n" +
+        "这是今天的日记:\n\n" + (todayMd || "(今天还没写)") +
+        "\n\n你有以下工具可用 — 改日记/打卡/换图标时调对应 tool;只聊天回应不调 tool。";
       var messages = [{ role: "system", content: sys }].concat(histToMsgs(body), [{ role: "user", content: (body && body.message) || "" }]);
-      var payload = { model: model || "deepseek-chat", messages: messages, stream: false };
+      var events = [];
+      var maxRounds = 5;
       var url = "https://api.deepseek.com/v1/chat/completions";
       var headers = { "Content-Type": "application/json", Authorization: "Bearer " + key };
       var CapHttp = _cap && _cap.CapacitorHttp;
-      if (CapHttp) {
-        return CapHttp.post({ url: url, headers: headers, data: payload })
-          .then(function (res) { return sseResp([{ type: "delta", text: pickReply(res && res.data) || "(空回复)" }, { type: "done", actions: [], model_id: model || "deepseek" }]); })
-          .catch(function (e) { return sseResp([{ type: "error", text: "DeepSeek 调用失败:" + e }, { type: "done", actions: [], model_id: model || "deepseek" }]); });
+
+      function callRound(round) {
+        if (round >= maxRounds) {
+          events.push({ type: "error", text: "已达最大工具调用轮数 (" + maxRounds + "),停止" });
+          events.push({ type: "done", actions: [], model_id: model || "deepseek" });
+          return Promise.resolve(events);
+        }
+        var lastRound = round === maxRounds - 1;
+        var payload = { model: model || "deepseek-chat", messages: messages, stream: false };
+        if (!lastRound) { payload.tools = TOOL_SPECS; payload.tool_choice = "auto"; }
+        var fetchPromise;
+        if (CapHttp) {
+          fetchPromise = CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 90, readTimeout: 90 })
+            .then(function (res) { return res && res.data; });
+        } else {
+          var abortCtrl = (typeof AbortController === "function") ? new AbortController() : null;
+          var timer = abortCtrl ? setTimeout(function () { abortCtrl.abort(); }, 90000) : null;
+          fetchPromise = realFetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload), signal: abortCtrl && abortCtrl.signal })
+            .then(function (r) { if (timer) clearTimeout(timer); return r.json(); });
+        }
+        return fetchPromise.then(function (d) {
+          var msg = d && d.choices && d.choices[0] && d.choices[0].message;
+          if (!msg) {
+            events.push({ type: "error", text: "DeepSeek 返空" });
+            events.push({ type: "done", actions: [], model_id: model || "deepseek" });
+            return events;
+          }
+          var toolCalls = msg.tool_calls;
+          if (toolCalls && toolCalls.length) {
+            messages.push(msg);  // assistant + tool_calls,下一轮必须保留
+            var ps = toolCalls.map(function (tc) {
+              var name = tc.function && tc.function.name;
+              var args = {};
+              try { args = JSON.parse(tc.function.arguments || "{}"); } catch (e) {}
+              events.push({ type: "tool_call", id: tc.id, name: name, args: args });
+              return dispatchTool(name, args).then(function (result) {
+                events.push({ type: "tool_result", id: tc.id, name: name, ok: !(result && result.error), result: result });
+                messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(result || {}) });
+              }).catch(function (err) {
+                var e = String(err && err.message || err);
+                events.push({ type: "tool_result", id: tc.id, name: name, ok: false, error: e });
+                messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify({ error: e }) });
+              });
+            });
+            return Promise.all(ps).then(function () { return callRound(round + 1); });
+          }
+          // 无 tool_calls = 终态
+          events.push({ type: "delta", text: msg.content || "(空回复)" });
+          events.push({ type: "done", actions: [], model_id: model || "deepseek" });
+          return events;
+        }).catch(function (err) {
+          var emsg = String(err && err.message || err);
+          if (emsg.indexOf("Failed to fetch") >= 0 || emsg.indexOf("CORS") >= 0) {
+            events.push({ type: "delta", text: "（浏览器直连 DeepSeek 受 CORS 限制 —— 真机经原生 HTTP 桥即可正常聊。）" });
+          } else if (emsg.indexOf("abort") >= 0 || emsg.indexOf("timeout") >= 0) {
+            events.push({ type: "error", text: "DeepSeek 超时(>90s),请重试" });
+          } else {
+            events.push({ type: "error", text: "DeepSeek 调用失败:" + emsg });
+          }
+          events.push({ type: "done", actions: [], model_id: model || "deepseek" });
+          return events;
+        });
       }
-      return realFetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload) })
-        .then(function (r) { return r.json(); })
-        .then(function (d) { return sseResp([{ type: "delta", text: pickReply(d) || "(空回复)" }, { type: "done", actions: [], model_id: model || "deepseek" }]); })
-        .catch(function () { return sseResp([{ type: "delta", text: "（浏览器直连 DeepSeek 受 CORS 限制 —— 真机经原生 HTTP 桥即可正常聊。）" }, { type: "done", actions: [], model_id: model || "deepseek" }]); });
+      return callRound(0).then(function (all) { return sseResp(all); });
     });
   }
 
@@ -1004,7 +1118,15 @@
   }
 
   // ── fetch 劫持 ───────────────────────────────────────
-  var realFetch = window.fetch.bind(window);
+  // realFetch = 启动时 cache 的原 window.fetch,绕开 shim 自身 /api/* 路由
+  // 加一层 wrapper 允许测试时 window.__gwFetchOverride hijack(生产无影响)
+  var _origFetch = window.fetch.bind(window);
+  function realFetch(input, init) {
+    if (typeof window !== "undefined" && typeof window.__gwFetchOverride === "function") {
+      return window.__gwFetchOverride(input, init);
+    }
+    return _origFetch(input, init);
+  }
 
   window.fetch = function (input, init) {
     var url = typeof input === "string" ? input : (input && input.url) || "";

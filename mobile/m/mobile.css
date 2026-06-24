@@ -507,6 +507,21 @@
 .gw-note-time { font: 10px var(--sans); color: var(--tan); letter-spacing: 0.18em; margin-bottom: 8px; }
 .gw-note-body { font: 16px/1.95 var(--kai); color: var(--ink); text-wrap: pretty; }
 .gw-note-sig { font: 12px var(--kai); color: var(--ink-3); margin-top: 12px; text-align: right; }
+/* AI 调 tool 的自然句 chip — 不显示 raw JSON,只让用户看到 "AI 在改 14:00 那条" 这种 */
+.gw-tool {
+  display: inline-flex; align-items: center; gap: 8px;
+  align-self: flex-start; max-width: 86%;
+  padding: 7px 12px; border-radius: 999px;
+  background: rgba(168,110,70,0.06); border: 1px solid var(--line);
+  font: 12.5px var(--sans); color: var(--ink-3);
+  margin: 2px 0;
+}
+.gw-tool-ico { font: 600 12px var(--sans); opacity: 0.7; }
+.gw-tool.doing { animation: gw-tool-pulse 1.6s ease-in-out infinite; }
+.gw-tool.ok .gw-tool-ico { color: #4a7a4a; opacity: 1; }
+.gw-tool.fail { background: rgba(177,74,43,0.05); border-color: rgba(177,74,43,0.3); color: #b14a2b; }
+.gw-tool.fail .gw-tool-ico { color: #b14a2b; opacity: 1; }
+@keyframes gw-tool-pulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
 /* AI 在想态：brand/logo-animated.svg 直出(Si-C 共价键 + 电子绕外圈),代替老的磨墨石 */
 .gw-grind {
   display: inline-flex; align-items: center; gap: 12px;
