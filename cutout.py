@@ -19,6 +19,7 @@ import base64
 import io
 import json
 import logging
+import re
 from pathlib import Path
 
 import requests
@@ -232,3 +233,84 @@ def baidu_cutout_image(file_path: Path | str, api_key: str, secret_key: str) -> 
                       f"{type(e).__name__}: {str(e)[:80]}",
                       context={"network_marker": "baidu_cutout_post_failed"})
         return None
+
+
+# ── dispatcher 层 ─ 从 server.py 抽出(行为零变化) ──────────────────
+# 上层 attachment URL → 缓存 → 端侧抠图链(macOS Subject Lift / rembg)→ 百度兜底 → 原图。
+# 跟 server.py 解耦:外部依赖(ATTACHMENTS_DIR/load_config)走函数体内 lazy import 避循环;
+# silent-failure 走本模块的 _emit_failure(server 启动时已注入 sink)。
+
+
+def _cutout_keys(cfg: dict) -> tuple:
+    """抠图用 baidu_cutout_* key,fallback 到 baidu_ocr_*(若没单独配)。
+    OCR 跟抠图建议用不同 app(权限要求不同),但单 app 包全也行。
+    """
+    api = cfg.get("baidu_cutout_api_key") or cfg.get("baidu_ocr_api_key", "")
+    sec = cfg.get("baidu_cutout_secret_key") or cfg.get("baidu_ocr_secret_key", "")
+    return api, sec
+
+
+def _get_or_create_processed_attachment(attachment_url: str, cutout: bool = True):
+    """统一图像处理路径。
+    cutout=True(默认): 端侧优先 — macOS Subject Lift / rembg → 百度兜底 → 原图
+    cutout=False: 直接返原图路径(不抠)。
+    抠图全失败时 silent fallback 原图,不抛错 — UX 不能因为抠图挂掉整个上传链路。
+    返 (Path, None) 成功,(None, error_msg) 失败。
+    """
+    from server import ATTACHMENTS_DIR, load_config
+    m = re.match(r"^/attachments/([^/]+)/([^/]+)$", (attachment_url or "").strip())
+    if not m:
+        return None, f"bad attachment_url: {attachment_url}"
+    src = ATTACHMENTS_DIR / m.group(1) / m.group(2)
+    if not src.exists():
+        return None, f"attachment not found: {attachment_url}"
+    if not cutout:
+        return src, None
+
+    cached = src.with_suffix(src.suffix + ".cutout.png")
+    if cached.exists() and cached.stat().st_size > 0:
+        return cached, None
+
+    # 1) 端侧:macOS Subject Lift → rembg(跨平台 ONNX)— 不联网,无 quota
+    #    端侧出来的 PNG 是原 aspect ratio,过 normalize_subject_frame 才能跟百度路径
+    #    一样:主体居中 1024 方形,视觉长边统一。少这一步 → 瘦长瓶 / 矮胖罐显示大小不一致
+    #    (5.28 南非醉茄实测的 bug)。
+    local_failed = False
+    try:
+        from cutout_local import cutout_local
+        png = cutout_local(src)
+        if png:
+            cached.write_bytes(normalize_subject_frame(png))
+            return cached, None
+        local_failed = True  # cutout_local 返 None — 端侧链没出货
+    except Exception as e:
+        local_failed = True
+        log.warning(f"local cutout chain failed: {e}")
+        _emit_failure("cutout_local_exception",
+                      f"{type(e).__name__}: {str(e)[:120]}")
+
+    # 2) 兜底:百度抠图(用户配了 key 才走;无 key 静默放原图)
+    #    baidu_cutout_image 内部已调 normalize_subject_frame,这里不需要再过。
+    cfg = load_config() or {}
+    api_key, sec = _cutout_keys(cfg)
+    has_cutout_key = bool(api_key and sec and not api_key.startswith("YOUR_") and not sec.startswith("YOUR_"))
+    if has_cutout_key:
+        png = baidu_cutout_image(src, api_key, sec)
+        if png:
+            # 端侧挂了用百度兜上 — 单独记一类,看 N 个用户里百度承担多少
+            if local_failed:
+                _emit_failure("cutout_local_failed_baidu_saved",
+                              "端侧链没出货,百度兜底成功",
+                              context={"file_size_kb": src.stat().st_size // 1024})
+            cached.write_bytes(png)
+            return cached, None
+
+    # 3) 全失败 → 原图(不报错,日记还是能用)
+    # 用户视觉上得到的是没抠图的原图,但 UX 不报错。这是典型 silent degrade。
+    _emit_failure("cutout_all_failed_fallback_original",
+                  "端侧 + 百度都没出货,落原图",
+                  context={
+                      "has_cutout_key": has_cutout_key,
+                      "file_size_kb": src.stat().st_size // 1024,
+                  })
+    return src, None
