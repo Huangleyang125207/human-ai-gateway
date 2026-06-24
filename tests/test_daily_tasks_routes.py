@@ -42,6 +42,9 @@ def dt(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "SCHEDULE_TEMPLATE_PATH", template)
     monkeypatch.setattr(server, "DAILY_TASKS_SOURCE", template, raising=False)
     monkeypatch.setattr(server, "PLATFORM_ROOT", tmp_path, raising=False)
+    # 隔离 _audit_vault 的聚合页扫描 → 绝不碰真 vault
+    monkeypatch.setattr(server, "VAULT_DIR", tmp_path, raising=False)
+    monkeypatch.setattr(server, "TAG_AGGREGATE_PATH", tmp_path / "标签聚合.md", raising=False)
     # 不碰真 git
     monkeypatch.setattr(server.vault_git, "commit_after_write", lambda *a, **k: None)
 
@@ -298,3 +301,126 @@ def test_llm_tool_check_stays_wired(client, dt):
     assert out["task_name"] == "鱼油（Swisse）"
     assert out.get("resolved_from") == "鱼油"
     assert "- [x] 鱼油（Swisse）" in dt.read_day_md()
+
+
+# ══ P0+ adversarial 补 gap(workflow wuycgxt7s)══════════════════════════
+# 这些守的是 *抽出本身* 的失败模式:静默数据损坏 + 误移"必须留 server"的 helper。
+# 9 条 base 只喂良构 map,永远不会 RED → 抓不到这些。
+
+# ── T10 [critical]: 损坏 meta 加载必响铃(不静默 {} 覆盖)★Cannot-break ──
+
+def test_corrupt_meta_rings_silent_failure_not_silent_clobber(client, dt, monkeypatch):
+    """intake_log 不可再生:parse 失败必 _report_silent_failure,且 rotate 留 bak。
+    抽出后 _load_task_meta_map / _report_silent_failure / rotate 都须 lazy resolve 回 server;
+    botched cut(裸 return {} / 丢 rotate / sink 没接)→ 此测试 RED 而 9 条 GREEN。
+    _report_silent_failure 默认 consent off 会 early-return → 必须 spy,不能读 jsonl。"""
+    rung = []
+    monkeypatch.setattr(server, "_report_silent_failure",
+                        lambda et, msg="", context=None: rung.append((et, msg, context)))
+    dt.write_day(["维生素D"])
+    dt.meta_map.write_text('{"鱼油":{ , BROKEN', encoding="utf-8")  # 外部损坏(模拟 Obsidian/手改)
+
+    r = client.post("/api/daily-tasks/check", json={"task_name": "维生素D", "checked": True})
+    assert r.status_code == 200
+    assert any(et == "task_meta_map_parse_failed" for et, _, _ in rung)  # 铃响了
+    # rotate 留下了 bak(原子写三件套在抽出后仍生效);live 文件现为良构(记录了 clobber)
+    assert (dt.meta_map.parent / (dt.meta_map.name + ".bak.1")).exists()
+    assert "维生素D" in dt.read_meta()
+
+
+# ── T11 [critical]: vault audit/repair 仍共享同一 io-map(#1 误移 tripwire)──
+
+def test_vault_audit_reads_daily_task_iomaps(client, dt):
+    """_audit_vault 读 _load_task_image_map / _load_task_meta_map —— 它们必须留 server。
+    误移进 daily_tasks_routes(只 re-export 给 route)→ audit 读空/NameError,静默报 0 drift。"""
+    dt.write_images({"鱼油": "data/daily-task-images/missing.png"})  # 文件不存在 + 无同名兜底
+    dt.write_meta({"幽灵": {"intake_log": {"2026-06-20": 1}}})       # 无 md 行 → orphan
+    # 不建 template/today → active_names 空 → 幽灵 是 meta orphan
+
+    d = client.get("/api/vault/audit").json()
+    assert any(o["task"] == "鱼油" for o in d["image_orphans"])
+    assert any(o["task"] == "幽灵" for o in d["meta_orphans"])
+
+
+def test_vault_repair_writes_iomap_then_catalog_sees_it(client, dt):
+    """_repair_vault 写 _save_task_image_map,catalog 读 _load_task_image_map —— 同一文件。
+    证明 repair 与 catalog 共享 io-map(都留 server,抽出后仍 resolve)。"""
+    real_png = dt.images_dir / "yuyou.png"; real_png.write_bytes(b"\x89PNG")
+    dt.write_images({"鱼油": "data/daily-task-images/OLD/yuyou.png"})  # 路径错但 basename 可救
+    dt.write_day(["鱼油"])
+
+    rep = client.post("/api/vault/repair").json()
+    assert rep["fixed_images"] >= 1
+    cat = client.get("/api/daily-tasks").json()
+    yu = next(t for t in cat["tasks"] if t["name"] == "鱼油")
+    assert yu["image_url"] is not None  # 修好的 path catalog 能读到
+
+
+# ── T12 [high]: _apply_task_op 留 server,/template/task add+edit 也走它 ──
+
+def test_template_task_add_edit_double_write_target(client, dt):
+    """_apply_task_op 三方共用(/template/task + /delete + LLM manage),必须留 server。
+    T7 只走 /delete;这条走 /template/task 的 add+edit,并守双写目标(模板 + 今天)。"""
+    dt.write_template(["鱼油"])
+    dt.write_day(["鱼油"])
+    assert client.post("/api/template/task", json={"action": "add", "text": "维生素D"}).status_code == 200
+    assert client.post("/api/template/task",
+                       json={"action": "edit", "old_text": "维生素D", "text": "维生素C"}).status_code == 200
+    tpl = dt.template.read_text(encoding="utf-8")
+    today = dt.read_day_md()
+    for blob in (tpl, today):  # 两个目标都改名成功
+        assert "维生素C" in blob and "维生素D" not in blob and "鱼油" in blob
+    names = {t["name"] for t in client.get("/api/daily-tasks").json()["tasks"]}
+    assert names == {"鱼油", "维生素C"}
+
+
+# ── T13 [high]: manage_daily_task 仍 wired + 改名迁移 meta+image key ──
+
+def test_manage_daily_task_wired_and_migrates_keys(client, dt):
+    """5 个 daily-task LLM tool T9 只验 check;manage 是第 3 个 _apply_task_op caller
+    且写两个 io-map(_migrate_task_keys)。误移任一 → 改名时 intake/图标变孤儿,9 条不 RED。"""
+    assert server.TOOL_IMPL["manage_daily_task"] is server.tool_manage_daily_task
+    assert "manage_daily_task" in server.TOOL_GROUPS["widgets_and_tasks"]
+    dt.write_template(["鱼油"]); dt.write_day(["鱼油"])
+    dt.write_meta({"鱼油": {"daily_dose": 2, "intake_log": {_today(): 1}}})
+    dt.write_images({"鱼油": "data/daily-task-images/yuyou.png"})
+
+    out = server.tool_manage_daily_task({"action": "edit", "old_text": "鱼油", "text": "鱼油B"})
+    assert out["ok"] is True
+    assert out["side_effects"]["meta_migrated"] is True
+    assert out["side_effects"]["image_migrated"] is True
+    assert "鱼油B" in dt.read_meta() and "鱼油" not in dt.read_meta()       # intake 跟过去
+    assert "鱼油B" in dt.read_images() and "鱼油" not in dt.read_images()   # 图标跟过去
+
+
+# ── T14 [high]: /check 非 int intake/increment 现行 500(不 guard,锁住不被悄改)──
+
+def test_check_non_int_intake_is_500_not_400(dt):
+    """/check 的 int(body['intake']) 无 try/except → 非 int 抛 → 500。
+    /meta 反而 400(T4)。锁这个不对称:抽出时'好心'包 try/except 会把硬 500 悄变 400/静默吞写。"""
+    from fastapi.testclient import TestClient
+    c = TestClient(server.app, raise_server_exceptions=False)
+    dt.write_day(["鱼油"])
+    assert c.post("/api/daily-tasks/check", json={"task_name": "鱼油", "intake": "abc"}).status_code == 500
+    assert c.post("/api/daily-tasks/check", json={"task_name": "鱼油", "increment": "x"}).status_code == 500
+
+
+# ── T15 [parity]: 补卡窗口对未来闭合 + catalog is_writable 过去/未来 ──
+
+def test_check_rejects_future_and_catalog_is_writable_window(client, dt):
+    """_writable_dates_set 是闭集 {today, yesterday-if-hour<12}:未来 + 前天都拒。
+    mobile-api.js L454 is_writable=date>=todayIso 正好反:放未来、拒昨天。这是最高价 parity oracle。"""
+    base = datetime.now()
+    dt.write_day(["鱼油"], d=base)
+    dt.set_now(base.replace(hour=10, minute=0, second=0, microsecond=0))
+    tomorrow = (base + timedelta(days=1)).strftime("%Y-%m-%d")
+    two_ago = (base - timedelta(days=2)).strftime("%Y-%m-%d")
+
+    # /check 对未来 + 更早都 400
+    assert client.post("/api/daily-tasks/check",
+                       json={"task_name": "鱼油", "date": tomorrow, "checked": True}).status_code == 400
+    assert client.post("/api/daily-tasks/check",
+                       json={"task_name": "鱼油", "date": two_ago, "checked": True}).status_code == 400
+    # catalog is_writable:昨天(hour<12)True,未来 False
+    assert client.get("/api/daily-tasks", params={"date": _yesterday()}).json()["is_writable"] is True
+    assert client.get("/api/daily-tasks", params={"date": tomorrow}).json()["is_writable"] is False
