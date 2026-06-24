@@ -60,8 +60,15 @@
         return { id: id, manifest: registry[id].manifest, enabled: registry[id].enabled };
       });
     }
-    function setEnabled(id, on) { if (registry[id]) registry[id].enabled = !!on; }
-    return { register: register, mountInto: mountInto, list: list, setEnabled: setEnabled };
+    var onChangeCallbacks = [];
+    function setEnabled(id, on) {
+      if (registry[id]) {
+        registry[id].enabled = !!on;
+        onChangeCallbacks.forEach(function (cb) { try { cb({ id: id, enabled: !!on }); } catch (e) {} });
+      }
+    }
+    function onChange(cb) { if (typeof cb === "function") onChangeCallbacks.push(cb); }
+    return { register: register, mountInto: mountInto, list: list, setEnabled: setEnabled, onChange: onChange };
   })();
   if (typeof window !== "undefined") window.gwWidgets = gwWidgets;
 
@@ -83,6 +90,39 @@
       { id: "tap", label: "勾/取消" }, { id: "longpress", label: "管理(换图/改 N 粒/历史/删/想要新项)" }
     ],
   }, { render: function (ctx) { return buildTasksPure(ctx || {}); } });
+  // mobile pulse widget — 本机状态汇总(对齐桌面 .gw-pulse 镜像但内容是 mobile 本机派生:
+  //   今日打卡完成度 + 喝水进度 + 写了多少 entry + 距 21:30 还有多久/纸条状态)
+  gwWidgets.register("pulse", {
+    name: "pulse", title: "今日 PULSE", category: "diary-core",
+    slot: "care", script: true, default_loaded: false,  // 默认关,用户/AI 可启用
+    data_source: { type: "derived", note: "本机派生:catalog + journal blocks 计算" },
+    mobile_actions: [{ id: "tap", label: "展开看详细" }],
+  }, { render: function (ctx) { return buildPulsePure(ctx || {}); } });
+  function buildPulsePure(ctx) {
+    var block = el("div", "gw-care-block gw-pulse-mobile",
+      '<div class="gw-care-label">今日 PULSE</div>');
+    var line = el("div", "gw-pulse-line");
+    var tasks = ctx.tasks || [];
+    var done = tasks.filter(function (t) { return t.checked; }).length;
+    var water = ctx.water_filled | 0;
+    var entries = 0;
+    if (ctx.j && ctx.j.blocks) {
+      (ctx.j.blocks || []).forEach(function (b) {
+        (b.h2 || []).forEach(function (h) { if (h && (h.title || (h.body && h.body.trim()))) entries++; });
+      });
+    }
+    // 21:30 纸条状态 - 检查当天 md 21:30 H2 是不是已写
+    var noteState = (ctx.j && ctx.j.has_note) ? "已写" : "待写";
+    var parts = [
+      '<span class="gw-pulse-cell"><b>' + done + '/' + (tasks.length || 0) + '</b> 打卡</span>',
+      '<span class="gw-pulse-cell"><b>' + water + '/8</b> 水</span>',
+      '<span class="gw-pulse-cell"><b>' + entries + '</b> entries</span>',
+      '<span class="gw-pulse-cell"><b>21:30</b> · ' + noteState + '</span>',
+    ];
+    line.innerHTML = parts.join('<span class="gw-pulse-sep">·</span>');
+    block.appendChild(line);
+    return block;
+  }
 
   // ── 轻提示 ──
   function flash(msg) {
@@ -891,7 +931,14 @@
     }).catch(startApp);
   });
 
-  function startApp() { renderBottom(); loadDateband().then(loadDay); }
+  function startApp() {
+    renderBottom();
+    loadDateband().then(loadDay);
+    // widget enable/disable 自动重 render journal(让 AI 切 widget 状态用户立刻看到)
+    if (window.gwWidgets && typeof window.gwWidgets.onChange === "function") {
+      window.gwWidgets.onChange(function () { if (state.tab === "journal") loadDay(); });
+    }
+  }
 
   function saveKeys(deepseek, dashscope) {
     var body = {};
