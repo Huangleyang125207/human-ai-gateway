@@ -566,7 +566,8 @@
         var h2 = "## " + (tags[0] ? "#" + tags[0] + " " : "") + title;
         var commits = (existing.h.commits || []).join("\n");
         var new_md = h2 + "\n\n" + bodyText + (commits ? "\n\n" + commits : "");
-        api("/api/journal/patch", { method: "POST", body: JSON.stringify({ date: state.date, time: existing.time, new_md: new_md }) })
+        // author:'user' 是手机端用户在 UI 改自己的块;shim 默认 'ai' 是失败安全(对齐桌面 oracle)
+        api("/api/journal/patch", { method: "POST", body: JSON.stringify({ date: state.date, time: existing.time, new_md: new_md, author: "user" }) })
           .then(function () { close(); flash("已改进 · " + existing.time); loadDay(); });
       } else {
         var body = { date: state.date, time: hv + ":" + mv, tag: tags[0] || "", title: title, body: bodyText };

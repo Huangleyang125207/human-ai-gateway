@@ -190,6 +190,13 @@
 
   // ── 忠实复刻 server.py parse_journal ────────────────
   var TIME_H1_RE = /^#\s*(\d{1,2})[：:](\d{2})\s*$/;
+  // 复刻 _check_author + _strip_author 给 patch 的 authorship boundary + H2 guard 用
+  // (test_authorship.test_patch_block_ai_refuses_user_block + test_patch_h2_rename 锁)
+  var AUTHOR_RE = /@(\w+)\s*$/;
+  function checkAuthor(h2) {
+    var m = AUTHOR_RE.exec(h2 || ""); return m ? m[1] : "user";  // 失败安全默认 user
+  }
+  function stripAuthorMarker(h2) { return (h2 || "").replace(/\s*@\S+\s*$/, "").trim(); }
   function parseJournal(text) {
     var lines = (text || "").split(/\r?\n/);
     var blocks = [], cur = null, i;
@@ -725,26 +732,60 @@
       });
     },
     "POST /api/journal/patch": function (req, u, body) {
-      var date = (body && body.date) || todayIso(), time = body && body.time;
+      // 复刻桌面 _patch_block 完整契约:
+      //  · authorship boundary:author='ai' + 块内 H2 标 @user → 拒(test_authorship)
+      //  · H2-rename guard:author='ai' + existing H2 strip 不等 new H2 strip + !allow_h2_rename → 拒
+      //    (test_patch_h2_rename;5.29 联想 entry 被 patch 吃掉事故的反向防御)
+      //  · author 字段未传默认 'ai' 失败安全(test_patch_block_default_caller_is_ai)
+      var date = (body && body.date) || todayIso();
+      var time = body && body.time;
+      var newMd = (body && body.new_md) || "";
+      var author = (body && body.author) || "ai";
+      var allowRename = !!(body && body.allow_h2_rename);
       return Store.readJournalMd(date).then(function (md) {
-        if (md === null) return jsonResp({ error: "no file" });
-        // 找到 time 对应的块,替整块体(MVP:简单替换,块内第一条 H2 起到下个 H1/分隔前)
+        if (md === null) return jsonResp({ error: "no file" }, 404);
         var pad = pad2(parseInt((time || "0:0").split(":")[0], 10)) + ":" + (time || "0:00").split(":")[1];
-        var lines = md.split(/\r?\n/), out = [], inBlock = false, replaced = false;
+        var lines = md.split(/\r?\n/);
+        // 1. 找 block 边界(start = H1 行,end = 下个 H1 或 ---)
+        var start = -1;
         for (var i = 0; i < lines.length; i++) {
           var tm = TIME_H1_RE.exec(lines[i]);
-          if (tm) {
-            var t = pad2(parseInt(tm[1], 10)) + ":" + tm[2];
-            inBlock = (t === pad);
-            out.push(lines[i]);
-            if (inBlock && !replaced) { out.push("", body.new_md || ""); replaced = true; }
-            continue;
-          }
-          if (inBlock) { if (lines[i].trim() === "---") { inBlock = false; out.push("", "---"); } continue; }
-          out.push(lines[i]);
+          if (tm && (pad2(parseInt(tm[1], 10)) + ":" + tm[2]) === pad) { start = i; break; }
         }
+        if (start === -1) return jsonResp({ error: "time block # " + time + " not found" }, 404);
+        var end = lines.length;
+        for (var j = start + 1; j < lines.length; j++) {
+          if (TIME_H1_RE.test(lines[j]) || lines[j].trim() === "---") { end = j; break; }
+        }
+        // 2. existing 首条 H2
+        var existingH2 = null;
+        for (var k = start + 1; k < end; k++) {
+          if (lines[k].indexOf("## ") === 0) { existingH2 = lines[k]; break; }
+        }
+        // 3. authorship boundary:AI 不能 patch @user 块(test_patch_block_ai_refuses_user_block)
+        if (author !== "user" && existingH2 && checkAuthor(existingH2) === "user") {
+          return jsonResp({ error: "block @ " + time + " 是 @user 所有,AI 不能 patch。想加评论用 append_journal_comment;想新加 entry 用 insert_journal_block。" }, 403);
+        }
+        // 4. H2 mismatch guard(test_patch_rejects_h2_mismatch_by_default + test_patch_allows_h2_rename_with_flag)
+        var newH2 = null;
+        var newLines = newMd.split(/\r?\n/);
+        for (var n = 0; n < newLines.length; n++) {
+          if (newLines[n].indexOf("## ") === 0) { newH2 = newLines[n]; break; }
+        }
+        if (author !== "user" && existingH2 && newH2 &&
+            existingH2.trim() !== "##" &&
+            stripAuthorMarker(existingH2) !== stripAuthorMarker(newH2) &&
+            !allowRename) {
+          return jsonResp({
+            error: "block @ " + time + " 已有 H2:`" + existingH2.trim() + "`。new_md 第一个 H2 是:`" + newH2.trim() + "` — 不一样。patch 会整段替换,原 H2 会被吃掉。想加新 H2 用 insert;改标题重传 allow_h2_rename=true。",
+            conflict: true,
+          }, 409);
+        }
+        // 5. splice:保留 H1 行,替换 H1+1..end 之间的 body
+        var trimmedNewMd = newMd.replace(/\s+$/, "");
+        var out = lines.slice(0, start + 1).concat([""], trimmedNewMd.split(/\r?\n/), [""], lines.slice(end));
         return Store.writeJournalMd(date, out.join("\n")).then(function () {
-          return replaced ? jsonResp({ patched: time, file: isoToStem(date) + ".md" }) : jsonResp({ error: "block not found" });
+          return jsonResp({ patched: time, file: isoToStem(date) + ".md" });
         });
       });
     },
