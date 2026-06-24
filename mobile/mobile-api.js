@@ -95,6 +95,17 @@
   // ── 工具:日期 ───────────────────────────────────────
   function pad2(n) { return (n < 10 ? "0" : "") + n; }
   function todayIso() { var d = new Date(); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+  // 复刻桌面 _writable_dates_set:闭集 {today, yesterday-if-hour<12}。
+  // 6.24 抽 daily_tasks_routes 时抓出 mobile L454 是 date>=today 正好反向(放未来/拒昨天)。
+  // 是 daily-tasks 的 Cannot-break 契约,由 test_check_rejects_future_and_catalog_is_writable_window 锁。
+  function isWritableDate(date) {
+    var now = new Date();
+    var t = now.getFullYear() + "-" + pad2(now.getMonth() + 1) + "-" + pad2(now.getDate());
+    if (date === t) return true;
+    var y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    var yIso = y.getFullYear() + "-" + pad2(y.getMonth() + 1) + "-" + pad2(y.getDate());
+    return date === yIso && now.getHours() < 12;
+  }
   // 第N天:距 2026-05-03(第1天)的日历天数,与桌面 vault 命名同源(实测对齐 6.12=41/6.13=42/6.15=44)。
   // 按日历天算,跳过的天也占号(6.14 缺也让 6.15=44),与 file-count 无关。
   function dayNum(iso) {
@@ -436,11 +447,13 @@
       var date = qsDate(u) || todayIso();
       return Store.readJournalMd(date).then(function (md) {
         var tasks = parseSupplements(md), water = parseWaterFilled(md);
-        // 并发拉 image + meta(对齐 PC 端 task 多带 total_pills/daily_dose)
+        // 并发拉 image + meta + intake_log(对齐 PC catalog 的真值线:
+        // tasks[].today_intake 从 intake_log 算,不是用 md 行勾态硬编 1)
         return Promise.all(tasks.map(function (t) {
           return Promise.all([
             Store.getSetting("taskimg/" + t.name),
             Store.getSetting("taskmeta/" + t.name),
+            Store.getSetting("taskintake/" + t.name),
           ]).then(function (rs) {
             t.image_url = rs[0] || null;
             try {
@@ -448,10 +461,15 @@
               if (meta.total_pills) t.total_pills = meta.total_pills;
               if (meta.daily_dose) t.daily_dose = meta.daily_dose;
             } catch (e) {}
+            try {
+              var log = rs[2] ? JSON.parse(rs[2]) : {};
+              t.today_intake = log[date] | 0;
+            } catch (e) {}
             return t;
           });
         })).then(function (ts) {
-          return jsonResp({ tasks: ts, water_filled: water, date: date, is_today: date === todayIso(), is_writable: date >= todayIso() });
+          // is_writable:复刻桌面 _writable_dates_set,不是 date>=today(L454 旧错值)
+          return jsonResp({ tasks: ts, water_filled: water, date: date, is_today: date === todayIso(), is_writable: isWritableDate(date) });
         });
       });
     },
@@ -516,15 +534,49 @@
       });
     },
     "POST /api/daily-tasks/check": function (req, u, body) {
+      // 复刻桌面 _bump_intake 数学(由 test_check_intake_increment_clamp_and_md_box 锁):
+      //  · intake/increment/checked 三入口,优先级 intake > increment > checked > toggle
+      //  · clamp [0, daily_dose];intake>=dose → md [x],否则 [ ]
+      //  · intake_log:{date: intake} 存独立 setting key;0 → pop 当日 key
+      //  · 窗口外日期 400(test_check_rejects_future_and_catalog_is_writable_window);非整 500
       var date = (body && body.date) || todayIso();
+      if (!isWritableDate(date)) return jsonResp({ ok: false, error: "date 不在可写窗口(只能补昨天 hour<12,不能写未来)" }, 400);
       var name = body && body.task_name;
-      return Store.readJournalMd(date).then(function (md) {
+      return Promise.all([
+        Store.readJournalMd(date),
+        Store.getSetting("taskmeta/" + name),
+        Store.getSetting("taskintake/" + name),
+      ]).then(function (rs) {
+        var md = rs[0];
         if (md === null) return jsonResp({ ok: false, error: "no file" }, 404);
-        var tasks = parseSupplements(md), cur = null, t;
-        for (t = 0; t < tasks.length; t++) if (tasks[t].name === name) cur = tasks[t];
-        var checked = body && typeof body.checked === "boolean" ? body.checked : !(cur && cur.checked);
-        return Store.writeJournalMd(date, setSupplementChecked(md, name, checked)).then(function () {
-          return jsonResp({ ok: true, task_name: name, checked: checked, total_pills: null, daily_dose: 1, today_intake: checked ? 1 : 0, remaining: null });
+        var meta = {}; try { meta = rs[1] ? JSON.parse(rs[1]) : {}; } catch (e) {}
+        var log = {}; try { log = rs[2] ? JSON.parse(rs[2]) : {}; } catch (e) {}
+        var dose = Math.max(1, parseInt(meta.daily_dose, 10) || 1);
+        var cur = log[date] | 0;
+        var next;
+        if ("intake" in body) {
+          var iv = parseInt(body.intake, 10);
+          if (isNaN(iv)) return jsonResp({ ok: false, error: "intake 必须是整数" }, 500);
+          next = Math.max(0, Math.min(dose, iv));
+        } else if ("increment" in body) {
+          var inc = parseInt(body.increment, 10) | 0;
+          next = Math.max(0, Math.min(dose, cur + inc));
+        } else if (body && typeof body.checked === "boolean") {
+          next = body.checked ? dose : 0;
+        } else {
+          next = (cur >= dose) ? 0 : dose;  // toggle
+        }
+        var checked = next >= dose;
+        if (next === 0) delete log[date]; else log[date] = next;
+        var p = [Store.writeJournalMd(date, setSupplementChecked(md, name, checked))];
+        if (Object.keys(log).length === 0) p.push(Store.removeSetting("taskintake/" + name));
+        else p.push(Store.setSetting("taskintake/" + name, JSON.stringify(log)));
+        return Promise.all(p).then(function () {
+          return jsonResp({
+            ok: true, task_name: name, checked: checked,
+            total_pills: meta.total_pills || null, daily_dose: dose, today_intake: next,
+            remaining: null,
+          });
         });
       });
     },
