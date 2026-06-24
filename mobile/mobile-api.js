@@ -205,6 +205,55 @@
     });
   }
 
+  // ── ③ C lazy 纸条:past_boards 提取 + DeepSeek prompt ──
+  // 从某天 md 里抽 # 21：30 H2 块的 body(占位 ## 视为无纸条返 null)
+  function _extractNoteBody(md) {
+    if (!md) return null;
+    var lines = md.split(/\r?\n/);
+    var h1Idx = -1;
+    for (var i = 0; i < lines.length; i++) {
+      if (/^#\s*21[：:]30\s*$/.test(lines[i])) { h1Idx = i; break; }
+    }
+    if (h1Idx === -1) return null;
+    var endIdx = lines.length;
+    for (var j = h1Idx + 1; j < lines.length; j++) {
+      if (/^#\s*\d{1,2}[：:]\d{2}\s*$/.test(lines[j]) || lines[j].trim() === "---") { endIdx = j; break; }
+    }
+    var bodyLines = [];
+    var sawH2 = false;
+    for (var k = h1Idx + 1; k < endIdx; k++) {
+      var t = lines[k].trim();
+      if (t === "##") return null;  // 占位 = 无纸条
+      if (t.indexOf("## ") === 0) { sawH2 = true; continue; }  // 跳过 H2 标题行
+      if (sawH2) bodyLines.push(lines[k]);
+    }
+    var body = bodyLines.join("\n").trim();
+    return body || null;
+  }
+  // 调 DeepSeek 出纸条:简化版桌面 _eval_build_messages — past_boards 跨夜连贯 +
+  // 今日 md。不复刻 PULSE/CLAUDE.md 注入(mobile 没那些);prompt 思路对齐 PC 端 21:30 仪式
+  function _evalLazyNote(todayMd, pastBoards, key) {
+    var sys = "你是用户的日记 AI 协作者。每晚 21:30 给他留一段纸条 — 这是仪式。\n\n" +
+      "规则:\n① 看见今天他写了什么,具体说几个细节(不空泛、不套话)\n② 给一两句真实感受 — 鼓励、提醒、或一个轻的回应,不要长篇大论\n③ 不超过 120 字\n④ 语气像睡前关灯前那段话,温柔、私人、不像 AI\n\n" +
+      (pastBoards ? "过去几晚你给他的纸条:\n\n" + pastBoards + "\n\n---\n\n" : "") +
+      "今天他写了:\n\n" + (todayMd || "(今天还没写)");
+    var payload = { model: "deepseek-chat", messages: [
+      { role: "system", content: sys },
+      { role: "user", content: "现在写今晚的纸条。" }
+    ], stream: false };
+    var url = "https://api.deepseek.com/v1/chat/completions";
+    var headers = { "Content-Type": "application/json", Authorization: "Bearer " + key };
+    var CapHttp = _cap && _cap.CapacitorHttp;
+    if (CapHttp) {
+      return CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 90, readTimeout: 90 })
+        .then(function (r) { return (r && r.data && r.data.choices && r.data.choices[0] && r.data.choices[0].message && r.data.choices[0].message.content) || ""; });
+    }
+    return realFetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { return (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || ""; })
+      .catch(function () { return ""; });
+  }
+
   // ── 工具:日期 ───────────────────────────────────────
   function pad2(n) { return (n < 10 ? "0" : "") + n; }
   function todayIso() { var d = new Date(); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
@@ -964,6 +1013,57 @@
         return jsonResp({ ok: true, inserted: "# " + h + "：" + mm, file: isoToStem(date) + ".md" });
       });
     },
+    // ③ C 简化版 lazy 纸条 — 用户打开 app 时如果当天 # 21：30 H2 块是占位 ##,
+    // 调 DeepSeek 用桌面 prompt 同源写一段,写进 21:30 H2 块。
+    // 不绑定时间(早晚都触发),time 戳走 PC 端原位 21:30 H2(user 拍板"保持 PC 端原位")。
+    "POST /api/note/check-lazy": function () {
+      var today = todayIso();
+      return Store.readJournalMd(today).then(function (md) {
+        if (md === null) return jsonResp({ skip: "no file" });
+        var lines = (md || "").split(/\r?\n/);
+        var h1Idx = -1;
+        for (var i = 0; i < lines.length; i++) {
+          if (/^#\s*21[：:]30\s*$/.test(lines[i])) { h1Idx = i; break; }
+        }
+        if (h1Idx === -1) return jsonResp({ skip: "no 21:30 block" });
+        var endIdx = lines.length;
+        for (var j = h1Idx + 1; j < lines.length; j++) {
+          if (TIME_H1_RE.test(lines[j]) || lines[j].trim() === "---") { endIdx = j; break; }
+        }
+        var firstH2 = null;
+        for (var k = h1Idx + 1; k < endIdx; k++) {
+          var t = lines[k].trim();
+          if (t === "##" || lines[k].indexOf("## ") === 0) { firstH2 = lines[k]; break; }
+        }
+        if (!firstH2 || firstH2.trim() !== "##") return jsonResp({ skip: "already has note" });
+        return Store.getSetting("deepseek_key").then(function (key) {
+          if (!key) return jsonResp({ skip: "no key" });
+          // past_boards 跨夜连贯:扫过去 7 天 vault 提取 21:30 H2 块 body
+          return Store.listJournalDates().then(function (dates) {
+            var past = (dates || []).filter(function (d) { return d < today; }).sort().reverse().slice(0, 7);
+            return Promise.all(past.map(function (d) {
+              return Store.readJournalMd(d).then(function (m) {
+                var body = _extractNoteBody(m);
+                return body ? "## " + d + "\n\n" + body : null;
+              });
+            })).then(function (boards) {
+              var pastBoards = boards.filter(Boolean).join("\n\n---\n\n");
+              return _evalLazyNote(md, pastBoards, key).then(function (noteText) {
+                if (!noteText) return jsonResp({ skip: "empty eval" });
+                // 写入 21:30 H2 占位 → "## 纸条 @ai\n\n{noteText}" — 走 patch 路径,
+                // 占位 H2 不卡 H2-guard,且 Sprint 1 #1 authorship boundary 已加占位排除。
+                // 用 window.fetch 走 shim 自调 routing → patch handler(realFetch 绕开 shim 给外部用)
+                var newMd = "## 纸条 @ai\n\n" + noteText;
+                return window.fetch("/api/journal/patch", { method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ date: today, time: "21:30", new_md: newMd, author: "ai" }) })
+                  .then(function (r) { return r.json(); })
+                  .then(function (j) { return jsonResp({ wrote: !j.error, detail: j }); });
+              });
+            });
+          }).catch(function (e) { return jsonResp({ skip: "error", err: String(e) }); });
+        });
+      });
+    },
     "POST /api/journal/patch": function (req, u, body) {
       // 复刻桌面 _patch_block 完整契约:
       //  · authorship boundary:author='ai' + 块内 H2 标 @user → 拒(test_authorship)
@@ -996,7 +1096,8 @@
           if (lines[k].indexOf("## ") === 0) { existingH2 = lines[k]; break; }
         }
         // 3. authorship boundary:AI 不能 patch @user 块(test_patch_block_ai_refuses_user_block)
-        if (author !== "user" && existingH2 && checkAuthor(existingH2) === "user") {
+        //    占位 H2 "##" 不算任何人所有,AI 可以填入(③ C lazy 纸条写入 21:30 占位块用)
+        if (author !== "user" && existingH2 && existingH2.trim() !== "##" && checkAuthor(existingH2) === "user") {
           return jsonResp({ error: "block @ " + time + " 是 @user 所有,AI 不能 patch。想加评论用 append_journal_comment;想新加 entry 用 insert_journal_block。" }, 403);
         }
         // 4. H2 mismatch guard(test_patch_rejects_h2_mismatch_by_default + test_patch_allows_h2_rename_with_flag)

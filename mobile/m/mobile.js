@@ -102,6 +102,23 @@
       api("/api/daily-tasks?date=" + state.date),
       api("/api/water-cup"),
     ]).then(function (rs) { state.cupImg = (rs[2] && rs[2].image_url) || null; renderJournal(rs[0], rs[1]); });
+    // ③ C lazy 纸条:仅当前是今天 + 不在进行中触发,防多入口 race
+    if (state.date === TODAY) checkLazyNote();
+  }
+  function checkLazyNote() {
+    if (state.lazyInflight) return;
+    state.lazyInflight = true;
+    api("/api/note/check-lazy", { method: "POST" })
+      .then(function (r) {
+        state.lazyInflight = false;
+        // 写成功 → 立刻重读 today 日记看到纸条;skip 不动 UI
+        if (r && r.wrote && state.date === TODAY) {
+          api("/api/journal/today?date=" + state.date).then(function (j) {
+            api("/api/daily-tasks?date=" + state.date).then(function (t) { renderJournal(j, t); });
+          });
+        }
+      })
+      .catch(function () { state.lazyInflight = false; });
   }
   function renderJournal(j, t) {
     var v = $("journalView"); v.innerHTML = "";
