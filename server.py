@@ -2724,6 +2724,13 @@ app.include_router(_setup_router)
 from daily_tasks_routes import router as _daily_tasks_router  # noqa: E402
 app.include_router(_daily_tasks_router)
 
+# Extract Module(ctrl-c-v § 9):thread-history 持久化(3 endpoint:/api/thread/history
+# + restore-from-bak + save)搬到 thread_routes.py(chat 簇降风险拆解第一刀,不碰 SSE 流式)。
+# helper(_thread_history_mtime_ms/_thread_save_is_stale)+ THREAD_HISTORY_PATH + _THREAD_LOCK
+# 留 server(test_thread_cas 直调 + 测试 patch)。零直接调用方 → 不 re-export。
+from thread_routes import router as _thread_router  # noqa: E402
+app.include_router(_thread_router)
+
 
 # ── UI 文件禁缓存:WKWebView 会按 URL 缓存 html/js/css,改了代码不 bump ?v= 就吃旧版
 # (2026-06-15 踩过:补建逻辑改了、重构建了,WebView 还服务 Build-1 缓存的旧 JS)。
@@ -5465,115 +5472,6 @@ def api_init_status():
     ready=True 前显示「正在初始化…」而非空白,回答用户「是慢还是卡住了」。"""
     with _INIT_LOCK:
         return dict(_INIT_STATE)
-
-
-@app.get("/api/thread/history")
-def thread_history_get():
-    """返聊天历史 + mtime_ns。client 轮询时 mtime 变化才重拉。"""
-    if not THREAD_HISTORY_PATH.exists():
-        return {"history": [], "mtime": 0}
-    try:
-        with _THREAD_LOCK:
-            data = json.loads(THREAD_HISTORY_PATH.read_text(encoding="utf-8"))
-            mtime = _thread_history_mtime_ms()
-        if not isinstance(data, list):
-            data = []
-        return {"history": data, "mtime": mtime}
-    except Exception as e:
-        log.warning(f"thread history read failed: {e}")
-        # 5.17 用户聊天历史被覆盖那条教训:即便 error 字段在,前端可能忽略 →
-        # 看起来像 history 被 wipe。A-H14 收口:返显式 status='corrupt' + 可用 bak 列表
-        # 前端读到这个状态必须拦下 saveHistory(避免空 list 当真覆盖)走 modal。
-        _report_silent_failure("thread_history_read_failed",
-            f"{type(e).__name__}: {str(e)[:120]}",
-            context={"file_size_kb": THREAD_HISTORY_PATH.stat().st_size // 1024 if THREAD_HISTORY_PATH.exists() else 0})
-        # 收集可用 bak 列表给前端 modal restore 用
-        baks = []
-        for i in range(1, 6):
-            bp = Path(f"{THREAD_HISTORY_PATH}.bak.{i}")
-            if bp.exists():
-                try:
-                    baks.append({
-                        "index": i,
-                        "size_kb": bp.stat().st_size // 1024,
-                        "mtime": int(bp.stat().st_mtime * 1000),
-                    })
-                except Exception:
-                    pass
-        return {
-            "history": [],
-            "mtime": 0,
-            "status": "corrupt",
-            "error": str(e)[:200],
-            "baks": baks,
-            "message": "thread-history 读取失败 — 选 bak 恢复或 start-fresh,别直接覆盖。",
-        }
-
-
-@app.post("/api/thread/restore-from-bak")
-async def thread_history_restore(req: Request):
-    """A-H14: 从指定 bak.N 恢复 thread-history。前端 modal 选哪个 bak 就调这个。
-    body: {bak_index: 1..5}
-    """
-    body = await req.json()
-    idx = int(body.get("bak_index") or 0)
-    if idx < 1 or idx > 5:
-        raise HTTPException(400, "bak_index 必须是 1..5")
-    bp = Path(f"{THREAD_HISTORY_PATH}.bak.{idx}")
-    if not bp.exists():
-        raise HTTPException(404, f"bak.{idx} 不存在")
-    try:
-        data = json.loads(bp.read_text(encoding="utf-8"))
-        if not isinstance(data, list):
-            raise ValueError("bak 内容不是 list")
-    except Exception as e:
-        raise HTTPException(400, f"bak.{idx} 解析失败: {type(e).__name__}: {e}")
-    with _THREAD_LOCK:
-        # 把当前损坏的 thread-history 另存一份(免得用户后悔)
-        if THREAD_HISTORY_PATH.exists():
-            try:
-                ts = int(datetime.now().timestamp())
-                corrupted = THREAD_HISTORY_PATH.with_name(f"{THREAD_HISTORY_PATH.name}.corrupted.{ts}")
-                THREAD_HISTORY_PATH.rename(corrupted)
-            except Exception:
-                pass
-        _safe_write_text(
-            THREAD_HISTORY_PATH,
-            json.dumps(data, ensure_ascii=False, indent=2),
-            rotate=False,  # bak 链已有,不用再 rotate 一次
-        )
-        mtime = _thread_history_mtime_ms()
-    return {"ok": True, "restored_from": f"bak.{idx}", "count": len(data), "mtime": mtime}
-
-
-@app.post("/api/thread/save")
-async def thread_history_save(req: Request):
-    """全量覆盖。client 应送整段 history(最近 N 条)。
-    返新 mtime,client 拿来作为下一次 poll 的基线(避免自己写完又被自己 poll 拉一遍)。
-    """
-    body = await req.json()
-    hist = body.get("history")
-    base_mtime = body.get("base_mtime")  # client 上次 GET/save 拿到的 mtime,用于 CAS
-    if not isinstance(hist, list):
-        raise HTTPException(400, "history must be a list")
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with _THREAD_LOCK:
-        current = _thread_history_mtime_ms()
-        # CAS 守门:base_mtime 跟当前不符 → 陈旧覆盖,拒绝。client 应 409 后 reload server 再说。
-        if _thread_save_is_stale(base_mtime, current):
-            raise HTTPException(status_code=409, detail={
-                "conflict": True,
-                "current_mtime": current,
-                "message": "stale base_mtime — reload server history before saving",
-            })
-        # rotate 5 份备份 + 原子写;事故能 rollback 到最近 5 个版本
-        _safe_write_text(
-            THREAD_HISTORY_PATH,
-            json.dumps(hist, ensure_ascii=False, indent=2),
-            rotate=True,
-        )
-        mtime = _thread_history_mtime_ms()
-    return {"ok": True, "mtime": mtime, "count": len(hist)}
 
 
 @app.post("/api/cutout")
