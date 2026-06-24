@@ -82,7 +82,7 @@
     mobile_actions: [
       { id: "tap", label: "勾/取消" }, { id: "longpress", label: "管理(换图/改 N 粒/历史/删/想要新项)" }
     ],
-  }, { render: function (ctx) { return buildTasks((ctx && ctx.tasks) || []); } });
+  }, { render: function (ctx) { return buildTasksPure(ctx || {}); } });
 
   // ── 轻提示 ──
   function flash(msg) {
@@ -178,7 +178,9 @@
       readonly: state.readonly,
       date: state.date,
       api: api,
+      reload: loadDay,
       onPickImage: pickWaterCupImage,
+      onLongPress: openTaskSheet,
       tasks: (t && t.tasks) || [],
       j: j, t: t,
     });
@@ -262,31 +264,42 @@
     });
   }
 
-  // 打卡(横滑,点 toggle → daily-tasks/check)
-  function buildTasks(tasks) {
+  // 打卡 — pure widget impl,ctx: { tasks, readonly, api, reload, onLongPress }
+  function buildTasksPure(ctx) {
+    var tasks = ctx.tasks || [];
+    var readonly = !!ctx.readonly;
     var block = el("div", "gw-care-block", '<div class="gw-care-label">今日打卡 <span style="opacity:.55">· 长按换图标</span></div>');
     var row = el("div", "gw-tasks");
     tasks.forEach(function (t) {
       var inner = t.image_url
         ? '<img src="' + t.image_url + '" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">'
         : esc((t.name || "·").slice(0, 1));
-      // 余量徽标:days_left ≤3 上 .urgent 红色;catalog 没返字段(没填 meta)→ 不挂
       var urgent = typeof t.days_left === "number" && t.days_left <= 3;
       var badge = urgent ? '<span class="gw-task-badge">' + t.days_left + 'd</span>' : '';
       var b = el("button", "gw-task" + (t.checked ? " on" : "") + (urgent ? " urgent" : ""),
         '<span class="gw-task-glyph">' + inner + '</span><span class="gw-task-name">' + esc(t.name) + '</span>' + badge);
-      if (state.readonly) b.disabled = true;
+      if (readonly) b.disabled = true;
       var lp = null, didLong = false;
-      // 长按改弹 action sheet(对齐 PC 右键菜单:换图/改 N 粒/看历史/删除)
-      b.addEventListener("pointerdown", function () { if (state.readonly) return; didLong = false; lp = setTimeout(function () { didLong = true; if (navigator.vibrate) navigator.vibrate(12); openTaskSheet(t); }, 480); });
+      b.addEventListener("pointerdown", function () {
+        if (readonly) return; didLong = false;
+        lp = setTimeout(function () { didLong = true; if (navigator.vibrate) navigator.vibrate(12);
+          if (typeof ctx.onLongPress === "function") ctx.onLongPress(t);
+        }, 480);
+      });
       ["pointerup", "pointercancel", "pointerleave"].forEach(function (ev) { b.addEventListener(ev, function () { clearTimeout(lp); }); });
       b.addEventListener("click", function () {
-        if (state.readonly || didLong) { didLong = false; return; }
-        api("/api/daily-tasks/check", { method: "POST", body: JSON.stringify({ task_name: t.name, checked: !t.checked }) }).then(loadDay);
+        if (readonly || didLong) { didLong = false; return; }
+        if (typeof ctx.api === "function") {
+          ctx.api("/api/daily-tasks/check", { method: "POST", body: JSON.stringify({ task_name: t.name, checked: !t.checked }) })
+            .then(function () { if (typeof ctx.reload === "function") ctx.reload(); });
+        }
       });
       row.appendChild(b);
     });
     block.appendChild(row); return block;
+  }
+  function buildTasks(tasks) {
+    return buildTasksPure({ tasks: tasks, readonly: state.readonly, api: api, reload: loadDay, onLongPress: openTaskSheet });
   }
 
   // 选图 → 端侧抠图(真机 Cutout 插件;浏览器/模拟器回落原图)→ 落成打卡图标
