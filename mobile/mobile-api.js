@@ -83,10 +83,27 @@
     },
     readDailyTasksMd: function () { return Backend.getText("daily-tasks"); },
     writeDailyTasksMd: function (md) { return Backend.setText("daily-tasks", md); },
+    // 5.17 教训:损坏返 sentinel,绝不空 [] 当真覆盖(test_thread_routes corrupt 锁)
     readThread: function () {
-      return Backend.getText("thread").then(function (t) { try { return t ? JSON.parse(t) : []; } catch (e) { return []; } });
+      return Backend.getText("thread").then(function (t) {
+        if (!t) return { ok: true, history: [] };
+        try { return { ok: true, history: JSON.parse(t) }; }
+        catch (e) { return { ok: false, corrupt: true, raw_bytes: t.length }; }
+      });
     },
-    writeThread: function (arr) { return Backend.setText("thread", JSON.stringify(arr || [])); },
+    writeThread: function (arr) {
+      // 写时同时落"逻辑 mtime"独立 setting,做 thread CAS 用(test_thread_cas 锁)
+      var mt = Date.now();
+      return Promise.all([
+        Backend.setText("thread", JSON.stringify(arr || [])),
+        Backend.setText("setting/thread_mtime", String(mt)),
+      ]).then(function () { return mt; });
+    },
+    readThreadMtime: function () {
+      return Backend.getText("setting/thread_mtime").then(function (s) {
+        var v = parseInt(s, 10); return isNaN(v) ? 0 : v;  // 0 = 文件尚不存在,首次写放行
+      });
+    },
     getSetting: function (k) { return Backend.getText("setting/" + k); },
     setSetting: function (k, v) { return Backend.setText("setting/" + k, v); },
     removeSetting: function (k) { return Backend.remove("setting/" + k); },
@@ -105,6 +122,16 @@
     var y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
     var yIso = y.getFullYear() + "-" + pad2(y.getMonth() + 1) + "-" + pad2(y.getDate());
     return date === yIso && now.getHours() < 12;
+  }
+  // 复刻桌面 _thread_save_is_stale(test_thread_cas 8 条 assert):
+  // base 空 / current 0(首次写)/ base 垃圾值 / base/current 异类型 → 不 stale(不误拒);
+  // base != current → stale(防 5.26 陈旧标签页覆盖)。
+  function threadSaveIsStale(base, current) {
+    if (base === null || base === undefined) return false;        // T1
+    if (current === 0) return false;                                 // T2
+    var b = parseInt(base, 10), c = parseInt(current, 10);
+    if (isNaN(b) || isNaN(c)) return false;                          // T5 垃圾值/异类型不误拒
+    return b !== c;                                                  // T3/T4/T6: 严格不等 = stale
   }
   // 第N天:距 2026-05-03(第1天)的日历天数,与桌面 vault 命名同源(实测对齐 6.12=41/6.13=42/6.15=44)。
   // 按日历天算,跳过的天也占号(6.14 缺也让 6.15=44),与 file-count 无关。
@@ -591,12 +618,33 @@
         });
       });
     },
+    // 复刻桌面 thread_routes.py:
+    //   GET 损坏 → status='corrupt' + baks(5.17:绝不空 [] 当真覆盖);健康返 mtime 给 client 做 CAS
+    //   POST 带 base_mtime,跟当前不符 → 409 + 文件原样(5.26:防陈旧标签页覆盖)
     "GET /api/thread/history": function () {
-      return Store.readThread().then(function (arr) { return jsonResp({ history: arr, mtime: Date.now() }); });
+      return Promise.all([Store.readThread(), Store.readThreadMtime()]).then(function (rs) {
+        var r = rs[0], mt = rs[1];
+        if (!r.ok && r.corrupt) {
+          return jsonResp({ status: "corrupt", history: [], baks: [], raw_bytes: r.raw_bytes, mtime: mt });
+        }
+        return jsonResp({ history: r.history || [], mtime: mt });
+      });
     },
     "POST /api/thread/save": function (req, u, body) {
-      var hist = (body && body.history) || [];
-      return Store.writeThread(hist).then(function () { return jsonResp({ ok: true, mtime: Date.now(), count: hist.length }); });
+      var hist = (body && body.history);
+      if (!Array.isArray(hist)) return jsonResp({ ok: false, error: "history must be a list" }, 400);
+      var base = body && body.base_mtime;
+      return Store.readThreadMtime().then(function (current) {
+        if (threadSaveIsStale(base, current)) {
+          return jsonResp({
+            conflict: true, current_mtime: current,
+            message: "stale base_mtime — reload server history before saving",
+          }, 409);
+        }
+        return Store.writeThread(hist).then(function (mt) {
+          return jsonResp({ ok: true, mtime: mt, count: hist.length });
+        });
+      });
     },
 
     // 写日记:行内编辑/插入/删除 —— MVP 简化,人写自己的块,不跑 authorship 守卫
