@@ -143,6 +143,68 @@
     removeSetting: function (k) { return Backend.remove("setting/" + k); },
   };
 
+  // ── 信号采集:⑤ E 极简观察 + ⑥ F user_intent,共享一个云端 sink ──
+  // 设计契约:
+  //  1) fire-and-forget — 失败静默不阻塞 UI(永远不 throw)
+  //  2) 无持久化 — 仅 sessionStorage 临时 anon_sid,避免 iOS ATT 弹窗
+  //  3) 无 PII — 对话原文不上报,只上报 kind + 200 字命中片段
+  //  4) sink 失败容错 — server 未部署时 fetch fail 静默(行业 telemetry 标准做法)
+  var SIGNAL_SINK_URL = "https://feedback.yanpaidb.cn/signal";
+  function _anonSid() {
+    try {
+      var s = sessionStorage.getItem("gw.sid");
+      if (!s) {
+        s = "s-" + Math.random().toString(36).slice(2, 10);
+        sessionStorage.setItem("gw.sid", s);
+      }
+      return s;
+    } catch (e) { return "s-nostorage"; }
+  }
+  function emitSignal(kind, payload) {
+    try {
+      var body = JSON.stringify({
+        kind: kind, payload: payload || {},
+        platform: "mobile-ios", ts: Date.now(),
+        anon_sid: _anonSid(),
+      });
+      // realFetch 是 shim hijack 前 cache 的原 fetch(避免被 mobile-api.js 自身的 /api/* 路由拦)
+      if (typeof realFetch === "function") {
+        realFetch(SIGNAL_SINK_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: body }).catch(function () {});
+      }
+    } catch (e) {}
+  }
+  // ⑥ F 隐式信号:sendChat 前扫词,命中关键词 emit user_intent
+  function scanUserIntent(text) {
+    if (!text || typeof text !== "string") return;
+    var KW = {
+      want_widget: /想加|想要 ?widget|搞个面板|加打卡|加 ?widget/,
+      want_paper: /界面太普通|太简洁|想要纸感|有质感|想要纸/,
+      want_desktop_parity: /像桌面那样|跟桌面一样|桌面有手机没有/,
+    };
+    for (var k in KW) {
+      try { if (KW[k].test(text)) emitSignal(k, { excerpt: text.slice(0, 200) }); } catch (e) {}
+    }
+  }
+  // expose 给 mobile.js 调用(IIFE 外的 UI 代码 emit 显式信号)
+  if (typeof window !== "undefined") {
+    window.emitSignal = emitSignal;
+    window.scanUserIntent = scanUserIntent;
+  }
+  // ⑤ E 全局错误捕获:onerror + unhandledrejection 双轨,只盖硬错误
+  if (typeof window !== "undefined" && !window.__GW_SIGNAL_BOUND__) {
+    window.__GW_SIGNAL_BOUND__ = true;
+    window.addEventListener("error", function (e) {
+      try { emitSignal("error.runtime", { msg: (e && e.message || "").slice(0, 200), src: (e && e.filename || "").slice(0, 100) }); } catch (_) {}
+    });
+    window.addEventListener("unhandledrejection", function (e) {
+      try {
+        var r = e && e.reason;
+        var msg = r && (r.message || String(r)) || "";
+        emitSignal("error.promise", { msg: msg.slice(0, 200) });
+      } catch (_) {}
+    });
+  }
+
   // ── 工具:日期 ───────────────────────────────────────
   function pad2(n) { return (n < 10 ? "0" : "") + n; }
   function todayIso() { var d = new Date(); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }

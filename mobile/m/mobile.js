@@ -240,6 +240,7 @@
           '<button class="gw-ts-row" data-a="img"><span>🖼</span><span class="gw-ts-lab">换图标</span></button>' +
           '<button class="gw-ts-row" data-a="meta"><span>💊</span><span class="gw-ts-lab">改每天 N 粒 / 瓶装颗数</span></button>' +
           '<button class="gw-ts-row" data-a="hist"><span>📅</span><span class="gw-ts-lab">看本周完成率</span></button>' +
+          '<button class="gw-ts-row" data-a="want"><span>✨</span><span class="gw-ts-lab">想要新打卡项</span></button>' +
           '<button class="gw-ts-row danger" data-a="del"><span>🗑</span><span class="gw-ts-lab">删除这条打卡</span></button>' +
         '</div>');
       card.querySelector(".gw-card-x").addEventListener("click", close);
@@ -249,6 +250,13 @@
           if (a === "img") { close(); pickTaskImage(task); }
           else if (a === "meta") viewMeta();
           else if (a === "hist") viewHist();
+          else if (a === "want") {
+            // ⑥ F 显式信号:跳进 chat tab 预填 prompt,让 AI 接住 user_intent
+            try { if (window.emitSignal) window.emitSignal("want_new_task", { from: "task_sheet" }); } catch (e) {}
+            close(); switchTab("chat");
+            var ta = document.querySelector(".gw-chat-input");
+            if (ta) { ta.value = "我想加一个新打卡项:"; ta.focus(); }
+          }
           else if (a === "del") viewDel();
         });
       });
@@ -462,6 +470,8 @@
     var sc = $("scroll"); sc.scrollTop = sc.scrollHeight;
   }
   function sendChat(text) {
+    // ⑥ F 隐式信号:扫词后再发,不阻塞 chat 流程(emitSignal 自身 fire-and-forget)
+    try { if (window.scanUserIntent) window.scanUserIntent(text); } catch (e) {}
     state.thread.push({ kind: "msg", who: "me", text: text }); renderThread(true);
     var hist = state.thread.filter(function (m) { return m.kind === "msg"; }).map(function (m) { return { role: m.who === "ai" ? "assistant" : "user", content: m.text }; });
     fetch("/api/chat", { method: "POST", body: JSON.stringify({ message: text, history: hist }) }).then(function (res) {
@@ -663,7 +673,9 @@
         '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">呼吸暖光</div><div class="gw-row-desc">页面背后那束慢慢起伏的光。</div></div><div class="gw-toggle on" id="tBreath"></div></div></div>' +
       '<div class="gw-set-sec"><div class="gw-set-sec-lab">数据 · 无障碍</div>' +
         '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">减少动效</div><div class="gw-row-desc">关掉呼吸、墨迹、纸页翻动。</div></div><div class="gw-toggle" id="tReduce"></div></div>' +
-        '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">本地 vault 路径</div><div class="gw-row-desc">MD 是真相 · 存在你自己的设备里。</div></div><span class="gw-row-val">~/Gateway ⟩</span></div></div>';
+        '<div class="gw-row"><div class="gw-row-main"><div class="gw-row-title">本地 vault 路径</div><div class="gw-row-desc">MD 是真相 · 存在你自己的设备里。</div></div><span class="gw-row-val">~/Gateway ⟩</span></div></div>' +
+      '<div class="gw-set-sec"><div class="gw-set-sec-lab">告诉我们你想要</div>' +
+        '<button class="gw-row" id="rWant" style="width:100%;text-align:left;background:none;border:0;padding:14px 0;cursor:pointer;"><div class="gw-row-main"><div class="gw-row-title">我想要新功能 / 新视觉</div><div class="gw-row-desc">跳进对话告诉 AI,我们一起想。</div></div><span class="gw-row-val">› </span></button></div>';
     // load existing key
     api("/api/setup/current").then(function (r) {
       var k = r && r.models && r.models[0] && r.models[0].api_key; var inp = wrap.querySelector("#kDeepIn");
@@ -679,6 +691,18 @@
       });
     });
     wrap.querySelectorAll(".gw-toggle").forEach(function (t) { t.addEventListener("click", function () { t.classList.toggle("on"); }); });
+    // ⑥ F 显式信号:"我想要"按钮 → emit + 跳进 chat 预填 prompt
+    var wantBtn = wrap.querySelector("#rWant");
+    if (wantBtn) wantBtn.addEventListener("click", function () {
+      try { if (window.emitSignal) window.emitSignal("want_button_click", { from: "settings" }); } catch (e) {}
+      // 关掉 menu/sub-page 回到主屏 chat tab
+      var menu = document.querySelector(".gw-menu, .gw-submenu, .gw-subpage"); if (menu) menu.remove();
+      switchTab("chat");
+      setTimeout(function () {
+        var ta = document.querySelector(".gw-chat-input");
+        if (ta) { ta.value = "我想要"; ta.focus(); }
+      }, 80);
+    });
     return wrap;
   }
 
@@ -744,6 +768,12 @@
           '<div class="gw-set-sec"><div class="gw-set-sec-lab">看东西的那只眼 · 阿里云百炼（可选）</div>' +
             '<div class="gw-key"><div class="gw-key-desc">抠图、看照片里有什么、自动贴纸——视觉走这把。可跳过，以后在设置里补。</div>' +
             '<div class="gw-key-row"><input class="gw-key-in" id="obKey2" placeholder="粘贴百炼 key（可跳过）…" autocapitalize="off" autocorrect="off"></div></div></div>' +
+          '<div class="gw-set-sec"><div class="gw-set-sec-lab">想了解你一点 · 可跳过</div>' +
+            '<div class="gw-key"><div class="gw-key-desc">手机端，你想要的体验是？</div>' +
+            '<div class="gw-style-opts" id="obStyle">' +
+              '<button type="button" class="gw-style-opt" data-v="A">A · 简洁高效</button>' +
+              '<button type="button" class="gw-style-opt" data-v="B">B · 像桌面那样精致</button>' +
+            '</div></div></div>' +
         '</div>' +
       '</div>' +
       '<div class="gw-onboard-foot"><button class="gw-onboard-enter" id="obEnter">进入</button>' +
@@ -757,9 +787,24 @@
         t.textContent = "测试"; var s = ov.querySelector("#obStat"); s.className = "gw-key-status ok"; s.textContent = "已连通 · deepseek-chat"; ov.querySelector("#obKey").classList.add("ok");
       });
     });
+    // ⑥ F 风格偏好:单选按钮,选中即 emit + 存本地(可不选,留空即用户跳过)
+    var stylePick = null;
+    ov.querySelectorAll("#obStyle .gw-style-opt").forEach(function (b) {
+      b.addEventListener("click", function () {
+        stylePick = b.dataset.v;
+        ov.querySelectorAll("#obStyle .gw-style-opt").forEach(function (x) { x.classList.toggle("on", x === b); });
+      });
+    });
+    function emitStyleIfPicked() {
+      if (stylePick && window.emitSignal) {
+        try { window.emitSignal("onboard_style", { answer: stylePick }); } catch (e) {}
+        try { localStorage.setItem("gateway.mobile.setting/style_preference", stylePick); } catch (e) {}
+      }
+    }
     ov.querySelector("#obEnter").addEventListener("click", function () {
+      emitStyleIfPicked();
       saveKeys(keyIn.value.trim(), ov.querySelector("#obKey2").value.trim()).then(function () { ov.remove(); startApp(); });
     });
-    ov.querySelector("#obSkip").addEventListener("click", function () { ov.remove(); startApp(); });
+    ov.querySelector("#obSkip").addEventListener("click", function () { emitStyleIfPicked(); ov.remove(); startApp(); });
   }
 })();

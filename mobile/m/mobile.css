@@ -650,3 +650,7 @@ html, body { height: 100%; margin: 0; background: var(--bg); }
 .gw-onboard-foot { position: relative; z-index: 1; padding: 14px 22px calc(16px + var(--safe-bot)); border-top: 1px solid var(--line); }
 .gw-onboard-enter { width: 100%; appearance: none; border: 0; background: var(--ink); color: var(--bg); font: 500 16px var(--sans); letter-spacing: .06em; padding: 15px; border-radius: var(--r-pill); cursor: pointer; }
 .gw-onboard-skip { display: block; width: 100%; text-align: center; margin-top: 12px; background: none; border: 0; color: var(--ink-4); font: 13px var(--sans); cursor: pointer; }
+/* ⑥ F 风格偏好两选,onboarding 末尾一题 */
+.gw-style-opts { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.gw-style-opt { appearance: none; padding: 12px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink-2); font: 14px var(--sans); text-align: left; cursor: pointer; transition: background .12s, border-color .12s; }
+.gw-style-opt.on { background: var(--peach); border-color: var(--peach); color: var(--ink); }
