@@ -2762,6 +2762,13 @@ from chat_routes import (  # noqa: E402,F401
 )
 app.include_router(_chat_router)
 
+# Extract Module(ctrl-c-v § 9):图像簇(/api/attachments* + /api/cutout + /api/vision/classify,
+# 7 端点)搬到 image_routes.py。双份回报:缩 server + characterization 兼移动 parity N4-N8 oracle。
+# 索引/vision/cutout helper(_load/_save_attachments_index/_index_attachment/_gemini_classify_image/
+# _get_or_create_processed_attachment/io-map)留 server(chat_routes 也共用),image lazy from server import。
+from image_routes import router as _image_router  # noqa: E402
+app.include_router(_image_router)
+
 
 # ── UI 文件禁缓存:WKWebView 会按 URL 缓存 html/js/css,改了代码不 bump ?v= 就吃旧版
 # (2026-06-15 踩过:补建逻辑改了、重构建了,WebView 还服务 Build-1 缓存的旧 JS)。
@@ -3160,19 +3167,6 @@ def config_status():
     return {"ok": True, "model": get_model(), "provider": cfg.get("base_url", "https://api.deepseek.com/v1")}
 
 
-@app.get("/attachments/{date}/{name}")
-def get_attachment(date: str, name: str):
-    """serve uploaded images. date 必须 YYYY-MM-DD 格式,name 必须不含 path traversal。"""
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
-        raise HTTPException(400, "bad date")
-    if "/" in name or ".." in name:
-        raise HTTPException(400, "bad name")
-    f = ATTACHMENTS_DIR / date / name
-    if not f.exists():
-        raise HTTPException(404, "not found")
-    return FileResponse(f)
-
-
 # ── attachments 索引 + 文件管理 ──────────────────────────────────────
 # 每次上传 → 后台 OCR → 写 _index.json
 # AI 工具能 list / search / delete,做"持续文件管理"
@@ -3334,79 +3328,6 @@ def _index_attachment(date: str, filename: str, original: str, size: int, sha256
     # upsert 而非 append:若 vision call 先到、已建好 entry,这里只补 OCR / 元数据,
     # 不动已有的 vision 字段(原来 append + skip-if-exists 的逻辑碰上 race 会丢 vision)
     _index_upsert(date, filename, **fields)
-
-
-@app.get("/api/attachments")
-def attachments_list(date_from: str = "", date_to: str = "", limit: int = 100):
-    """前端 / AI 列 attachments(带 OCR 摘要)"""
-    arr = _load_attachments_index()
-    if date_from:
-        arr = [x for x in arr if x.get("date", "") >= date_from]
-    if date_to:
-        arr = [x for x in arr if x.get("date", "") <= date_to]
-    arr = sorted(arr, key=lambda x: (x.get("date", ""), x.get("filename", "")), reverse=True)
-    return {"items": arr[:limit], "total": len(arr)}
-
-
-@app.get("/api/attachments/search")
-def attachments_search(q: str, limit: int = 30):
-    """grep 文件名 / 原名 / OCR 文本。"""
-    if not q:
-        return {"items": [], "query": q}
-    arr = _load_attachments_index()
-    ql = q.lower()
-    hits = []
-    for x in arr:
-        hay = (x.get("filename", "") + " " + x.get("original", "") + " " + x.get("ocr_text", "")).lower()
-        if ql in hay:
-            hits.append(x)
-    hits = sorted(hits, key=lambda x: x.get("date", ""), reverse=True)
-    return {"items": hits[:limit], "query": q, "total": len(hits)}
-
-
-@app.post("/api/attachments/delete")
-async def attachments_delete(req: Request):
-    """删 attachment 文件 + 索引条目。body: {date, filename}"""
-    body = await req.json()
-    date = (body.get("date") or "").strip()
-    filename = (body.get("filename") or "").strip()
-    if not date or not filename or "/" in filename or ".." in filename:
-        raise HTTPException(400, "need {date, filename} (no path traversal)")
-    f = ATTACHMENTS_DIR / date / filename
-    if f.exists():
-        try:
-            f.unlink()
-        except Exception as e:
-            raise HTTPException(500, f"delete file failed: {e}")
-    arr = _load_attachments_index()
-    arr = [x for x in arr if not (x.get("date") == date and x.get("filename") == filename)]
-    _save_attachments_index(arr)
-    return {"ok": True, "removed": filename}
-
-
-@app.post("/api/attachments/reindex")
-def attachments_reindex():
-    """扫 attachments 目录,把没进索引的图都补 OCR 一遍。
-    用户首次启用文件管理,或索引丢了,调一次。"""
-    if not ATTACHMENTS_DIR.exists():
-        return {"ok": True, "indexed": 0, "skipped": 0}
-    existing = _load_attachments_index()
-    existing_keys = {(x.get("date"), x.get("filename")) for x in existing}
-    indexed = 0
-    skipped = 0
-    for day_dir in sorted(ATTACHMENTS_DIR.iterdir()):
-        if not day_dir.is_dir() or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day_dir.name):
-            continue
-        for f in sorted(day_dir.iterdir()):
-            if not f.is_file() or f.name.startswith("_") or f.name.startswith("."):
-                continue
-            key = (day_dir.name, f.name)
-            if key in existing_keys:
-                skipped += 1
-                continue
-            _index_attachment(day_dir.name, f.name, "", f.stat().st_size)
-            indexed += 1
-    return {"ok": True, "indexed": indexed, "skipped": skipped}
 
 
 # ── sliding-window summarization (B 包) ──────────────────────────────
@@ -4628,64 +4549,6 @@ def api_init_status():
         return dict(_INIT_STATE)
 
 
-@app.post("/api/cutout")
-async def cutout_image(req: Request):
-    """对一张已经上传的图(/attachments/...)做去背,存为某 task 的 image。
-    body: {attachment_url: "/attachments/YYYY-MM-DD/xxx.jpg", task_name: "鱼油（Swisse）"}
-    成功返 {ok, task_name, image_url}
-    """
-    body = await req.json()
-    url = (body.get("attachment_url") or "").strip()
-    task_name = (body.get("task_name") or "").strip()
-    if not url or not task_name:
-        raise HTTPException(400, "need {attachment_url, task_name}")
-
-    m = re.match(r"^/attachments/([^/]+)/([^/]+)$", url)
-    if not m:
-        raise HTTPException(400, f"bad attachment_url: {url}")
-    src = ATTACHMENTS_DIR / m.group(1) / m.group(2)
-    if not src.exists():
-        raise HTTPException(404, f"attachment not found: {url}")
-
-    processed, err = _get_or_create_processed_attachment(url)
-    if err:
-        raise HTTPException(502, err)
-
-    DAILY_TASK_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    stem = _sanitize_task_filename(task_name)
-    out_file = DAILY_TASK_IMAGES_DIR / f"{stem}.png"
-    out_file.write_bytes(processed.read_bytes())
-
-    rel = _pretty_rel(out_file)
-    image_map = _load_task_image_map()
-    image_map[task_name] = rel
-    _save_task_image_map(image_map)
-
-    # 顺带跑 OCR 抽颗数(用原图,不用抠图后的)。失败/无识别都不阻断 cutout 流。
-    cfg = load_config() or {}
-    ocr_pill_count = None
-    try:
-        ocr_text = _ocr_text(src)
-        ocr_pill_count = _parse_pill_count_from_ocr(ocr_text)
-        if ocr_pill_count:
-            # 只在 meta 还没填过 total 时自动写入(尊重用户已有手填)
-            meta_map = _load_task_meta_map()
-            cur = meta_map.get(task_name) or {}
-            if not cur.get("total_pills"):
-                cur["total_pills"] = ocr_pill_count
-                meta_map[task_name] = cur
-                _save_task_meta_map(meta_map)
-    except Exception as e:
-        log.warning(f"cutout OCR sidecar failed: {type(e).__name__}: {e}")
-
-    return {
-        "ok": True,
-        "task_name": task_name,
-        "image_url": f"/{rel}",
-        "ocr_pill_count": ocr_pill_count,
-    }
-
-
 # PULSE_DIR 已搬到 pulse_io.py(P2,顶部 re-export)
 
 # ─── daily eval (测试端点) ──────────────────────────────────────────────────
@@ -5462,23 +5325,6 @@ def telemetry_reset_client_id():
         return {"ok": True, "client_id": new_id}
     except Exception as e:
         raise HTTPException(500, f"reset failed: {type(e).__name__}: {e}")
-
-
-@app.post("/api/vision/classify")
-async def vision_classify_endpoint(req: Request):
-    """直接给前端用,不走 AI tool 那条路。
-    body: {attachment_url, extra_question?}
-    """
-    body = await req.json()
-    url = (body.get("attachment_url") or "").strip()
-    extra_q = (body.get("extra_question") or "").strip()
-    if not url:
-        raise HTTPException(400, "need attachment_url")
-    m = re.match(r"^/attachments/([^/]+)/([^/]+)$", url)
-    if not m:
-        raise HTTPException(400, f"bad attachment_url: {url}")
-    f = ATTACHMENTS_DIR / m.group(1) / m.group(2)
-    return _gemini_classify_image(f, extra_q)
 
 
 _SCHEDULE_FILE_RE = re.compile(r"^26\.(\d{1,2})\.(\d{1,2})")
