@@ -30,7 +30,7 @@ oracle 文件:`tests/test_journal_routes.py` + helper 层 `tests/test_authorship
 
 | id | 契约(oracle test) | mobile shim 处 | 状态 | sha | 备注 |
 |----|---|---|---|---|---|
-| J1 | test_today_returns_blocks | mobile-api.js readJournalMd/解析 | ❌ | — | 读:今天 blocks 形状 |
+| J1 | test_today_returns_blocks | mobile-api.js GET /api/journal/today L1142 + parseJournal | ✅ | 02bc3ae | 返 `{file, date, blocks: [{time, h1_raw, h2: [{tags, title, body, commits}]}]}` 全字段对齐桌面 oracle。3/3 pass:date 字符串匹配 + blocks 是数组 + blocks 含"早醒"原文 |
 | J2 | test_days_lists_files | journal/days 等价 | ❌ | — | |
 | J3 | test_tag_stats_top_and_default_for_new_user | tag-stats | ❌ | — | 新用户兜底 5 default tag |
 | J4 | test_new_day_creates_then_idempotent | new-day 骨架生成 | ❌ | — | 幂等;dayN 编号;半点格 |
