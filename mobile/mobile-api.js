@@ -903,6 +903,10 @@
   function dispatchTool(name, args) {
     args = args || {};
     var fch = (typeof window !== "undefined") ? window.fetch : realFetch;
+    // 写型 journal tool 注入 author='ai'(AI 调用 = fail-safe 路径,撞 @user 仍拒;
+    // HTTP user UI 走 endpoint 默认 'user',跟桌面 journal_routes 一致 — 参 J10/J-CB1)
+    var writeJournalTools = ["patch_journal_block", "insert_journal_block", "append_journal_comment"];
+    if (writeJournalTools.indexOf(name) >= 0 && !args.author) args.author = "ai";
     var H = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(args) };
     switch (name) {
       case "patch_journal_block": return fch("/api/journal/patch", H).then(function (r) { return r.json(); });
@@ -1684,11 +1688,14 @@
       //  · authorship boundary:author='ai' + 块内 H2 标 @user → 拒(test_authorship)
       //  · H2-rename guard:author='ai' + existing H2 strip 不等 new H2 strip + !allow_h2_rename → 拒
       //    (test_patch_h2_rename;5.29 联想 entry 被 patch 吃掉事故的反向防御)
-      //  · author 字段未传默认 'ai' 失败安全(test_patch_block_default_caller_is_ai)
+      //  · HTTP endpoint 默认 'user'(user-trust,test_patch_http_user_can_patch_ai_block J10)
+      //    对齐桌面 journal_routes.py L189 显式 _patch_block(..., author="user")
+      //  · AI tool 调用走 dispatchTool 注入 author='ai',撞 @user 仍拒(fail-safe 桌面 T5
+      //    pure-function 等价 = dispatchTool 路径模拟)
       var date = (body && body.date) || todayIso();
       var time = body && body.time;
       var newMd = (body && body.new_md) || "";
-      var author = (body && body.author) || "ai";
+      var author = (body && body.author) || "user";
       var allowRename = !!(body && body.allow_h2_rename);
       return Store.readJournalMd(date).then(function (md) {
         if (md === null) return jsonResp({ error: "no file" }, 404);
