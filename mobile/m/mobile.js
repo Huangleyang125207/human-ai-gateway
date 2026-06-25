@@ -744,6 +744,10 @@
       case "fetch_url": return "看 " + ((args.url || "").replace(/^https?:\/\//, "").slice(0, 32)) + " 正文";
       case "vision_classify": return "看图 · " + ((args.attachment_url || "").split("/").pop() || "");
       case "ocr_image": return "OCR · " + ((args.attachment_url || "").split("/").pop() || "");
+      case "list_my_uploads": return "看最近 " + (args.n || 20) + " 张图";
+      case "search_my_uploads":
+      case "ask_photo_curator": return "找图 · \"" + (args.query || "") + "\"";
+      case "delete_attachment": return "删图 · " + ((args.attachment_url || "").split("/").pop() || "");
       default: return name;
     }
   }

@@ -92,6 +92,27 @@
         return ks.map(function (k) { return k.slice("attachments/".length); }).sort();
       });
     },
+    // attachment metadata index(对齐 PC _index.json):vision_classify result 缓存 + uploaded_at
+    // 走 setting/uploads_index/<date>/<stem> 持久化,跟 attachment 本体并列存
+    writeUploadMeta: function (date, stem, meta) { return Backend.setText("setting/uploads_index/" + date + "/" + stem, JSON.stringify(meta)); },
+    readUploadMeta: function (date, stem) {
+      return Backend.getText("setting/uploads_index/" + date + "/" + stem).then(function (s) {
+        try { return s ? JSON.parse(s) : null; } catch (e) { return null; }
+      });
+    },
+    deleteUploadMeta: function (date, stem) { return Backend.remove("setting/uploads_index/" + date + "/" + stem); },
+    listAllUploadMetas: function () {
+      return Backend.keys("setting/uploads_index/").then(function (ks) {
+        return Promise.all(ks.map(function (k) {
+          return Backend.getText(k).then(function (s) {
+            var m = /^setting\/uploads_index\/([^/]+)\/(.+)$/.exec(k);
+            if (!m) return null;
+            try { var meta = s ? JSON.parse(s) : {}; meta._date = m[1]; meta._stem = m[2]; meta._url = "/attachments/" + m[1] + "/" + m[2]; return meta; }
+            catch (e) { return null; }
+          });
+        })).then(function (rs) { return rs.filter(Boolean); });
+      });
+    },
     // ⑥ B Turn 5:AI 动态 widget manifest 持久化 setting/widgets/<id>
     listWidgetManifests: function () {
       return Backend.keys("setting/widgets/").then(function (ks) {
@@ -851,6 +872,30 @@
       parameters: { type: "object", properties: {
         attachment_url: { type: "string" },
       }, required: ["attachment_url"] }}},
+    // Group D photo curator — 复刻 PC list_my_uploads / search_my_uploads / ask_photo_curator
+    { type: "function", function: { name: "list_my_uploads",
+      description: "列用户最近上传的图(默认 20 张,降序按上传时间)。返 {url, date, description, kind}。",
+      parameters: { type: "object", properties: {
+        n: { type: "integer", description: "几张,默认 20,最多 100" },
+      }} }},
+    { type: "function", function: { name: "search_my_uploads",
+      description: "按关键词搜本机已上传的图(匹配 vision_classify cache 的 description / kind / brand)。返 hits 数组。",
+      parameters: { type: "object", properties: {
+        query: { type: "string", description: "如 '鱼油' / '猫' / '截图' / 'Life Extension' 等" },
+      }, required: ["query"] }},
+    },
+    { type: "function", function: { name: "ask_photo_curator",
+      description: "让 photo curator 帮用户找图(自然语言描述,内部走 search_my_uploads 精确搜)。如用户问 '上周拍的那张瓶子',你传 query='瓶子'。",
+      parameters: { type: "object", properties: {
+        query: { type: "string" },
+      }, required: ["query"] }},
+    },
+    { type: "function", function: { name: "delete_attachment",
+      description: "删除一张已上传的图(同时删 metadata index)。不可逆,删前跟用户确认。",
+      parameters: { type: "object", properties: {
+        attachment_url: { type: "string", description: "/attachments/<date>/<stem>" },
+      }, required: ["attachment_url"] }},
+    },
   ];
   // tool_name → mobile-api endpoint dispatch
   // 注意:用 window.fetch(shim-hijacked)而不是 realFetch — /api/* 路径要走 shim
@@ -914,6 +959,13 @@
         var ocrArgs = { attachment_url: args.attachment_url, extra_question: "请把图里所有文字 OCR 出来,只返文字本身,不要解释。" };
         return fch("/api/vision/classify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ocrArgs) })
           .then(function (r) { return r.json(); });
+      case "list_my_uploads": return fch("/api/uploads/list?n=" + (args.n || 20)).then(function (r) { return r.json(); });
+      case "search_my_uploads": return fch("/api/uploads/search", H).then(function (r) { return r.json(); });
+      case "ask_photo_curator":
+        // 内部复用 search_my_uploads(简化:不另起 LLM 子查询;PC 端 photo curator 是 LLM 子查询,
+        // mobile 端简化为关键词搜)
+        return fch("/api/uploads/search", H).then(function (r) { return r.json(); });
+      case "delete_attachment": return fch("/api/uploads/delete", H).then(function (r) { return r.json(); });
       default: return Promise.resolve({ error: "unknown tool: " + name });
     }
   }
@@ -1359,7 +1411,10 @@
         return Store.readAttachment(date, stem).then(function (existing) {
           if (existing) return jsonResp({ ok: true, url: "/attachments/" + date + "/" + stem, deduped: true, size: parsed.buf.byteLength });
           return Store.writeAttachment(date, stem, dataUrl).then(function () {
-            return jsonResp({ ok: true, url: "/attachments/" + date + "/" + stem, deduped: false, size: parsed.buf.byteLength });
+            // 写 metadata index(uploaded_at + size + mime)— vision_classify 后续 enrich description
+            return Store.writeUploadMeta(date, stem, { uploaded_at: Date.now(), size: parsed.buf.byteLength, mime: parsed.mime }).then(function () {
+              return jsonResp({ ok: true, url: "/attachments/" + date + "/" + stem, deduped: false, size: parsed.buf.byteLength });
+            });
           });
         });
       });
@@ -1371,13 +1426,69 @@
       var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(attUrl);
       if (!m) return jsonResp({ ok: false, error: "attachment_url 格式错" }, 400);
       var date = m[1], stem = m[2];
-      return Promise.all([Store.readAttachment(date, stem), Store.getSetting("dashscope_key")]).then(function (rs) {
-        var dataUrl = rs[0], key = rs[1];
+      return Promise.all([Store.readAttachment(date, stem), Store.getSetting("dashscope_key"), Store.readUploadMeta(date, stem)]).then(function (rs) {
+        var dataUrl = rs[0], key = rs[1], meta = rs[2] || {};
         if (!dataUrl) return jsonResp({ ok: false, error: "attachment 不存在: " + attUrl }, 404);
+        // cache 命中:不带 extra_question 的默认描述 + 已 cache → 直接返(critic 标的钱包/latency leak 修)
+        if (!q && meta.vision_result) {
+          return jsonResp({ ok: true, attachment_url: attUrl, result: meta.vision_result, cached: true });
+        }
         return _qwenClassifyImage(dataUrl, q, key).then(function (j) {
           if (j && j.error) return jsonResp({ ok: false, error: j.error, hint: j.hint, detail: j.detail });
+          // 默认描述路径(无 extra_question)cache 起来
+          if (!q) {
+            meta.vision_result = j; meta.vision_at = Date.now();
+            return Store.writeUploadMeta(date, stem, meta).then(function () {
+              return jsonResp({ ok: true, attachment_url: attUrl, result: j, cached: false });
+            });
+          }
           return jsonResp({ ok: true, attachment_url: attUrl, result: j });
         });
+      });
+    },
+    // ── Group D photo curator — list/search/curator/delete attachment(对齐 PC list_my_uploads)
+    "GET /api/uploads/list": function (req, u) {
+      var qs = new URL(u, "http://x").searchParams;
+      var n = Math.max(1, Math.min(parseInt(qs.get("n") || "20", 10), 100));
+      return Store.listAllUploadMetas().then(function (metas) {
+        // 按 uploaded_at 降序,top n
+        metas.sort(function (a, b) { return (b.uploaded_at || 0) - (a.uploaded_at || 0); });
+        var out = metas.slice(0, n).map(function (m) {
+          return {
+            url: m._url, date: m._date, uploaded_at: m.uploaded_at,
+            size: m.size, mime: m.mime,
+            description: m.vision_result && m.vision_result.description,
+            kind: m.vision_result && m.vision_result.kind,
+          };
+        });
+        return jsonResp({ ok: true, n: out.length, uploads: out });
+      });
+    },
+    "POST /api/uploads/search": function (req, u, body) {
+      var q = (body && body.query || "").trim().toLowerCase();
+      if (!q) return jsonResp({ ok: false, error: "缺 query" }, 400);
+      return Store.listAllUploadMetas().then(function (metas) {
+        var hits = metas.filter(function (m) {
+          if (!m.vision_result) return false;
+          var hay = [m.vision_result.description || "", m.vision_result.kind || "", m.vision_result.brand || ""].join(" ").toLowerCase();
+          return hay.indexOf(q) >= 0;
+        }).map(function (m) {
+          return { url: m._url, date: m._date, description: m.vision_result.description, kind: m.vision_result.kind };
+        });
+        return jsonResp({ ok: true, query: q, n: hits.length, hits: hits.slice(0, 20) });
+      });
+    },
+    "POST /api/uploads/delete": function (req, u, body) {
+      var attUrl = body && body.attachment_url;
+      if (!attUrl) return jsonResp({ ok: false, error: "缺 attachment_url" }, 400);
+      var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(attUrl);
+      if (!m) return jsonResp({ ok: false, error: "url 格式错" }, 400);
+      var date = m[1], stem = m[2];
+      return Promise.all([
+        Backend.remove("attachments/" + date + "/" + stem),
+        Store.deleteUploadMeta(date, stem),
+      ]).then(function () {
+        return jsonResp({ ok: true, deleted: attUrl });
       });
     },
     "GET /api/attachments/get": function (req, u) {
