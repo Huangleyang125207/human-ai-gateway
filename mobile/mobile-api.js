@@ -1709,6 +1709,8 @@
       //    pure-function 等价 = dispatchTool 路径模拟)
       var date = (body && body.date) || todayIso();
       var time = body && body.time;
+      // J12 test_patch_missing_new_md_400:new_md 必传(空串拒,旧 fallback ""静默通过)
+      if (body && body.new_md == null) return jsonResp({ ok: false, error: "缺 new_md" }, 400);
       var newMd = (body && body.new_md) || "";
       var author = (body && body.author) || "user";
       var allowRename = !!(body && body.allow_h2_rename);
