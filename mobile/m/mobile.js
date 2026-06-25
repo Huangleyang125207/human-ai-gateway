@@ -331,22 +331,41 @@
     var filled = ctx.water_filled | 0;
     var cupImg = ctx.cup_image;
     var readonly = !!ctx.readonly;
-    var block = el("div", "gw-care-block", '<div class="gw-care-label">八杯水 <span style="opacity:.55">· 长按换杯</span></div>');
+    var block = el("div", "gw-care-block" + (readonly ? " readonly" : ""),
+      '<div class="gw-care-label">八杯水 <span class="whisper">' + (readonly ? "历史日只读" : "睡前一抹点亮") + "</span></div>");
     var row = el("div", "gw-cups");
     var cups = [];
-    var hasImg = !!cupImg;
+    // cd cupSVG:钢笔速写玻璃杯 + 水裹 .water clip-path 倒水动画
+    function cupSVG(filledFlag, idx) {
+      var cid = "cups-clip-" + idx;
+      var waterH = 15;
+      var water = filledFlag
+        ? '<g class="water" clip-path="url(#' + cid + ')"><rect x="3" y="' + (36 - waterH) + '" width="16" height="' + (waterH + 2) + '" fill="var(--fill-water)"/><path d="M3 ' + (37 - waterH) + ' q4 -2 8 0 t8 0" fill="none" stroke="var(--fill-water)" stroke-width="1.6" opacity="0.7"/></g>'
+        : '';
+      var glassPath = 'M4 4 L18 4 L16.4 34 Q16.2 36 14.4 36 L7.6 36 Q5.8 36 5.6 34 Z';
+      return '<svg viewBox="0 0 22 38" preserveAspectRatio="none">' +
+        '<defs><clipPath id="' + cid + '"><path d="' + glassPath + '"/></clipPath></defs>' +
+        water +
+        '<path d="' + glassPath + '" fill="none" stroke="' + (filledFlag ? 'var(--ink-soft)' : 'var(--ink-faint)') + '" stroke-width="1.3" stroke-linejoin="round"/>' +
+        '</svg>';
+    }
     for (var i = 0; i < N; i++) {
-      var inner = hasImg ? '<img src="' + cupImg + '" alt="" class="gw-cup-img">' : '<div class="gw-cup-fill"></div>';
-      var c = el("div", "gw-cup" + (hasImg ? " with-image" : ""), inner);
+      var c = el("div", "gw-cup", cupSVG(i < filled, i));
       cups.push(c); row.appendChild(c);
     }
-    var count = el("div", "gw-cups-count");
+    var count = el("div", "gw-cups-foot");
+    count.innerHTML = '<b>' + filled + '</b> / ' + N + " 杯 · <span class=\"hint\">" +
+      (readonly ? "" : (filled >= N ? "今天喝够了" : "还差 " + (N - filled) + " 杯")) + "</span>";
     function paint(focus) {
       cups.forEach(function (c, i) {
-        c.className = "gw-cup" + (hasImg ? " with-image" : "") + (i < filled ? " filled" : "") +
-          (i === focus ? " cup-focus" : (focus >= 0 && Math.abs(i - focus) === 1 ? " cup-near" : ""));
+        c.className = "gw-cup" + (i < filled ? " just" : "") +
+          (i === focus ? " focus" : (focus >= 0 && Math.abs(i - focus) === 1 ? " near" : ""));
+        c.innerHTML = cupSVG(i < filled, i);
       });
-      count.innerHTML = "<b>" + filled + "</b> / " + N + " 杯 · " + (readonly ? "历史日只读" : "滑过杯子点亮 · 长按换杯");
+      var b = count.querySelector("b");
+      var hint = count.querySelector(".hint");
+      if (b) b.textContent = filled;
+      if (hint) hint.textContent = readonly ? "" : (filled >= N ? "今天喝够了" : "还差 " + (N - filled) + " 杯");
     }
     function idxAt(x) { var best = -1, bd = 1e9; cups.forEach(function (c, i) { var r = c.getBoundingClientRect(); var d = Math.abs(x - (r.left + r.width / 2)); if (d < bd) { bd = d; best = i; } }); return best; }
     function apply(x) { if (readonly) return; var i = idxAt(x); if (i < 0) return; var was = filled; filled = i + 1; paint(i); if (i + 1 > was) cups[i].classList.add("just"); }
@@ -394,16 +413,27 @@
   function buildTasksPure(ctx) {
     var tasks = ctx.tasks || [];
     var readonly = !!ctx.readonly;
-    var block = el("div", "gw-care-block", '<div class="gw-care-label">今日打卡 <span style="opacity:.55">· 长按换图标</span></div>');
+    var block = el("div", "gw-care-block" + (readonly ? " readonly" : ""),
+      '<div class="gw-care-label">今日打卡</div>');
     var row = el("div", "gw-tasks");
     tasks.forEach(function (t) {
-      var inner = t.image_url
-        ? '<img src="' + t.image_url + '" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">'
+      var done = !!t.checked;
+      var todayIntake = t.today_intake | 0;
+      var dailyDose = Math.max(1, t.daily_dose | 0 || 1);
+      // cd 视觉:.gw-task-disc 圆形容器(虚线/实线 ring + check + badge + glyph)+ name + dose
+      var ring = done
+        ? '<svg class="ring" viewBox="0 0 46 46" fill="none"><circle cx="23" cy="23" r="21.5" stroke="var(--umber)" stroke-width="1.4"/></svg>'
+        : '<svg class="ring" viewBox="0 0 46 46" fill="none"><circle cx="23" cy="23" r="21.5" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="2 3"/></svg>';
+      var check = done ? '<svg class="gw-task-check" width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3.5 9.5 Q6 12 7.5 14 Q10 8 15 4" stroke="var(--vermilion)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '';
+      var badge = (typeof t.days_left === "number" && t.days_left <= 3) ? '<span class="gw-task-badge">' + t.days_left + 'd</span>' : '';
+      var dose = (dailyDose >= 2) ? (todayIntake + "/" + dailyDose) : (done ? "✓" : " ");
+      var glyph = t.image_url
+        ? '<img src="' + t.image_url + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">'
         : esc((t.name || "·").slice(0, 1));
-      var urgent = typeof t.days_left === "number" && t.days_left <= 3;
-      var badge = urgent ? '<span class="gw-task-badge">' + t.days_left + 'd</span>' : '';
-      var b = el("button", "gw-task" + (t.checked ? " on" : "") + (urgent ? " urgent" : ""),
-        '<span class="gw-task-glyph">' + inner + '</span><span class="gw-task-name">' + esc(t.name) + '</span>' + badge);
+      var b = el("button", "gw-task" + (done ? " done" : ""),
+        '<span class="gw-task-disc">' + ring + check + badge + '<span class="gw-task-glyph">' + glyph + '</span></span>' +
+        '<span class="gw-task-name">' + esc(t.name) + '</span>' +
+        '<span class="gw-task-dose">' + dose + '</span>');
       if (readonly) b.disabled = true;
       var lp = null, didLong = false;
       b.addEventListener("pointerdown", function () {
