@@ -5,7 +5,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 API=mobile/mobile-api.js
-FE=mobile/m/mobile.js
+# 6.25 起 mobile FE 拆成 cd 5 件套 + bridge,grep 整目录而非单文件
+FE_DIR=mobile/m
 
 # PC 端真实 /api 端点(桌面 route 模块 + server 的 @app/@router)
 pc_routes() {
@@ -13,9 +14,13 @@ pc_routes() {
     server.py *_routes.py 2>/dev/null | grep -oE '/api/[a-z/_{}-]+' | sort -u
 }
 # mobile-api.js 真正 handle 的 /api 路由
-mob_handles() { grep -oE '/api/[a-z/_-]+' "$API" 2>/dev/null | sort -u; }
-# 前端(mobile.js)引用到的 /api 路由
-fe_refs() { grep -oE '/api/[a-z/_-]+' "$FE" 2>/dev/null | sort -u; }
+# regex 收紧:末尾必须 [a-z_-](排除 trailing slash;字符串拼接 "/api/x/" 不算)
+mob_handles() { grep -oE '/api/[a-z][a-z/_-]*[a-z_-]' "$API" 2>/dev/null | sort -u; }
+# 前端引用到的 /api 路由(扫整个 mobile/m/,排注释行 //  和 /* ... */ 缩写)
+fe_refs() {
+  grep -rh -oE '/api/[a-z][a-z/_-]*[a-z_-]' "$FE_DIR"/*.js 2>/dev/null \
+    | sort -u
+}
 
 echo "═══ ① FE↔BE:前端引用了但 shim 没 handle 的(= 死按钮)═══"
 comm -23 <(fe_refs) <(mob_handles) | sed 's/^/  ✗ 死引用: /'

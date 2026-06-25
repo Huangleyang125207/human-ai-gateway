@@ -11,7 +11,7 @@
 //   GW.days/tasks/water/journal/thread — async prefetch 进真数据
 //   GW.sendChat        → /api/chat SSE 真流式 + tool chip 三态
 //   bus.on('pulse')    → POST /api/daily-tasks/{water,check}(滑/打)
-//   bus.on('reloadDay') → diff snapshot → POST /api/journal/{insert-block,patch,delete-block}
+//   bus.on('reloadDay') → diff snapshot → POST insert-block / patch / delete-block
 //
 // 红线:cd 5 件套字节不改,bridge 是 monkey-patch + 监听层。
 
