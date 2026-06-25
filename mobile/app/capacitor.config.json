@@ -9,11 +9,33 @@
   },
   "ios": {
     "contentInset": "never",
-    "backgroundColor": "#f4ede2"
+    "backgroundColor": "#f4ede2",
+    "scheme": "gateway",
+    "preferredContentMode": "mobile"
+  },
+  "android": {
+    "backgroundColor": "#f4ede2",
+    "allowMixedContent": false,
+    "captureInput": true
   },
   "plugins": {
     "CapacitorHttp": {
       "enabled": true
+    },
+    "Camera": {
+      "_comment": "强转 JPEG 防 HEIC 在百炼 vision 拒(critic 标的);quality 80 防 base64 OOM 闪退",
+      "format": "jpeg",
+      "quality": 80,
+      "allowEditing": false,
+      "saveToGallery": false,
+      "presentationStyle": "popover"
+    },
+    "Filesystem": {
+      "_comment": "iCloud Backup 排除 attachments 目录(critic 标的 5GB 撑满 trap),真机阶段配合 Swift bridge 写 NSURLIsExcludedFromBackupKey",
+      "iosDatabaseLocation": "Library/NoCloud"
+    },
+    "Preferences": {
+      "group": "NSUserDefaults"
     }
   }
 }

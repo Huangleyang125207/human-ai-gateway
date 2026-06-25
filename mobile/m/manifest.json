@@ -1,0 +1,22 @@
+{
+  "name": "Gateway · 半小时块日记",
+  "short_name": "Gateway",
+  "description": "AI 跟你共写的一本日记。半小时一格,墨笔留痕,纸感落落。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4ede2",
+  "theme_color": "#a86e46",
+  "lang": "zh-CN",
+  "categories": ["lifestyle", "productivity"],
+  "icons": [
+    {
+      "src": "../../brand/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": []
+}

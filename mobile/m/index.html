@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
 <title>Gateway</title>
 <!-- 移动原生前端 · cd 设计组装。shim 数据层 + gatewayMd 渲染,classic 单一日间。 -->
+
+<!-- PWA — 让 iOS Safari / Android Chrome 用户能"添加到主屏"作 native-like app -->
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#a86e46">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Gateway">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="../../brand/logo.svg">
+
 <script>window.__GATEWAY_MOBILE__ = true;</script>
 <script src="../mobile-api.js?v=cec"></script>
 <link rel="stylesheet" href="./mobile.css?v=cec">
