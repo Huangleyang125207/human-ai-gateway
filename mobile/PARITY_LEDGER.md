@@ -32,7 +32,7 @@ oracle 文件:`tests/test_journal_routes.py` + helper 层 `tests/test_authorship
 |----|---|---|---|---|---|
 | J1 | test_today_returns_blocks | mobile-api.js GET /api/journal/today L1142 + parseJournal | ✅ | 02bc3ae | 返 `{file, date, blocks: [{time, h1_raw, h2: [{tags, title, body, commits}]}]}` 全字段对齐桌面 oracle。3/3 pass:date 字符串匹配 + blocks 是数组 + blocks 含"早醒"原文 |
 | J2 | test_days_lists_files | mobile-api.js GET /api/journal/days L1135 + Store.listJournalDates | ✅ | ec44e93 | 返 `{days: [{date, stem, file}]}` length 跟桌面 listJournalDates 一致。3/3 pass:length==2 + has_today + has_past3(写两个 day fixture)|
-| J3 | test_tag_stats_top_and_default_for_new_user | tag-stats | ❌ | — | 新用户兜底 5 default tag |
+| J3 | test_tag_stats_top_and_default_for_new_user | mobile-api.js tag-stats L1131 | ✅ | 6c09927 | 旧实装返空 array,本 commit fix:空 vault → 5 default tag(思考/探索/工作/饮食/运动)+ default:true;有 day file → 扫所有 md 的 `## #tag` 行统计 top limit,sort by count desc。JS oracle 2/2:① empty_vault 5 default + ② "思考"+"投资" 都在 top 内 |
 | J4 | test_new_day_creates_then_idempotent | mobile-api.js new-day L1149 + emptyDayMd L705 | ✅ | 1e4057f | 实装齐:首次 → `{ok:true, created:true}` + 写 emptyDayMd 半点格(7:00-23:00);第二次 → `{ok:true, created:false}` 幂等;dayN 编号(6.24=第53天)。JS oracle 6/6 pass |
 | J5 | test_insert_block_http_stamps_user | mobile-api.js L1386 insert-block(J-CB1 同 fix) | ✅ | 20081e4 | ★HTTP user-trust:POST 不传 author 默认 "user",新 H2 字节级 stamp "## #工作 新条目 @user" 字面对齐桌面 oracle assert。3/3 pass(status 200 + marker + body)。 |
 | J6 | test_insert_block_missing_time_400 | mobile-api.js insert-block L1404 校验 | ✅ | c716826 | 加 `if (!time) return 400`(旧实装是 fallback "0:0" 写 # 0：00 假成功);regression happy path 200 仍通 |
