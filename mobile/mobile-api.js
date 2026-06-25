@@ -1233,14 +1233,30 @@
     "POST /api/daily-tasks/meta": function (req, u, body) {
       var name = (body && body.task_name) || "";
       if (!name) return jsonResp({ ok: false, error: "缺 task_name" }, 400);
+      // D4 test_meta_update_total_pills_daily_dose_and_clear:非 int → 400
+      // total_pills="" / null / 0 → pop;"abc" → 400;daily_dose "x" → 400
+      function isBadInt(v) {
+        // 字符串前缀非 digit/- → 拒(parseInt 否则会吞掉前缀)
+        var s = String(v);
+        return s.length === 0 || /^[^\d-]/.test(s) || isNaN(parseInt(s, 10));
+      }
+      if ("total_pills" in body) {
+        var tv = body.total_pills;
+        if (!(tv === null || tv === "" || tv === 0) && isBadInt(tv)) {
+          return jsonResp({ ok: false, error: "total_pills 必须是整数" }, 400);
+        }
+      }
+      if ("daily_dose" in body && isBadInt(body.daily_dose)) {
+        return jsonResp({ ok: false, error: "daily_dose 必须是整数" }, 400);
+      }
       return Store.getSetting("taskmeta/" + name).then(function (raw) {
         var meta = {}; try { meta = raw ? JSON.parse(raw) : {}; } catch (e) {}
         if ("total_pills" in body) {
           var v = body.total_pills;
           if (v === null || v === "" || v === 0) delete meta.total_pills;
-          else meta.total_pills = Math.max(1, parseInt(v, 10) || 0);
+          else meta.total_pills = Math.max(1, parseInt(v, 10));
         }
-        if ("daily_dose" in body) meta.daily_dose = Math.max(1, parseInt(body.daily_dose, 10) || 1);
+        if ("daily_dose" in body) meta.daily_dose = Math.max(1, parseInt(body.daily_dose, 10));
         return Store.setSetting("taskmeta/" + name, JSON.stringify(meta)).then(function () {
           return jsonResp({ ok: true, task_name: name, total_pills: meta.total_pills || null, daily_dose: meta.daily_dose || 1 });
         });

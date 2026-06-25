@@ -60,7 +60,7 @@ oracle 文件:`tests/test_daily_tasks_routes.py`
 | D1 | test_catalog_shape_and_is_writable | mobile-api.js GET /api/daily-tasks L1146 | ✅ | 21bd1c3 | catalog 返完整 shape `{tasks, water_filled, date, is_today, is_writable}` 字段全齐;fresh task 默认 `{name, checked:false, image_url:null, total_pills:null, daily_dose:1, today_intake:0, remaining:null}`。JS oracle 9/9 pass(带 ?date=today canonical 路径)|
 | **D2** | **test_check_backfill_window_yesterday_before_noon_else_403** | mobile-api.js **L466 isWritableDate** | ✅ | fde19c1 | 闭集 `{today, yesterday-if-hour<12}` 已实装(L466-475);桌面 pytest 16/16 GREEN + JS oracle 5/5 + check-fe-be 干净 |
 | **D3** | **test_check_intake_increment_clamp_and_md_box** | mobile-api.js **L1262 check + L634/646 setSupplement{Checked,Progress}** | ✅ | 53230fc | _bump_intake 数学已实装:三入口 intake/increment/checked/toggle + clamp [0,dose] + dose>=2 sub-box(setSupplementProgress)+ dose<2 单行(setSupplementChecked)+ intake=0 log pop。桌面 16/16 GREEN + JS oracle 6/6 + md 字节级 "- [x] parity-D3-鱼油" 验通 |
-| D4 | test_meta_update_total_pills_daily_dose_and_clear | meta 更新 | ❌ | — | total_pills None/''/0→pop;daily_dose max1 |
+| D4 | test_meta_update_total_pills_daily_dose_and_clear | mobile-api.js POST /api/daily-tasks/meta L1233 | ✅ | bbca91f | total_pills="" / null / 0 → pop;set 数字 max(1, ...);本 commit fix:非 int("abc"/"x")→ 400(isBadInt 校验:string 前缀非 digit/- 或 isNaN 拒);regression:string 数字 "5" 仍接受。JS oracle 5/5 pass |
 | D5 | test_history_per_day_oldest_first | history | ❌ | — | oldest→newest;null=无文件 |
 | D6 | test_water_cup_get_set_roundtrip_reserved_key | water-cup | ❌ | — | `__water_cup__` 保留 key |
 | D7 | test_delete_cascade_md_image_meta | delete | ❌ | — | md 双写目标 + image + meta 全清(5.15 肌酸丢 guard) |
