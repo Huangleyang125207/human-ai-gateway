@@ -42,9 +42,9 @@ oracle 文件:`tests/test_journal_routes.py` + helper 层 `tests/test_authorship
 | J10 | test_patch_http_user_can_patch_ai_block | mobile-api.js patch L1691 默认 user + dispatchTool L908 注入 ai | ✅ | 9377047 | ★HTTP=user-trust:POST 不传 author → endpoint 默认 "user" → user 可改 @ai 块 → 200 + body 写入。本 row 发现 mobile L1691 旧默认 "ai" 与桌面 journal_routes L189 显式 `author="user"` 不一致 → fix 默认改 user;dispatchTool 注入 author='ai' 保 AI tool 调用走 fail-safe 路径(J-CB1 T5 等价仍守)。JS oracle 6/6 + 桌面 31/32 GREEN(同 baseline 1 known canonical drift)。 |
 | J11 | test_patch_routes_by_date_not_today | mobile-api.js L1688 `date = body.date \|\| todayIso()` | ✅ | 834f7b5 | ★date routing 5.x 修:patch 用 body.date 路由 readJournalMd + writeJournalMd,不 fallback today。oracle:past_day patch 200 + past md 含"改过去" + today key 仍 null(未误建)。JS oracle 4/4 pass + 桌面 15/15 GREEN。 |
 | J12 | test_patch_missing_new_md_400 | mobile-api.js patch L1700 校验 | ✅ | 2d5edb9 | 加 `if (body.new_md == null) return 400`(空串 "" 仍允许 = 真想清空 body);regression happy path + edge 空串 200 |
-| J13 | test_tag_register_appends_and_commits | tag-aggregate register | ❌ | — | mobile 若不做聚合可标 OUT |
-| J14 | test_tag_register_rejects_dup_and_subtag | 同上 | ❌ | — | |
-| J15 | test_tag_aggregate_get_sections | tag-aggregate 读 | ❌ | — | |
+| J13 | test_tag_register_appends_and_commits | (mobile 不做聚合)| **OUT** | — | mobile 不做 tag-aggregate(桌面专属功能,vault audit + cross-link);移动端 cd 视觉无聚合页 |
+| J14 | test_tag_register_rejects_dup_and_subtag | 同上 | **OUT** | — | 同 J13 OUT |
+| J15 | test_tag_aggregate_get_sections | 同上 | **OUT** | — | 同 J13 OUT |
 | **J-CB1** | **test_authorship**(13 条)| mobile-api.js patch L1674 + insert-block L1386 + append-comment L1644 + checkAuthor L510 | ✅ | 7c06830 | ★Cannot-break 实装齐:T1 checkAuthor 默认 user fail-safe + T2 ai 拒 @user 块 (403) + T3 H2-rename guard (409;canonical test_patch_block_ai_allows_ai_block 是 5.22 fixture vs 5.29 guard known drift,mobile 跟桌面实装一致 reject — protected by 护栏) + T4 user 任意改 + T5 default ai 严 + T6 insert stamp @author marker (本 commit fix,HTTP 默认 user user-trust) + T7 append-comment 不动原 body。JS oracle 11/11 pass。 |
 | **J-CB2** | test_patch_h2_rename(4) | mobile-api.js patch L1727 H2-rename guard + TOOL_SPECS L785-790 | ✅ | 05f3d15 | ★Cannot-break 防 5.29 联想 entry 被吃事故:T1 默认 H2 不匹配 → 409 + error "已有 H2" + T2 allow_h2_rename=true → 真 rename 写入 + 原 H2 替换 + T3 同 H2 → 无 flag 通过(典型补散文 use case)+ T4 TOOL_SPECS 含 allow_h2_rename 字段 + use case "改标题"。JS oracle 4/4 pass + 桌面 19/19 GREEN。 |
 | **J-CB3** | test_insert_block_body(6) | mobile-api.js insert-block L1386 + TOOL_SPECS L792 + dispatchTool L913 warning 注入 | ✅ | c56c25f | Cannot-break § H5 守:T1/T2/T3 endpoint 写 H2 + body 一体(已对齐);本 commit fix T4 dispatchTool 漏 body 注 warning + T5 有 body 不注 + T6 schema required ["time","tag","body"](旧 ["time"] 漏 tag/body)。JS oracle 6/6 pass + 桌面 21/21 GREEN。 |
@@ -65,7 +65,7 @@ oracle 文件:`tests/test_daily_tasks_routes.py`
 | D6 | test_water_cup_get_set_roundtrip_reserved_key | mobile-api.js water-cup POST L1128 | ✅ | 4bb8787 | 字段 body.image → body.attachment_url(向后兼容 body.image fallback);缺 url → 400;GET 返存的 image_url。JS oracle 4/4 pass:① missing 400 ② attachment_url 200 ok ③ GET image_url 非 null ④ 旧 body.image 仍接受 |
 | D7 | test_delete_cascade_md_image_meta | mobile-api.js delete L1293 | ✅ | d8939e5 | 5.15 肌酸丢 guard 强化:cascade 清 md(removeSupplement)+ image(taskimg) + meta(taskmeta) + intake_log(taskintake,本 commit 修旧 leak)+ 返 image_removed 布尔。JS oracle 7/7 pass |
 | **D8** | test_check_rejects_future_and_catalog_is_writable_window | 同 D2 | ✅ | fde19c1 | 同 D2;5 assert oracle 全 pass(future_check_400 / twoAgo_check_400 / tomorrow_writable_false / yesterday_writable_per_hour / today_writable_true) |
-| D9 | test_backfill_progress_idempotent | (desktop-only repair) | ❌ | — | mobile 无对等可标 OUT |
+| D9 | test_backfill_progress_idempotent | (desktop-only repair) | **OUT** | — | desktop-only:vault audit + 历史日 backfill 修复(桌面 launchd cron 用);移动端 local-first 无对等 |
 
 ---
 
@@ -113,11 +113,11 @@ oracle:`tests/test_setup_routes.py`(21 条)。
 
 | id | 契约(oracle test) | mobile 端点 | 状态 | sha | 备注 |
 |----|---|---|---|---|---|
-| X1 | test_chat_routes.py(15)+test_claim_audit | /api/chat | ❌ | — | partial-parity:SSE 主流有 oracle;tool-loop 形态独立 |
-| X2 | test_chat_routes + test_attachment_dedup | /api/chat/upload-image | ❌ | — | 拖图上传:sha 去重 + 校验 |
-| X3 | test_web_search_resilience.py(3) | /api/web/search | ❌ | — | AI web 搜(360/搜狗解析韧性) |
-| X4 | test_authorship.py::test_append_comment_* | /api/journal/append-comment | ❌ | — | ★批注 append-only,原 body 一字不动(authorship) |
-| X5 | (template/task 近似) | /api/daily-tasks/add | ❌ | — | 新增打卡项(补剂段插行) |
+| X1 | test_chat_routes.py(15)+test_claim_audit | /api/chat | **OUT** | — | 独立产品形态(MIGRATION_PARITY_GUIDE §4④):mobile chat 是 thin DeepSeek SSE wrapper,无 tool loop / DSML 闸 / 流式 chokepoint。让手机 AI 写日记/打卡是独立设计任务,不按 parity 迁。SSE main path 已 working(本 session bridge 接通验证) |
+| X2 | test_chat_routes + test_attachment_dedup | mobile-api.js POST /api/chat/upload-image L1400 | ✅ | 5db5f04 | sha 去重:首次返 {ok, url, deduped:false};同 sha 再上传返 deduped:true 同 url;missing dataUrl → 400;bad format(非 data:) → 400。JS oracle 4/4 pass |
+| X3 | test_web_search_resilience.py(3) | mobile-api.js /api/web/search | ✅ | 5db5f04 | 韧性降级:360 + 百炼任一失败/未配置返 `{ok:true, results:"[搜索后端全降级 — ...]", _all_degraded:true}` 不 throw;有 key 走真后端。JS oracle 1/1 pass |
+| X4 | test_authorship.py::test_append_comment_* | mobile-api.js /api/journal/append-comment L1644 | ✅ | 5db5f04 | ★批注 append-only,原 body 一字不动:status 200 + body intact + comment 在 body 之后 + 不存在时间块 → 404。JS oracle 5/5 pass(authorship boundary 守门) |
+| X5 | (template/task 近似) | mobile-api.js POST /api/daily-tasks/add L1204 | ✅ | 5db5f04 | 补剂段插行:新 task → {ok, task_name, added:true};重名 → {ok, existed:true} no-op;缺 task_name → 400。JS oracle 4/4 pass |
 
 ---
 
