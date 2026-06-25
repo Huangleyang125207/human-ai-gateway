@@ -34,7 +34,7 @@ oracle 文件:`tests/test_journal_routes.py` + helper 层 `tests/test_authorship
 | J2 | test_days_lists_files | journal/days 等价 | ❌ | — | |
 | J3 | test_tag_stats_top_and_default_for_new_user | tag-stats | ❌ | — | 新用户兜底 5 default tag |
 | J4 | test_new_day_creates_then_idempotent | new-day 骨架生成 | ❌ | — | 幂等;dayN 编号;半点格 |
-| J5 | test_insert_block_http_stamps_user | insert-block | ❌ | — | ★HTTP=user-trust,新 H2 stamp @user |
+| J5 | test_insert_block_http_stamps_user | mobile-api.js L1386 insert-block(J-CB1 同 fix) | ✅ | 20081e4 | ★HTTP user-trust:POST 不传 author 默认 "user",新 H2 字节级 stamp "## #工作 新条目 @user" 字面对齐桌面 oracle assert。3/3 pass(status 200 + marker + body)。 |
 | J6 | test_insert_block_missing_time_400 | insert-block 校验 | ❌ | — | |
 | J7 | test_insert_block_no_journal_404 | insert-block | ❌ | — | |
 | J8 | test_delete_block_clears_to_placeholder | delete-block | ❌ | — | 清块→`##`,别块不动 |
