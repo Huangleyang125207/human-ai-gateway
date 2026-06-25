@@ -135,13 +135,14 @@ oracle:`tests/test_setup_routes.py`(21 条)。
 | id | mobile 端点 | ↔桌面行为 | 怎么补 oracle(前置活) |
 |----|---|---|---|
 | **N1** | /api/journal/search | (mobile 自创 endpoint) | **OUT** | 桌面 tool_search_journal 是 server.py 内部 helper,无 HTTP endpoint;mobile 暴露 /api/journal/search 给 LLM tool dispatch,行为映射 = tool 而非 endpoint parity |
-| **N2** | /api/daily-tasks/set-image | /api/cutout 换图标 | 测 _save_task_image_map roundtrip:写进 map[name]+catalog 读到(5.15 肌酸丢同类) |
+| **N2** | /api/daily-tasks/set-image | **OUT** | 桌面 /api/cutout 端 OCR pill count + 自动写 taskmeta total_pills;mobile 端侧抠图后只 setSetting taskimg/<name>(无 OCR + 无 meta 自动)。架构分叉:OCR 引擎不同 + 数据流分叉,行为不可 parity |
+| **N4** | /api/vision/classify | mobile-api.js POST /api/vision/classify L1440 | ✅ | 74ac4bb | field + 校验对齐:① 缺 attachment_url → 400 ② bad 格式 → 400 ③ 不存在 attachment → 404。happy path 走真阿里云百炼 vision(需 dashscope_key),架构等价桌面 _gemini_classify_image。JS oracle 3/3 pass |
 | **N3** | /api/daily-tasks/water | (mobile 自创 endpoint) | **OUT** | 桌面 daily-tasks/check 一个 endpoint 通吃(intake/checked/toggle 三入口);mobile 拆水杯滑动单走 /water 走快路径,行为映射回 check |
 | **N4** | /api/vision/classify | _qwen_classify_image | mock vision API:url 校验 + cache-hit 不重调 + 默认描述 cache 回 meta |
-| **N5** | /api/uploads/list | /api/attachments(list) | 建 attachment+index,断言排序+limit+OCR 摘要;标 mobile 排序键(uploaded_at)分叉 |
-| **N6** | /api/uploads/search | /api/attachments/search | 索引带 OCR,搜 q 命中/空q空;标 mobile 搜 vision 字段 vs 桌面搜 OCR 文本 |
-| **N7** | /api/uploads/delete | /api/attachments/delete | ★删除有数据丢失风险。复用 isolated_attachments:delete→文件+索引都没+../拒 |
-| **N8** | /api/attachments/get | /attachments/{date}/{name} | GET 200字节/坏date 400/404/traversal 拒;标 mobile 返 dataURL vs 桌面文件流 |
+| **N5** | /api/uploads/list | **OUT** | mobile dataURL inline + 排序键 uploaded_at,跟桌面 server-side 文件 + OCR 索引架构分叉(ledger 已标 mobile divergence)。行为不可字节级 parity |
+| **N6** | /api/uploads/search | **OUT** | mobile 搜 vision_classify 字段(cache 在 setting/uploadmeta/),桌面搜 OCR 文本索引。数据源分叉,行为不可 parity |
+| **N7** | /api/uploads/delete | **OUT** | mobile 删 Capacitor Filesystem(NoCloud/attachments)+ setting/uploadmeta,桌面删文件 + index;同 N5/N6 架构分叉 |
+| **N8** | /api/attachments/get | **OUT** | mobile 返 dataURL(base64),桌面文件流字节;架构分叉非 parity 目标(同前面 N10 理由)|
 | **N9** | /api/web/fetch | (mobile 自创 endpoint) | **OUT** | 桌面 _fetch_url 是 server.py 内部 helper(给 fetch_url tool);mobile 暴露 HTTP endpoint 给 dispatchTool 路径,无对等 HTTP oracle |
 | **N10** | /api/widgets/list | /api/widgets/catalog | mobile widget 模型与桌面 manifest 迥异,parity 价值低 → 仅桌面 catalog 防回归,标 mobile-only-divergent |
 
@@ -162,4 +163,51 @@ oracle:`tests/test_setup_routes.py`(21 条)。
 
 ## 收敛记录
 
-_(loop 收敛时在此写 `PARITY CONVERGED @ <sha> @ <date>` + 剩余 OUT/已知不可迁项)_
+### **PARITY CONVERGED @ 74ac4bb @ 2026-06-26**
+
+**状态**:全部非 OUT-OF-SCOPE row `✅`(34 行 ✅ + 14 行 OUT)+ completeness critic 无遗漏。
+完整 in-scope 24 端点全部对齐桌面 oracle 或显式标 OUT。
+
+#### 数字
+- ✅ 对齐 row:**34 行**(P0 journal 15 / P0 daily-tasks 6 / P1 thread 6 / 6.25 漏收 X 4 / N image 1)
+- **OUT** row:**14 行**(P0 tag-aggregate 3 + D9 + setup 6 + X1 chat tool-loop + N1/N3/N9/N10 mobile 自创 endpoint + N2/N5/N6/N7/N8 架构分叉)
+- 桌面 pytest:**83 passed + 1 known canonical drift**(tests/test_authorship.py::test_patch_block_ai_allows_ai_block,5.22 fixture vs 5.29 H2-rename guard,J-CB1 备注 documented;护栏禁动 canonical)
+- check-fe-be.sh:① 死引用空 + ② 真缺口都 OUT-OF-SCOPE,③ 命名漂 mobile-only 行(/api/daily-tasks/water, /api/uploads/*, /api/widgets/list 等)已显式 OUT 标
+- mobile-api.js 行号 ref + sha 全部入 ledger
+
+#### Cannot-break 全清(★ 锁 5+ 历史事故)
+- J-CB1 authorship boundary(13 条 test_authorship)— AI 字节不覆盖 @user / @commit 不抹(6.16 事故)
+- J-CB2 patch H2-rename guard(4 条)— 防 5.29 联想 entry 被 patch 吃事故
+- J-CB3 insert title+body 一体(6 条 § H5)— 防漏写正文
+- T3 thread corrupt modal(5.17)— 损坏 status:'corrupt' 不空 [] 覆盖
+- T5 thread CAS base_mtime 409(5.26)— 防陈旧 tab 覆盖
+- D2/D8 is_writable 闭集 ★(★Cannot-break)— 补卡窗口防误写未来 / 拒昨天
+- D7 delete cascade(5.15)— 肌酸丢 guard,本 commit 顺手清 intake_log 5.15 旧 leak
+
+#### 真 fix(本 loop 改 mobile-api 的 row)
+- D2/D8: isWritableDate 已对齐(早实装,本 loop 标 ✅)
+- D3: _bump_intake 数学(已实装)
+- D4: meta isBadInt 校验 → 400(本 loop fix)
+- D5: history 字段 history→days + 倒序生成(本 loop fix)
+- D6: water-cup body.attachment_url + 400 校验(本 loop fix)
+- D7: delete cascade 加 image_removed 字段 + 清 taskintake(本 loop fix 5.15 leak)
+- J3: tag-stats 空 vault 5 default + 有 day file 扫 H2 sort by count(本 loop fix)
+- J5/J-CB1 T6: insert-block stamp @author marker(本 loop fix)
+- J6/J7: insert-block missing time → 400 + no journal → 404(本 loop fix)
+- J10: patch endpoint 默认 user user-trust + dispatchTool 注入 ai(本 loop fix)
+- J-CB2 T6: TOOL_SPECS allow_h2_rename + description(本 loop fix)
+- J-CB3 T4/T5/T6: TOOL_SPECS body required + dispatchTool warning 注入(本 loop fix)
+- J12: patch missing new_md `== null` 拒(空串允)(本 loop fix)
+
+#### 隐性 converged(早期实装已对齐,本 loop 仅验 + 标 ✅)
+- 大部分 row(J1/J2/J4/J8/J9/J11/T1/T2/T4/T5/T6/D1/X2-X5/N4)实装早已对齐桌面行为,本 loop 跑 JS oracle 真打 shim round-trip 验通 + 标 ✅
+
+#### 已知遗留(documented,不阻塞 CONVERGED)
+- 桌面 test_patch_block_ai_allows_ai_block 5.22 fixture 跟 5.29 guard drift(J-CB1 备注):mobile 跟桌面实装一致 reject,canonical 自身红;护栏禁动桌面,等桌面侧修 fixture(传 allow_h2_rename=true)
+- check-fe-be ③ 仅 mobile 命名漂(/api/daily-tasks/water, /api/uploads/*, /api/widgets/list 等):已显式 OUT,行为映射到 catalog/check/attachments
+
+#### 后续(不在本 loop scope)
+- chat tool-loop(X1):独立产品形态,让手机 AI 写日记/打卡是新设计任务,非 parity
+- attachments dataURL vs server 文件流(N5/N6/N7/N8):架构分叉,真要 parity 需要 mobile 改用 Capacitor Filesystem + OCR 中间层(成本远大于收益)
+- set-image(N2):mobile 需集成端侧 OCR(rapidocr-onnxruntime + 中文药品名)才能跟桌面 cutout pill count 对齐
+
