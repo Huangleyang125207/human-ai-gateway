@@ -1128,7 +1128,38 @@
     "POST /api/water-cup": function (req, u, body) {
       return Store.setSetting("water_cup_img", (body && body.image) || "").then(function () { return jsonResp({ ok: true }); });
     },
-    "GET /api/journal/tag-stats": function () { return jsonResp({ tags: [] }); },
+    "GET /api/journal/tag-stats": function (req, u) {
+      // J3 test_tag_stats_top_and_default_for_new_user:
+      //   空 vault → 兜底 5 default tag + default:true
+      //   有 day file → 扫 md 统计 ## #tag 出现次数,top limit
+      var DEFAULT_TAGS = ["思考", "探索", "工作", "饮食", "运动"];
+      var limit = parseInt(new URL(u, location.origin).searchParams.get("limit"), 10) || 10;
+      return Store.listJournalDates().then(function (dates) {
+        if (!dates.length) {
+          return jsonResp({ tags: DEFAULT_TAGS.map(function (t) { return { tag: t, count: 0, "default": true }; }) });
+        }
+        return Promise.all(dates.map(function (d) { return Store.readJournalMd(d); })).then(function (mds) {
+          var counts = {};
+          mds.forEach(function (md) {
+            if (!md) return;
+            var lines = md.split(/\r?\n/);
+            lines.forEach(function (line) {
+              if (line.indexOf("## ") !== 0) return;
+              // 扫 H2 行的 #tag(可能多个,如 "## #投资 #协作 KV cache")
+              var m = line.match(/#[\w一-鿿/\-]+/g);
+              if (!m) return;
+              m.forEach(function (rawTag) {
+                var tag = rawTag.replace(/^#/, "").split("/")[0];  // 顶层 tag(去 sub-tag)
+                if (tag) counts[tag] = (counts[tag] | 0) + 1;
+              });
+            });
+          });
+          var sorted = Object.keys(counts).map(function (t) { return { tag: t, count: counts[t] }; });
+          sorted.sort(function (a, b) { return b.count - a.count; });
+          return jsonResp({ tags: sorted.slice(0, limit) });
+        });
+      });
+    },
     // 移动端无 vault 文件漂移概念;返 0 漂移,vault-audit.js 据此不弹横幅
     "GET /api/vault/audit": function () { return jsonResp({ total_drift: 0, image_recoverable: [], image_orphans: [], meta_orphans: [], aggregate_broken_links: [] }); },
 
