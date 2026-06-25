@@ -789,10 +789,11 @@
         new_md: { type: "string", description: "新内容,从 ## H2 行开始" },
         allow_h2_rename: { type: "boolean", description: "改 H2 标题时传 true,否则会被 guard 拒" },
       }, required: ["time", "new_md"] }}},
-    { type: "function", function: { name: "insert_journal_block", description: "在指定时间块**插入新条目**(写在空 H2 占位上)。已有 entry 用 patch",
+    { type: "function", function: { name: "insert_journal_block", description: "在指定时间块**插入新条目**(写在空 H2 占位上)。已有 entry 用 patch。body 是必填正文,光写标题违反 § H5(test_insert_block_body J-CB3 锁)",
       parameters: { type: "object", properties: {
-        date: { type: "string" }, time: { type: "string" }, tag: { type: "string" }, title: { type: "string" }, body: { type: "string" },
-      }, required: ["time"] }}},
+        date: { type: "string" }, time: { type: "string" }, tag: { type: "string" }, title: { type: "string" },
+        body: { type: "string", description: "正文(result + 意义),不是只写标题 — § H5 锁的 Cannot-break" },
+      }, required: ["time", "tag", "body"] }}},
     { type: "function", function: { name: "check_daily_task", description: "打卡(吃药/补剂)。优先级 intake > increment > checked > toggle",
       parameters: { type: "object", properties: {
         task_name: { type: "string" }, date: { type: "string" },
@@ -910,7 +911,18 @@
     var H = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(args) };
     switch (name) {
       case "patch_journal_block": return fch("/api/journal/patch", H).then(function (r) { return r.json(); });
-      case "insert_journal_block": return fch("/api/journal/insert-block", H).then(function (r) { return r.json(); });
+      case "insert_journal_block":
+        // J-CB3 T4:漏 body 时 tool result 注 warning(nag AI 补正文,违反 § H5 提醒)
+        var insertOp = fch("/api/journal/insert-block", H).then(function (r) { return r.json(); });
+        if (!args.body || !String(args.body).trim()) {
+          return insertOp.then(function (result) {
+            if (result && result.ok && !result.warning) {
+              result.warning = "⚠ 缺正文(body)— 只插了标题。补一段说明 result + 意义(§ H5)";
+            }
+            return result;
+          });
+        }
+        return insertOp;
       case "check_daily_task": return fch("/api/daily-tasks/check", H).then(function (r) { return r.json(); });
       case "set_daily_task_meta": return fch("/api/daily-tasks/meta", H).then(function (r) { return r.json(); });
       case "read_today_schedule": return fch("/api/journal/today" + (args.date ? "?date=" + encodeURIComponent(args.date) : "")).then(function (r) { return r.json(); });

@@ -47,7 +47,7 @@ oracle 文件:`tests/test_journal_routes.py` + helper 层 `tests/test_authorship
 | J15 | test_tag_aggregate_get_sections | tag-aggregate 读 | ❌ | — | |
 | **J-CB1** | **test_authorship**(13 条)| mobile-api.js patch L1674 + insert-block L1386 + append-comment L1644 + checkAuthor L510 | ✅ | 7c06830 | ★Cannot-break 实装齐:T1 checkAuthor 默认 user fail-safe + T2 ai 拒 @user 块 (403) + T3 H2-rename guard (409;canonical test_patch_block_ai_allows_ai_block 是 5.22 fixture vs 5.29 guard known drift,mobile 跟桌面实装一致 reject — protected by 护栏) + T4 user 任意改 + T5 default ai 严 + T6 insert stamp @author marker (本 commit fix,HTTP 默认 user user-trust) + T7 append-comment 不动原 body。JS oracle 11/11 pass。 |
 | **J-CB2** | test_patch_h2_rename(4) | mobile-api.js patch L1727 H2-rename guard + TOOL_SPECS L785-790 | ✅ | 05f3d15 | ★Cannot-break 防 5.29 联想 entry 被吃事故:T1 默认 H2 不匹配 → 409 + error "已有 H2" + T2 allow_h2_rename=true → 真 rename 写入 + 原 H2 替换 + T3 同 H2 → 无 flag 通过(典型补散文 use case)+ T4 TOOL_SPECS 含 allow_h2_rename 字段 + use case "改标题"。JS oracle 4/4 pass + 桌面 19/19 GREEN。 |
-| **J-CB3** | test_insert_block_body(6) | insert 写 title+body 一体 | ❌ | — | |
+| **J-CB3** | test_insert_block_body(6) | mobile-api.js insert-block L1386 + TOOL_SPECS L792 + dispatchTool L913 warning 注入 | ✅ | c56c25f | Cannot-break § H5 守:T1/T2/T3 endpoint 写 H2 + body 一体(已对齐);本 commit fix T4 dispatchTool 漏 body 注 warning + T5 有 body 不注 + T6 schema required ["time","tag","body"](旧 ["time"] 漏 tag/body)。JS oracle 6/6 pass + 桌面 21/21 GREEN。 |
 
 ---
 
