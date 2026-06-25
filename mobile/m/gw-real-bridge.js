@@ -103,40 +103,54 @@
       });
     } catch (e) { console.warn('[bridge] /api/daily-tasks 失败,沿用 mock', e); }
 
-    // 3c. today 日记 entries
+    // 3c. today 日记 entries — mobile-api 真返 schema:
+    //  { file, date, blocks: [{ time, h1_raw, h2: [{tags, title, body, commits}] }] }
+    // 一个 H1 时间块可含多个 H2 entry,flatten 成 cd entry list
     try {
       var todayData = await safeJson('/api/journal/today?date=' + iso);
       GW.journal = GW.journal || {};
-      GW.journal[dayKey] = (todayData.entries || []).map(function (e, i) {
-        return {
-          id: entryId(e, i),
-          time: e.time || '00:00',
-          tags: e.tags || [],
-          author: e.author === 'ai' ? '@ai' : '@我',
-          title: e.title || '',
-          body: e.body || '',
-          commits: (e.commits || []).map(function (c) {
-            return { who: c.author === 'ai' ? 'ai' : 'me', text: c.text || '' };
-          }),
-          isNote: /21\s*[:：]\s*30/.test(e.time || '')  // 21:30 纸条
-        };
+      var flatEntries = [];
+      var idx = 0;
+      (todayData.blocks || []).forEach(function (b) {
+        var t = b.time || '00:00';
+        (b.h2 || []).forEach(function (h) {
+          flatEntries.push({
+            id: 'r' + t.replace(':', '') + '_' + (idx++),
+            time: t,
+            tags: (h.tags || []).map(function (tg) { return tg.charAt(0) === '#' ? tg : '#' + tg; }),
+            author: h.author === 'ai' ? '@ai' : '@我',
+            title: h.title || '',
+            body: h.body || '',
+            commits: (h.commits || []).map(function (c) {
+              return { who: c.author === 'ai' ? 'ai' : 'me', text: c.text || '' };
+            }),
+            isNote: /21\s*[:：]?\s*30/.test(t) && /纸条/.test(h.title || '')
+          });
+        });
       });
+      GW.journal[dayKey] = flatEntries;
     } catch (e) { console.warn('[bridge] /api/journal/today 失败,沿用 mock', e); }
 
     // 3d. thread history
+    // mobile-api 直接 JSON.stringify 存读 thread array,save 啥 read 啥。
+    // 所以保留 cd 原 schema({kind,who,text,id,attachments?})— 不双向 transform。
+    // 旧版本可能存的是 {role, content} 老格式,做 backward compat。
     try {
       var threadData = await safeJson('/api/thread/history');
-      var hist = threadData.history || threadData.messages || [];
+      var hist = threadData.history || [];
       if (threadData.status === 'corrupt') {
-        console.warn('[bridge] thread corrupt,modal 兜底由 cd 自处理');
+        console.warn('[bridge] thread corrupt,cd 端 modal 兜底');
         hist = [];
       }
       GW.thread = hist.map(function (m, i) {
+        // cd 原 schema 已带 kind/who → 直接用
+        if (m && m.kind && m.who) return m;
+        // 旧 schema {role, content} → 转 cd
         return {
           kind: 'msg',
-          who: m.role === 'assistant' || m.who === 'ai' ? 'ai' : 'me',
+          who: (m.role === 'assistant' || m.who === 'ai') ? 'ai' : 'me',
           text: m.content || m.text || '',
-          id: 't' + (m.ts || (Date.now() + i))
+          id: m.id || ('t' + (m.ts || (Date.now() + i)))
         };
       });
     } catch (e) { console.warn('[bridge] /api/thread/history 失败,沿用 mock', e); }
@@ -277,16 +291,15 @@
     var aiText = '';
     var firstChunkSeen = false;
 
-    var messages = st.thread
-      .filter(function (m) { return m.kind === 'msg'; })
-      .map(function (m) {
-        return { role: m.who === 'ai' ? 'assistant' : 'user', content: m.text || '' };
-      });
+    // mobile-api.js chatViaDeepseek 期待:body = { history: [全部历史含 cd 4 kind], message: "最新用户消息" }
+    // L988: messages = sys + histToMsgs(body.history) + [{role:user, content:body.message}]
+    // histToMsgs 已 cd 4 kind:msg/ref/note/tool — 我传整条 thread(去掉本轮 user)就行
+    var historyForApi = st.thread.slice(0, -1);  // 去掉刚 push 的 user msg(它进 body.message)
 
     fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: messages })
+      body: JSON.stringify({ history: historyForApi, message: text || '' })
     }).then(function (resp) {
       if (!resp.ok) throw new Error('chat ' + resp.status);
       var reader = resp.body.getReader();
@@ -303,12 +316,9 @@
             } else {
               grindEl.remove();
             }
-            // 保存 thread 到后端(append-only 持久化)
-            postJson('/api/thread/save', {
-              history: st.thread.filter(function (m) { return m.kind === 'msg'; }).map(function (m) {
-                return { role: m.who === 'ai' ? 'assistant' : 'user', content: m.text, ts: Date.now() };
-              })
-            });
+            // 保存 thread 到后端 — 直接传 cd 原 schema(含 tool/ref/note 三个 kind)
+            // mobile-api JSON.stringify 存 / parse 读,save 啥 read 啥(L131)
+            postJson('/api/thread/save', { history: st.thread });
             return;
           }
           buffer += decoder.decode(r.value, { stream: true });
@@ -349,11 +359,30 @@
                 tc.result = ev.result;
               }
               GW.renderThread(container, st);
+            } else if (ev.type === 'error') {
+              // mobile-api emit error(CORS / 超时 / DeepSeek 返空 / 工具上限)
+              if (!firstChunkSeen) {
+                firstChunkSeen = true;
+                if (grindEl.parentNode) grindEl.remove();
+                st.thread.push({ kind: 'msg', who: 'ai', text: '⚠ ' + (ev.text || '出错了'), id: aiId });
+                GW.renderThread(container, st);
+              } else {
+                aiText += '\n\n⚠ ' + (ev.text || '出错了');
+                var em = st.thread.find(function (x) { return x.id === aiId; });
+                if (em) em.text = aiText;
+                var enode = container.querySelector('.gw-msg[data-id="' + aiId + '"] .gw-msg-text');
+                if (enode) enode.textContent = aiText;
+              }
             } else if (ev.type === 'done') {
               // server emit done — pump 自然 r.done 也会到,这里早 break 让 finally 清理
               if (firstChunkSeen) {
                 var dm = st.thread.find(function (x) { return x.id === aiId; });
                 if (dm) dm.streaming = false;
+              } else if (!firstChunkSeen) {
+                // 走到 done 但一个 delta 都没收 → 退磨墨 + push 占位
+                if (grindEl.parentNode) grindEl.remove();
+                st.thread.push({ kind: 'msg', who: 'ai', text: '(无回复)', id: aiId });
+                GW.renderThread(container, st);
               }
             }
           });
