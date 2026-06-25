@@ -134,15 +134,15 @@ oracle:`tests/test_setup_routes.py`(21 条)。
 
 | id | mobile 端点 | ↔桌面行为 | 怎么补 oracle(前置活) |
 |----|---|---|---|
-| **N1** | /api/journal/search | tool_search_journal | ★最优先:双侧零 oracle + AI 高频。直测 tool_search_journal:hits 形状(time/snippet 200字/total/top30/days clamp) |
+| **N1** | /api/journal/search | (mobile 自创 endpoint) | **OUT** | 桌面 tool_search_journal 是 server.py 内部 helper,无 HTTP endpoint;mobile 暴露 /api/journal/search 给 LLM tool dispatch,行为映射 = tool 而非 endpoint parity |
 | **N2** | /api/daily-tasks/set-image | /api/cutout 换图标 | 测 _save_task_image_map roundtrip:写进 map[name]+catalog 读到(5.15 肌酸丢同类) |
-| **N3** | /api/daily-tasks/water | 喝水 md 父子勾选 | 复用 dt fixture:water{filled:N}→子项<=N 勾、父项 N>=8 才勾、clamp[0,8]、404 |
+| **N3** | /api/daily-tasks/water | (mobile 自创 endpoint) | **OUT** | 桌面 daily-tasks/check 一个 endpoint 通吃(intake/checked/toggle 三入口);mobile 拆水杯滑动单走 /water 走快路径,行为映射回 check |
 | **N4** | /api/vision/classify | _qwen_classify_image | mock vision API:url 校验 + cache-hit 不重调 + 默认描述 cache 回 meta |
 | **N5** | /api/uploads/list | /api/attachments(list) | 建 attachment+index,断言排序+limit+OCR 摘要;标 mobile 排序键(uploaded_at)分叉 |
 | **N6** | /api/uploads/search | /api/attachments/search | 索引带 OCR,搜 q 命中/空q空;标 mobile 搜 vision 字段 vs 桌面搜 OCR 文本 |
 | **N7** | /api/uploads/delete | /api/attachments/delete | ★删除有数据丢失风险。复用 isolated_attachments:delete→文件+索引都没+../拒 |
 | **N8** | /api/attachments/get | /attachments/{date}/{name} | GET 200字节/坏date 400/404/traversal 拒;标 mobile 返 dataURL vs 桌面文件流 |
-| **N9** | /api/web/fetch | tool_fetch_url | mock HTTP→strip 纯文本+3000字截断+https 校验+cleartext hint |
+| **N9** | /api/web/fetch | (mobile 自创 endpoint) | **OUT** | 桌面 _fetch_url 是 server.py 内部 helper(给 fetch_url tool);mobile 暴露 HTTP endpoint 给 dispatchTool 路径,无对等 HTTP oracle |
 | **N10** | /api/widgets/list | /api/widgets/catalog | mobile widget 模型与桌面 manifest 迥异,parity 价值低 → 仅桌面 catalog 防回归,标 mobile-only-divergent |
 
 > **mobile-only no-op**(无需真 parity,桌面补一条防回归即可):/api/user-widgets(恒空)·
