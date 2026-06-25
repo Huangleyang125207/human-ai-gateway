@@ -77,8 +77,8 @@ oracle:`tests/test_thread_routes.py` + `tests/test_thread_cas.py`
 |----|---|---|---|---|---|
 | T1 | test_history_empty_when_no_file | mobile-api.js GET /api/thread/history L1328 | ✅ | ea8d0e8 | 无文件 → `{history:[], mtime:0}` 字节级对齐桌面 oracle |
 | T2 | test_history_happy_returns_list_and_mtime | mobile-api.js GET /api/thread/history | ✅ | ea8d0e8 | save 后:返 history 数组字节匹配 + mtime > 0 + 无 `status:'corrupt'` 标记(正常路径)|
-| T3 | test_history_corrupt_returns_modal_payload_and_rings | thread/history | ❌ | — | ★Cannot-break:损坏→`status:'corrupt'`+baks,不空覆盖(5.17) |
-| T4 | test_restore_from_bak_roundtrip | restore-from-bak | ❌ | — | mobile 若无 bak 机制标 OUT |
+| T3 | test_history_corrupt_returns_modal_payload_and_rings | mobile-api.js readThread L129 + GET handler L1411 corrupt 分支 | ✅ | 697046b | ★Cannot-break 5.17:损坏 JSON → `{status:'corrupt', history:[], mtime:0, baks:[...], message}` 字节级对齐桌面 oracle。JS oracle 5/5 pass(corrupt + history:[] + mtime:0 + baks index:1 + message)|
+| T4 | test_restore_from_bak_roundtrip | mobile-api.js POST /api/thread/restore-from-bak L1429 | ✅ | 697046b | 实装齐:`{bak_index}` 1..5,bad index → 400 / missing → 404 / 成功 → 200 + `{restored_from:"bak.N", count}` + thread 字节替换为 bak 内容。JS oracle 7/7 pass(restore-from-bak.2 + count:1 + thread eq good + 0/6 → 400 + missing → 404)|
 | **T5** | **test_thread_cas**(9 条)| mobile-api.js threadSaveIsStale L477 + thread/save L1368 | ✅ | 4a99149 | ★Cannot-break CAS 实装齐(防 5.26 陈旧 tab 覆盖):T1 null base 放行 + T2 文件不存在 first save 放行 + T3 match mtime 放行 + T4 mismatch 409 + T5 垃圾值(string/array)不崩放行 + T6 字符串数字 base parseInt 正确比较 + T7 stale save 文件不动 + T9 non-list history 400。JS oracle 11/11 pass。 |
 | T6 | test_save_rejects_non_list_history_400 | mobile-api.js POST /api/thread/save L1368 `if (!Array.isArray(hist))` | ✅ | ea8d0e8 | history='oops' → 400 + 无 history 字段 → 400(契约边界:抽出'好心' try/except 不能静默不写)|
 
