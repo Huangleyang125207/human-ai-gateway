@@ -264,6 +264,105 @@
       .catch(function () { return ""; });
   }
 
+  // ── web_search 移植:PC 端 web_tools.py 三层降级链(360 → 百炼 → 拒答)
+  // critic 校正:① selector 模糊匹配 li[class*='res-list'](精确匹配漏 30-50%)
+  // ② entity unescape 用 table(不用 DOMParser 防 inline img prefetch CSP)
+  // ③ http→https 自动升级(iOS ATS 拒 cleartext)④ dashscope_key 用正确键名
+  var _HTML_ENT_TABLE = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'", nbsp: " ", "#10": "\n", "#13": "\r" };
+  function _htmlUnescape(s) {
+    return String(s == null ? "" : s)
+      .replace(/&(#x?[0-9a-fA-F]+|\w+);/g, function (_, k) {
+        if (k.charAt(0) === "#") {
+          var c = (k.charAt(1) === "x" || k.charAt(1) === "X")
+            ? parseInt(k.slice(2), 16) : parseInt(k.slice(1), 10);
+          return isNaN(c) ? _ : String.fromCharCode(c);
+        }
+        return _HTML_ENT_TABLE.hasOwnProperty(k) ? _HTML_ENT_TABLE[k] : _;
+      });
+  }
+  function _htmlStripToText(html) {
+    if (!html) return "";
+    return _htmlUnescape(
+      String(html)
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    );
+  }
+  function _httpsUpgrade(u) {
+    // iOS ATS 拒 http://, 自动升 https(失败时 LLM 看到 error 自行 retry)
+    if (typeof u !== "string") return u;
+    return u.replace(/^http:\/\//i, "https://");
+  }
+  // lazy resolve CapacitorHttp(IIFE 启动时 cache 的 _cap 拿不到测试时后注入的 mock)
+  function _getCapHttp() {
+    return (typeof window !== "undefined" && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp) || null;
+  }
+  function _mobileWebSearch360(query, max) {
+    var CapHttp = _getCapHttp();
+    var url = "https://www.so.com/s";
+    var headers = {
+      "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+      "Accept-Language": "zh-CN,zh;q=0.9",
+    };
+    var params = { q: query, pn: "1" };
+    var p;
+    if (CapHttp) {
+      p = CapHttp.get({ url: url, params: params, headers: headers, connectTimeout: 15, readTimeout: 15 })
+        .then(function (r) { return (r && r.data) || ""; });
+    } else {
+      // 浏览器 dev fallback (CORS 大概率拦,但保留 path 让 dev 看到错误)
+      var qs = Object.keys(params).map(function (k) { return k + "=" + encodeURIComponent(params[k]); }).join("&");
+      p = realFetch(url + "?" + qs, { headers: headers }).then(function (r) { return r.text(); });
+    }
+    return p.then(function (html) {
+      if (!html) return "[360 搜索:空响应]";
+      // DOMParser 解析 + 模糊 class 匹配(critic 校正)
+      try {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var items = doc.querySelectorAll('li[class*="res-list"]');
+        if (!items.length) return "[360 搜索无结果]";
+        var out = [];
+        for (var i = 0; i < items.length && out.length < (max || 5); i++) {
+          var node = items[i];
+          var a = node.querySelector("h3 a") || node.querySelector("a");
+          if (!a) continue;
+          var href = a.getAttribute("data-mdurl") || a.getAttribute("href") || "";
+          var title = (a.textContent || "").trim();
+          var desc = node.querySelector("p.res-desc, .res-desc, p");
+          var dt = desc ? (desc.textContent || "").trim() : "";
+          if (title) out.push("【" + title + "】 " + (href ? href + " — " : "") + dt);
+        }
+        return out.length ? out.join("\n\n") : "[360 搜索无结果]";
+      } catch (e) { return "[360 解析异常:" + (e.message || "") + "]"; }
+    }).catch(function (e) { return "[360 异常:" + (e && e.message || e) + "]"; });
+  }
+  function _mobileWebSearchBailian(query, key) {
+    if (!key) return Promise.resolve("[未配置阿里云百炼 key — 进设置填 dashscope key 解锁联网搜]");
+    var CapHttp = _getCapHttp();
+    var url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
+    var headers = { "Content-Type": "application/json", Authorization: "Bearer " + key };
+    var payload = {
+      model: "qwen-flash",
+      messages: [{ role: "user", content: "联网搜索并回答下面的查询。列关键事实要点,能附来源链接就附。简洁,别废话。\n\n" + query }],
+      enable_search: true,
+      search_options: { search_strategy: "turbo", enable_source: true },
+    };
+    var p;
+    if (CapHttp) {
+      p = CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 30, readTimeout: 30 })
+        .then(function (r) { return (r && r.data) || {}; });
+    } else {
+      p = realFetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
+    }
+    return p.then(function (d) {
+      var c = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
+      return c || "[百炼空响应]";
+    }).catch(function (e) { return "[百炼异常:" + (e && e.message || e) + "]"; });
+  }
+
   // ── 工具:日期 ───────────────────────────────────────
   function pad2(n) { return (n < 10 ? "0" : "") + n; }
   function todayIso() { var d = new Date(); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
@@ -653,6 +752,19 @@
     { type: "function", function: { name: "remove_widget",
       description: "删除一个动态注册的 widget(只能删 AI add 的,不能删核心 cups/tasks/pulse)",
       parameters: { type: "object", properties: { id: { type: "string" }}, required: ["id"] }}},
+    // web_search + fetch_url 移植 PC 端 web_tools.py 三层降级链(critic 校正)
+    { type: "function", function: { name: "web_search",
+      description: "联网搜索 — 找信息+真实来源 URL(返标题/链接/摘要)。先看标题摘要决定要不要 fetch_url 看正文,别只凭摘要答。**每对话最多 2 次**,死循环 narrow 是最大坑。降级链 360→百炼→拒答。",
+      parameters: { type: "object", properties: {
+        query: { type: "string", description: "搜索关键词" },
+        max_results: { type: "integer", description: "默认 5,最多 10" },
+        category: { type: "string", enum: ["general"], description: "general=360 搜(wechat/bilibili 暂不支持)" },
+      }, required: ["query"] }}},
+    { type: "function", function: { name: "fetch_url",
+      description: "拉某 URL 正文(HTML stripped → text,最多 3000 char)。先 web_search 看标题再 fetch,别盲 fetch。同一 URL 不要 fetch 多次。iOS 不接 http://,会自动升 https,失败换链接。",
+      parameters: { type: "object", properties: {
+        url: { type: "string", description: "http(s):// URL" },
+      }, required: ["url"] }}},
   ];
   // tool_name → mobile-api endpoint dispatch
   // 注意:用 window.fetch(shim-hijacked)而不是 realFetch — /api/* 路径要走 shim
@@ -708,6 +820,8 @@
           }
           return { ok: true, id: args.id, removed: true };
         });
+      case "web_search": return fch("/api/web/search", H).then(function (r) { return r.json(); });
+      case "fetch_url": return fch("/api/web/fetch", H).then(function (r) { return r.json(); });
       default: return Promise.resolve({ error: "unknown tool: " + name });
     }
   }
@@ -718,7 +832,11 @@
   // 多轮 tool 调用 loop:DeepSeek 返 tool_calls → dispatch → result push 回 → 再调,
   // 直到无 tool_calls 或达 maxRounds 上限(防 infinite loop)。
   // 最后一轮 force-no-tool(不传 tools)防 AI 永远在调用 tool 不出回应。
+  // frequency cap 对齐 PC L2642:web_search ≤ 3/对话,fetch_url ≤ 5/对话
+  // 闭包 per-conversation counter,parallel tool_calls 也同步累加防 race(critic 标的)
+  var TOOL_FREQ_CAP = { web_search: 3, fetch_url: 5 };
   function chatViaDeepseek(body, key, model) {
+    var freqCount = {};
     return Store.readJournalMd(todayIso()).then(function (todayMd) {
       var sys = "你是用户的日记协作 AI,语气温和、像深夜台灯下说话。\n\n" +
         "这是今天的日记:\n\n" + (todayMd || "(今天还没写)") +
@@ -763,6 +881,18 @@
               var name = tc.function && tc.function.name;
               var args = {};
               try { args = JSON.parse(tc.function.arguments || "{}"); } catch (e) {}
+              // frequency cap 同步累加 + 检查(critic 防 parallel race)
+              var cap = TOOL_FREQ_CAP[name];
+              if (cap != null) {
+                freqCount[name] = (freqCount[name] || 0) + 1;
+                if (freqCount[name] > cap) {
+                  var capMsg = name + " 已达上限 (" + cap + " 次/对话),停止继续调,基于已搜到的信息直接回答用户";
+                  events.push({ type: "tool_call", id: tc.id, name: name, args: args });
+                  events.push({ type: "tool_result", id: tc.id, name: name, ok: false, error: capMsg });
+                  messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify({ error: capMsg, _freq_capped: true }) });
+                  return Promise.resolve();
+                }
+              }
               events.push({ type: "tool_call", id: tc.id, name: name, args: args });
               return dispatchTool(name, args).then(function (result) {
                 events.push({ type: "tool_result", id: tc.id, name: name, ok: !(result && result.error), result: result });
@@ -1118,6 +1248,55 @@
         var blockMd = "# " + h + "：" + mm + "\n\n" + h2 + "\n" + (body.body || "") + "\n\n---\n";
         Store.writeJournalMd(date, (md ? md.replace(/\s*$/, "\n\n") : "") + blockMd);
         return jsonResp({ ok: true, inserted: "# " + h + "：" + mm, file: isoToStem(date) + ".md" });
+      });
+    },
+    // ── web_search 三层降级 — 360 主 → 百炼兜底 → 拒答 sentinel
+    "POST /api/web/search": function (req, u, body) {
+      var query = (body && body.query || "").trim();
+      var max = Math.max(1, Math.min(parseInt(body && body.max_results || "5", 10), 10));
+      if (!query) return jsonResp({ ok: false, error: "缺 query" }, 400);
+      return _mobileWebSearch360(query, max).then(function (r360) {
+        if (r360 && r360.indexOf("[360") !== 0) {
+          return jsonResp({ ok: true, query: query, category: "general", source: "360", results: r360 });
+        }
+        // 360 降级 → 试百炼
+        return Store.getSetting("dashscope_key").then(function (key) {
+          return _mobileWebSearchBailian(query, key).then(function (rB) {
+            if (rB && rB.indexOf("[百炼") !== 0 && rB.indexOf("[未配置") !== 0) {
+              return jsonResp({ ok: true, query: query, category: "general", source: "bailian", results: rB, _degraded_from: "360" });
+            }
+            // 双降级
+            return jsonResp({ ok: true, query: query, results: "[搜索后端全降级 — 360 失败,百炼也失败或未配置。" + r360 + " | " + rB + "]", _all_degraded: true });
+          });
+        });
+      });
+    },
+    "POST /api/web/fetch": function (req, u, body) {
+      var rawUrl = (body && body.url || "").trim();
+      if (!rawUrl || !/^https?:\/\//i.test(rawUrl)) return jsonResp({ ok: false, error: "url 必须 http(s)://" }, 400);
+      var url = _httpsUpgrade(rawUrl);  // critic ATS 修:http → https
+      var CapHttp = _getCapHttp();
+      var headers = { "User-Agent": "Mozilla/5.0 (gateway-fetch)" };
+      var p;
+      if (CapHttp) {
+        p = CapHttp.get({ url: url, headers: headers, connectTimeout: 15, readTimeout: 15 })
+          .then(function (r) { return (r && r.data) || ""; });
+      } else {
+        p = realFetch(url, { headers: headers }).then(function (r) { return r.text(); });
+      }
+      return p.then(function (html) {
+        var text = _htmlStripToText(html);
+        var FETCH_CAP = 3000;
+        var truncated = text.length > FETCH_CAP;
+        if (truncated) text = text.slice(0, FETCH_CAP);
+        return jsonResp({ ok: true, url: url, text: text, truncated: truncated, length: text.length });
+      }).catch(function (e) {
+        var msg = String(e && e.message || e);
+        // ATS / 网络异常 → 给 LLM 可解释 hint
+        if (msg.indexOf("cleartext") >= 0) {
+          return jsonResp({ ok: false, error: "iOS 拒 http 协议,该 URL 升级 https 也失败,换条链接", url: url });
+        }
+        return jsonResp({ ok: false, error: "fetch_url 异常:" + msg.slice(0, 200), url: url });
       });
     },
     // ⑥ B Turn 5:列 AI 动态注册的 widget manifest(从 setting/widgets/* 持久化读)

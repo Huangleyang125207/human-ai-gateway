@@ -720,6 +720,8 @@
       case "set_widget_enabled": return ((args.enabled ? "启用 " : "停用 ") + (args.id || "?") + " widget");
       case "add_widget": return "装新 widget · " + (args.title || args.id || "?");
       case "remove_widget": return "卸 widget · " + (args.id || "?");
+      case "web_search": return "搜 \"" + (args.query || "") + "\"";
+      case "fetch_url": return "看 " + ((args.url || "").replace(/^https?:\/\//, "").slice(0, 32)) + " 正文";
       default: return name;
     }
   }
