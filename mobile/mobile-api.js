@@ -1299,27 +1299,32 @@
     },
     // 历史:近 N 天每天是否打勾,对齐 PC 端 /history(query: name + days)
     "GET /api/daily-tasks/history": function (req, u) {
+      // D5 test_history_per_day_oldest_first:
+      // - 返字段 `days`(数组,不是 history)
+      // - 排序 oldest → newest(桌面 [base-2, yesterday, today])
+      // - 没文件 → checked: null;有文件没勾 → false;勾 → true
       var url = new URL(u, "http://x");
       var name = url.searchParams.get("name") || "";
-      var days = Math.max(1, Math.min(parseInt(url.searchParams.get("days") || "14", 10), 60));
+      var nDays = Math.max(1, Math.min(parseInt(url.searchParams.get("days") || "14", 10), 60));
       if (!name) return jsonResp({ ok: false, error: "需 name query" }, 400);
       var today = new Date();
       var dates = [];
-      for (var i = 0; i < days; i++) {
+      // 生成 oldest → newest 顺序(i=nDays-1 → 0)
+      for (var i = nDays - 1; i >= 0; i--) {
         var d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
         dates.push(d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()));
       }
       return Promise.all(dates.map(function (dt) {
         return Store.readJournalMd(dt).then(function (md) {
-          if (md === null) return { date: dt, checked: null };  // 没文件 = 未记录
+          if (md === null) return { date: dt, checked: null };
           var tasks = parseSupplements(md);
           var found = tasks.filter(function (t) { return t.name === name; })[0];
           return { date: dt, checked: found ? found.checked : null };
         });
-      })).then(function (history) {
-        var checked_days = history.filter(function (h) { return h.checked === true; }).length;
-        var recorded_days = history.filter(function (h) { return h.checked !== null; }).length;
-        return jsonResp({ ok: true, name: name, days: days, history: history, checked_days: checked_days, recorded_days: recorded_days });
+      })).then(function (daysArr) {
+        var checked_days = daysArr.filter(function (h) { return h.checked === true; }).length;
+        var recorded_days = daysArr.filter(function (h) { return h.checked !== null; }).length;
+        return jsonResp({ ok: true, name: name, days: daysArr, checked_days: checked_days, recorded_days: recorded_days });
       });
     },
     "POST /api/daily-tasks/check": function (req, u, body) {
