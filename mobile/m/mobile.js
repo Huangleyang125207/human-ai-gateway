@@ -569,6 +569,17 @@
     var who = /claude|gpt|deepseek|gemini|\bai\b|opus|sonnet|fable/i.test(m[1]) ? "ai" : "me";
     return { who: who, text: m[2].trim() };
   }
+  // attachment logical url → dataURL 异步替换(浏览器版直接拿 dataURL,真机将来走 Capacitor.convertFileSrc)
+  function rewriteAttachmentImgs(rootNode) {
+    if (!rootNode) return;
+    var imgs = rootNode.querySelectorAll('img[src^="/attachments/"]');
+    Array.prototype.forEach.call(imgs, function (img) {
+      var src = img.getAttribute("src");
+      api("/api/attachments/get?url=" + encodeURIComponent(src)).then(function (r) {
+        if (r && r.ok && r.dataUrl) img.src = r.dataUrl;
+      }).catch(function () {});
+    });
+  }
   function buildEntry(e) {
     var wrap = el("div", "gw-entry-wrap");
     wrap.appendChild(el("div", "gw-entry-del", "删除"));
@@ -585,11 +596,13 @@
       '<div class="gw-entry-main">' +
         (tagsHtml ? '<div class="gw-entry-tags">' + tagsHtml + '</div>' : '') +
         (h.title ? '<div class="gw-entry-title">' + esc(h.title) + '</div>' : '') +
-        '<div class="gw-entry-body">' + md(h.body) + '</div>' +
+        '<div class="gw-entry-body gw-rewrite-img">' + md(h.body) + '</div>' +
         (commitsHtml ? '<div class="gw-commits">' + commitsHtml + '</div>' : '') +
       '</div>');
     bindEntryGesture(entry, e);
     wrap.appendChild(entry);
+    // 异步替换 ![](/attachments/...) 渲染的 img src 为真 dataURL
+    setTimeout(function () { rewriteAttachmentImgs(entry); }, 0);
     return wrap;
   }
   function bindEntryGesture(entry, e) {
@@ -694,6 +707,13 @@
       var msg = el("div", "gw-msg " + (m.who === "ai" ? "ai" : "me") + (m.err ? " err" : ""),
         '<span class="who">' + (m.who === "ai" ? "Gateway" : "我") + (m.err ? " · 失败" : "") + '</span>' +
         '<div class="gw-bubble' + (m.streaming ? " gw-cursor" : "") + (m.err ? " err" : "") + '">' + (m.who === "ai" ? md(m.text) : esc(m.text)) + '</div>');
+      // 用户消息附图缩略图
+      if (m.attachments && m.attachments.length) {
+        var thumbs = el("div", "gw-msg-thumbs", m.attachments.map(function (a) {
+          return '<img class="gw-msg-thumb" src="' + esc(a.dataUrl || a.url) + '" alt="">';
+        }).join(""));
+        msg.appendChild(thumbs);
+      }
       box.appendChild(msg);
     });
     // AI 在想动画:brand/logo-animated.svg 是 Si-C 共价键(电子绕外圈 40s 一圈 +
@@ -722,13 +742,17 @@
       case "remove_widget": return "卸 widget · " + (args.id || "?");
       case "web_search": return "搜 \"" + (args.query || "") + "\"";
       case "fetch_url": return "看 " + ((args.url || "").replace(/^https?:\/\//, "").slice(0, 32)) + " 正文";
+      case "vision_classify": return "看图 · " + ((args.attachment_url || "").split("/").pop() || "");
+      case "ocr_image": return "OCR · " + ((args.attachment_url || "").split("/").pop() || "");
       default: return name;
     }
   }
-  function sendChat(text) {
+  function sendChat(text, attachments) {
     // ⑥ F 隐式信号:扫词后再发,不阻塞 chat 流程(emitSignal 自身 fire-and-forget)
     try { if (window.scanUserIntent) window.scanUserIntent(text); } catch (e) {}
-    state.thread.push({ kind: "msg", who: "me", text: text }); renderThread(true);
+    var userMsg = { kind: "msg", who: "me", text: text };
+    if (attachments && attachments.length) userMsg.attachments = attachments.map(function (a) { return { url: a.url, dataUrl: a.dataUrl }; });
+    state.thread.push(userMsg); renderThread(true);
     var hist = state.thread.filter(function (m) { return m.kind === "msg"; }).map(function (m) { return { role: m.who === "ai" ? "assistant" : "user", content: m.text }; });
     fetch("/api/chat", { method: "POST", body: JSON.stringify({ message: text, history: hist }) }).then(function (res) {
       var reader = res.body.getReader(), dec = new TextDecoder(), buf = "", aiMsg = null;
@@ -793,14 +817,74 @@
       fab.addEventListener("click", function () { openCard(); });
       $("gw").appendChild(fab);
     } else {
+      // 缩略 chip 行(贴图后显示在 chatbar 上方,可叉)
+      var chipRow = el("div", "gw-attach-chips"); chipRow.style.display = "none";
+      state.pendingAttachments = state.pendingAttachments || [];
+      function refreshChipRow() {
+        chipRow.innerHTML = "";
+        if (!state.pendingAttachments.length) { chipRow.style.display = "none"; return; }
+        chipRow.style.display = "flex";
+        state.pendingAttachments.forEach(function (att, idx) {
+          var chip = el("div", "gw-attach-chip", '<img src="' + att.dataUrl + '" alt=""><button class="gw-attach-x" aria-label="移除">×</button>');
+          chip.querySelector(".gw-attach-x").addEventListener("click", function () {
+            state.pendingAttachments.splice(idx, 1); refreshChipRow();
+          });
+          chipRow.appendChild(chip);
+        });
+      }
+      b.appendChild(chipRow);
+
       var bar = el("div", "gw-chatbar");
+      var attBtn = el("button", "gw-chat-attach", I.plus); attBtn.setAttribute("aria-label", "贴图");
+      attBtn.addEventListener("click", function () { pickAndUploadImage(); });
       var ta = el("textarea", "gw-chat-input"); ta.rows = 1; ta.placeholder = "跟 Gateway 说点什么…";
       var send = el("button", "gw-chat-send", I.send); send.disabled = true;
-      ta.addEventListener("input", function () { send.disabled = !ta.value.trim(); ta.style.height = "auto"; ta.style.height = Math.min(96, ta.scrollHeight) + "px"; });
+      ta.addEventListener("input", function () { send.disabled = !ta.value.trim() && !state.pendingAttachments.length; ta.style.height = "auto"; ta.style.height = Math.min(96, ta.scrollHeight) + "px"; });
       ta.addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); fire(); } });
       send.addEventListener("click", fire);
-      function fire() { var t = ta.value.trim(); if (!t) return; ta.value = ""; ta.style.height = "auto"; send.disabled = true; sendChat(t); }
-      bar.appendChild(ta); bar.appendChild(send); b.appendChild(bar);
+      function fire() {
+        var t = ta.value.trim();
+        var atts = state.pendingAttachments.slice();
+        if (!t && !atts.length) return;
+        ta.value = ""; ta.style.height = "auto"; send.disabled = true;
+        state.pendingAttachments = []; refreshChipRow();
+        // 拼 attachment url 到 user msg 末尾 + refs 给 server(mobile 端 server 是 shim,自动跑 vision)
+        var finalMsg = t;
+        if (atts.length) {
+          var urls = atts.map(function (a) { return a.url; });
+          finalMsg = t + (t ? "\n\n" : "") + "(我贴了 " + atts.length + " 张图: " + urls.join(", ") + ")";
+        }
+        sendChat(finalMsg, atts);
+      }
+      bar.appendChild(attBtn); bar.appendChild(ta); bar.appendChild(send); b.appendChild(bar);
+
+      // pickImage + upload 暴露给外部:Camera plugin 真机 / <input type=file> 浏览器
+      function pickAndUploadImage() {
+        var Cap = window.Capacitor && window.Capacitor.Plugins;
+        if (Cap && Cap.Camera && Cap.Camera.getPhoto) {
+          Cap.Camera.getPhoto({ resultType: "base64", source: "PHOTOS", quality: 80, allowEditing: false, format: "jpeg" }).then(function (photo) {
+            if (!photo || !photo.base64String) return;
+            var dataUrl = "data:image/" + (photo.format || "jpeg") + ";base64," + photo.base64String;
+            uploadDataUrlAttachment(dataUrl);
+          }).catch(function (e) { if (e && e.message && e.message.indexOf("cancelled") < 0) flash("选图失败"); });
+          return;
+        }
+        // 浏览器 fallback
+        var inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+        inp.addEventListener("change", function () {
+          var f = inp.files && inp.files[0]; if (!f) return;
+          var r = new FileReader(); r.onload = function () { uploadDataUrlAttachment(r.result); }; r.readAsDataURL(f);
+        });
+        document.body.appendChild(inp); inp.click(); setTimeout(function () { inp.remove(); }, 1000);
+      }
+      function uploadDataUrlAttachment(dataUrl) {
+        api("/api/chat/upload-image", { method: "POST", body: JSON.stringify({ dataUrl: dataUrl }) })
+          .then(function (r) {
+            if (!r || !r.ok) { flash("贴图失败:" + (r && r.error || "")); return; }
+            state.pendingAttachments.push({ url: r.url, dataUrl: dataUrl });
+            refreshChipRow(); send.disabled = false;
+          }).catch(function () { flash("贴图失败"); });
+      }
     }
   }
 
@@ -829,11 +913,37 @@
         '<span class="gw-time-colon">:</span>' +
         '<input class="gw-time-in" id="cMm" inputmode="numeric" maxlength="2" value="' + mm + '">' +
         '<div class="gw-time-quick"><button id="cNow">现在</button><button id="cHour">整点</button><button id="cHalf">半</button></div></div></div>' +
-      '<div class="gw-field" style="margin-bottom:8px"><div class="gw-field-lab">正文</div>' +
+      '<div class="gw-field" style="margin-bottom:8px"><div class="gw-field-lab">正文 <button type="button" id="cAttach" class="gw-card-attach">+ 贴张图</button></div>' +
         '<input class="gw-entry-title" id="cTitle" placeholder="标题（可选）" style="display:block;width:100%;border:0;outline:none;background:transparent;margin-bottom:6px">' +
         '<textarea class="gw-body-in" id="cBody" placeholder="此刻在想什么…"></textarea></div>' +
       '<div class="gw-card-foot"><span class="gw-card-hint">MD 是真相 · 写进当天</span><button class="gw-card-save">' + (editing ? "改完" : "落笔") + '</button></div>');
     layer.appendChild(scrim); layer.appendChild(card);
+    // openCard 贴张图入口:走 file picker → upload → 拼 ![](url) 进 cBody
+    card.querySelector("#cAttach").addEventListener("click", function () {
+      var Cap = window.Capacitor && window.Capacitor.Plugins;
+      function doUpload(dataUrl) {
+        api("/api/chat/upload-image", { method: "POST", body: JSON.stringify({ dataUrl: dataUrl }) }).then(function (r) {
+          if (!r || !r.ok) { flash("贴图失败"); return; }
+          var cBody = card.querySelector("#cBody");
+          var v = cBody.value || "";
+          cBody.value = v + (v && !v.endsWith("\n") ? "\n\n" : "") + "![](" + r.url + ")\n";
+          cBody.focus();
+        });
+      }
+      if (Cap && Cap.Camera && Cap.Camera.getPhoto) {
+        Cap.Camera.getPhoto({ resultType: "base64", source: "PHOTOS", quality: 80, format: "jpeg" }).then(function (photo) {
+          if (!photo || !photo.base64String) return;
+          doUpload("data:image/" + (photo.format || "jpeg") + ";base64," + photo.base64String);
+        }).catch(function () {});
+        return;
+      }
+      var inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+      inp.addEventListener("change", function () {
+        var f = inp.files && inp.files[0]; if (!f) return;
+        var r = new FileReader(); r.onload = function () { doUpload(r.result); }; r.readAsDataURL(f);
+      });
+      document.body.appendChild(inp); inp.click(); setTimeout(function () { inp.remove(); }, 1000);
+    });
     if (editing) {
       card.querySelector("#cTitle").value = existing.h.title || "";
       card.querySelector("#cBody").value = existing.h.body || "";

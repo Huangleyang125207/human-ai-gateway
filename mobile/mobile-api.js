@@ -81,6 +81,17 @@
         return ks.map(function (k) { return k.slice("journal/".length); }).sort();
       });
     },
+    // vision/OCR 移植 — attachment 存 Capacitor Filesystem(浏览器对应 localStorage)
+    // dataURL inline 存 attachments/<date>/<stem>(从 server 端 chat_routes 复刻 sha256
+    // 去重 + 按日期分目录,但不存 mime 链路,直接存完整 dataURL prefix 保留 mime)
+    writeAttachment: function (date, stem, dataUrl) { return Backend.setText("attachments/" + date + "/" + stem, dataUrl); },
+    readAttachment: function (date, stem) { return Backend.getText("attachments/" + date + "/" + stem); },
+    listAttachments: function (date) {
+      var prefix = "attachments/" + (date ? date + "/" : "");
+      return Backend.keys(prefix).then(function (ks) {
+        return ks.map(function (k) { return k.slice("attachments/".length); }).sort();
+      });
+    },
     // ⑥ B Turn 5:AI 动态 widget manifest 持久化 setting/widgets/<id>
     listWidgetManifests: function () {
       return Backend.keys("setting/widgets/").then(function (ks) {
@@ -299,6 +310,68 @@
   // lazy resolve CapacitorHttp(IIFE 启动时 cache 的 _cap 拿不到测试时后注入的 mock)
   function _getCapHttp() {
     return (typeof window !== "undefined" && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp) || null;
+  }
+  // ── vision_classify 移植 — 调阿里云百炼 qwen3-vl-flash(OpenAI 兼容)
+  // 复刻桌面 server.py:2171 _qwen_classify_image 的 system prompt + JSON mode
+  function _qwenClassifyImage(dataUrl, extraQuestion, key) {
+    if (!key) return Promise.resolve({ error: "no_dashscope_key", hint: "进设置填阿里云百炼 key 解锁视觉" });
+    if (!dataUrl) return Promise.resolve({ error: "no_image" });
+    var CapHttp = _getCapHttp();
+    var url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
+    var headers = { "Content-Type": "application/json", Authorization: "Bearer " + key };
+    var sysPrompt = "你看图,用 JSON 返回:{kind: 'supplement'/'photo'/'screenshot'/'document'/'other', " +
+      "description: 一两句具体描述图里有啥(看清楚再写,别空泛), " +
+      "ocr_likely: bool 这图里有没有可读文字, " +
+      "suggested_action: 给用户一句行动建议(可选), " +
+      "brand: 看到的品牌(可选,补剂/产品类才有), " +
+      "pill_count: 看到的瓶装颗数(可选,补剂瓶子才有)}";
+    var userContent = [
+      { type: "text", text: extraQuestion || "请按规则描述这张图。" },
+      { type: "image_url", image_url: { url: dataUrl } },
+    ];
+    var payload = {
+      model: "qwen3-vl-flash",
+      messages: [{ role: "system", content: sysPrompt }, { role: "user", content: userContent }],
+      response_format: { type: "json_object" },
+    };
+    var p;
+    if (CapHttp) {
+      p = CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 60, readTimeout: 60 })
+        .then(function (r) { return (r && r.data) || {}; });
+    } else {
+      p = realFetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
+    }
+    return p.then(function (d) {
+      var content = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
+      if (!content) return { error: "empty_response" };
+      // 容错 ```json fence
+      var s = String(content).trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+      try { return JSON.parse(s); } catch (e) { return { error: "json_parse_failed", raw: s.slice(0, 200) }; }
+    }).catch(function (e) {
+      return { error: "vision_failed", detail: String(e && e.message || e) };
+    });
+  }
+  // 简单 sha256 用 SubtleCrypto(浏览器/iOS WKWebView 都支持)
+  function _sha256Hex(buf) {
+    if (typeof crypto === "undefined" || !crypto.subtle) {
+      // dev fallback:返时间戳作 unique stem(不去重但能跑)
+      return Promise.resolve("ts" + Date.now() + Math.random().toString(36).slice(2, 8));
+    }
+    return crypto.subtle.digest("SHA-256", buf).then(function (h) {
+      var b = new Uint8Array(h);
+      var hex = ""; for (var i = 0; i < b.length; i++) { hex += (b[i] < 16 ? "0" : "") + b[i].toString(16); }
+      return hex.slice(0, 16);  // 短 hash 够 mobile vault 用
+    });
+  }
+  function _dataUrlToBuf(dataUrl) {
+    var m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl || "");
+    if (!m) return null;
+    var b64 = m[2];
+    try {
+      var bin = atob(b64); var u = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+      return { mime: m[1], buf: u.buffer };
+    } catch (e) { return null; }
   }
   function _mobileWebSearch360(query, max) {
     var CapHttp = _getCapHttp();
@@ -765,6 +838,19 @@
       parameters: { type: "object", properties: {
         url: { type: "string", description: "http(s):// URL" },
       }, required: ["url"] }}},
+    // vision/OCR 移植 — 阿里云百炼 qwen3-vl-flash(OpenAI 兼容)
+    { type: "function", function: { name: "vision_classify",
+      description: "看图分类 + 描述。返 {kind, description, ocr_likely, suggested_action, brand?, pill_count?}。" +
+        "extra_question 可指定问题(如'里面写了啥')替换默认描述任务。",
+      parameters: { type: "object", properties: {
+        attachment_url: { type: "string", description: "/attachments/<date>/<stem> 格式" },
+        extra_question: { type: "string", description: "可选,问 vision 一个具体问题" },
+      }, required: ["attachment_url"] }}},
+    { type: "function", function: { name: "ocr_image",
+      description: "把图里所有文字 OCR 出来,返 raw 文本。底层走 vision_classify + extra_question='请把图里所有文字 OCR 出来'。",
+      parameters: { type: "object", properties: {
+        attachment_url: { type: "string" },
+      }, required: ["attachment_url"] }}},
   ];
   // tool_name → mobile-api endpoint dispatch
   // 注意:用 window.fetch(shim-hijacked)而不是 realFetch — /api/* 路径要走 shim
@@ -822,6 +908,12 @@
         });
       case "web_search": return fch("/api/web/search", H).then(function (r) { return r.json(); });
       case "fetch_url": return fch("/api/web/fetch", H).then(function (r) { return r.json(); });
+      case "vision_classify": return fch("/api/vision/classify", H).then(function (r) { return r.json(); });
+      case "ocr_image":
+        // 内部走 vision_classify + extra_question(对齐 critic plan 设计)
+        var ocrArgs = { attachment_url: args.attachment_url, extra_question: "请把图里所有文字 OCR 出来,只返文字本身,不要解释。" };
+        return fch("/api/vision/classify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ocrArgs) })
+          .then(function (r) { return r.json(); });
       default: return Promise.resolve({ error: "unknown tool: " + name });
     }
   }
@@ -1248,6 +1340,55 @@
         var blockMd = "# " + h + "：" + mm + "\n\n" + h2 + "\n" + (body.body || "") + "\n\n---\n";
         Store.writeJournalMd(date, (md ? md.replace(/\s*$/, "\n\n") : "") + blockMd);
         return jsonResp({ ok: true, inserted: "# " + h + "：" + mm, file: isoToStem(date) + ".md" });
+      });
+    },
+    // ── vision/OCR 移植 — 复刻桌面 /api/chat/upload-image + /api/vision/classify
+    //    mobile 端 attachment 走 Capacitor Filesystem dataURL inline 存(浏览器对应
+    //    localStorage),sha256 短 hash 去重 + logical url /attachments/<date>/<stem>
+    "POST /api/chat/upload-image": function (req, u, body) {
+      var dataUrl = body && body.dataUrl;
+      if (!dataUrl || typeof dataUrl !== "string" || dataUrl.indexOf("data:") !== 0) {
+        return jsonResp({ ok: false, error: "缺 dataUrl 或格式错(必须 data:...;base64,...)" }, 400);
+      }
+      var parsed = _dataUrlToBuf(dataUrl);
+      if (!parsed) return jsonResp({ ok: false, error: "dataUrl 解析失败" }, 400);
+      var ext = ({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" })[parsed.mime] || "bin";
+      var date = todayIso();
+      return _sha256Hex(parsed.buf).then(function (hash) {
+        var stem = hash + "." + ext;
+        return Store.readAttachment(date, stem).then(function (existing) {
+          if (existing) return jsonResp({ ok: true, url: "/attachments/" + date + "/" + stem, deduped: true, size: parsed.buf.byteLength });
+          return Store.writeAttachment(date, stem, dataUrl).then(function () {
+            return jsonResp({ ok: true, url: "/attachments/" + date + "/" + stem, deduped: false, size: parsed.buf.byteLength });
+          });
+        });
+      });
+    },
+    "POST /api/vision/classify": function (req, u, body) {
+      var attUrl = body && body.attachment_url;
+      var q = body && body.extra_question;
+      if (!attUrl) return jsonResp({ ok: false, error: "缺 attachment_url" }, 400);
+      var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(attUrl);
+      if (!m) return jsonResp({ ok: false, error: "attachment_url 格式错" }, 400);
+      var date = m[1], stem = m[2];
+      return Promise.all([Store.readAttachment(date, stem), Store.getSetting("dashscope_key")]).then(function (rs) {
+        var dataUrl = rs[0], key = rs[1];
+        if (!dataUrl) return jsonResp({ ok: false, error: "attachment 不存在: " + attUrl }, 404);
+        return _qwenClassifyImage(dataUrl, q, key).then(function (j) {
+          if (j && j.error) return jsonResp({ ok: false, error: j.error, hint: j.hint, detail: j.detail });
+          return jsonResp({ ok: true, attachment_url: attUrl, result: j });
+        });
+      });
+    },
+    "GET /api/attachments/get": function (req, u) {
+      // 前端给 <img> 拿 dataURL 用;url=/attachments/<date>/<stem>(logical)
+      var qs = new URL(u, "http://x").searchParams;
+      var attUrl = qs.get("url") || "";
+      var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(attUrl);
+      if (!m) return jsonResp({ ok: false, error: "url 格式错" }, 400);
+      return Store.readAttachment(m[1], m[2]).then(function (dataUrl) {
+        if (!dataUrl) return jsonResp({ ok: false, error: "not found" }, 404);
+        return jsonResp({ ok: true, dataUrl: dataUrl });
       });
     },
     // ── web_search 三层降级 — 360 主 → 百炼兜底 → 拒答 sentinel
