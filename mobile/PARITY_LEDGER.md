@@ -59,7 +59,7 @@ oracle 文件:`tests/test_daily_tasks_routes.py`
 |----|---|---|---|---|---|
 | D1 | test_catalog_shape_and_is_writable | mobile-api.js L439-449 catalog | ❌ | — | tasks 字段形状 |
 | **D2** | **test_check_backfill_window_yesterday_before_noon_else_403** | mobile-api.js **L466 isWritableDate** | ✅ | fde19c1 | 闭集 `{today, yesterday-if-hour<12}` 已实装(L466-475);桌面 pytest 16/16 GREEN + JS oracle 5/5 + check-fe-be 干净 |
-| **D3** | **test_check_intake_increment_clamp_and_md_box** | mobile-api.js **L184/227**(check 路径硬编 daily_dose:1) | 🔴 | — | 已确认洞:check 路径要读 meta.daily_dose + clamp + sub-box(catalog L449 已读 meta,check 没跟上) |
+| **D3** | **test_check_intake_increment_clamp_and_md_box** | mobile-api.js **L1262 check + L634/646 setSupplement{Checked,Progress}** | ✅ | 53230fc | _bump_intake 数学已实装:三入口 intake/increment/checked/toggle + clamp [0,dose] + dose>=2 sub-box(setSupplementProgress)+ dose<2 单行(setSupplementChecked)+ intake=0 log pop。桌面 16/16 GREEN + JS oracle 6/6 + md 字节级 "- [x] parity-D3-鱼油" 验通 |
 | D4 | test_meta_update_total_pills_daily_dose_and_clear | meta 更新 | ❌ | — | total_pills None/''/0→pop;daily_dose max1 |
 | D5 | test_history_per_day_oldest_first | history | ❌ | — | oldest→newest;null=无文件 |
 | D6 | test_water_cup_get_set_roundtrip_reserved_key | water-cup | ❌ | — | `__water_cup__` 保留 key |
