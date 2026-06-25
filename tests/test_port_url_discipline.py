@@ -135,7 +135,7 @@ def test_curator_tool_description_forbids_absolute_url():
     """模型曾把相对 URL 自动补上 http://localhost:18080 — 这是 prompt discipline 的事。
     description 必须明令"原样照抄,不要加 host/port 前缀"。
     """
-    src = (ROOT / "server.py").read_text()
+    src = (ROOT / "tool_specs.py").read_text()  # TOOLS schema 6.25 抽到 tool_specs.py
     # 抓 ask_photo_curator 那个 tool 的 description 字段(可能跨多行字符串拼接)
     m = re.search(
         r'"name"\s*:\s*"ask_photo_curator"\s*,\s*\n\s*"description"\s*:\s*\((.+?)\)\s*,',

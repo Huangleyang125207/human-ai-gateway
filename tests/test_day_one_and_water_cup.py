@@ -127,7 +127,7 @@ def test_set_water_cup_image_dispatcher_wired():
 
 def test_set_water_cup_image_tool_schema_minimum():
     """OpenAI tool spec 必含 name + description + parameters.required[attachment_url]"""
-    src = (ROOT / "server.py").read_text()
+    src = (ROOT / "tool_specs.py").read_text()  # TOOLS schema 6.25 抽到 tool_specs.py
     # 抓 set_water_cup_image 这个 function spec 的 properties 段
     m = re.search(
         r'"name":\s*"set_water_cup_image".*?"required":\s*\[(.*?)\]',
