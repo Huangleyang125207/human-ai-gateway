@@ -1384,14 +1384,22 @@
 
     // 写日记:行内编辑/插入/删除 —— MVP 简化,人写自己的块,不跑 authorship 守卫
     "POST /api/journal/insert-block": function (req, u, body) {
+      // 复刻桌面 _insert_block authorship 契约(test_authorship T6 + journal_routes J5):
+      //  · 新 H2 必 stamp @author marker(test_insert_block_stamps_{ai,user}_marker)
+      //  · HTTP 默认 author='user'(user-trust;test_insert_block_http_stamps_user)
+      //  · 显式传 author='ai' 用于 lazy 21:30 纸条 / AI tool 写入路径
       var date = (body && body.date) || todayIso();
       return Store.readJournalMd(date).then(function (md) {
         if (md === null) md = "";
         var time = body.time, h = parseInt((time || "0:0").split(":")[0], 10), mm = (time || "0:00").split(":")[1];
-        var h2 = "## " + (body.tag ? "#" + body.tag + " " : "") + (body.title || "");
+        var author = (body && body.author) || "user";
+        var titlePart = (body.tag ? "#" + body.tag + " " : "") + (body.title || "");
+        // H2 末尾 stamp marker:" @user" / " @ai"(空格分隔,与桌面 AUTHOR_RE 兼容)
+        var h2 = "## " + titlePart + " @" + author;
         var blockMd = "# " + h + "：" + mm + "\n\n" + h2 + "\n" + (body.body || "") + "\n\n---\n";
-        Store.writeJournalMd(date, (md ? md.replace(/\s*$/, "\n\n") : "") + blockMd);
-        return jsonResp({ ok: true, inserted: "# " + h + "：" + mm, file: isoToStem(date) + ".md" });
+        return Store.writeJournalMd(date, (md ? md.replace(/\s*$/, "\n\n") : "") + blockMd).then(function () {
+          return jsonResp({ ok: true, inserted: "# " + h + "：" + mm, file: isoToStem(date) + ".md" });
+        });
       });
     },
     // ── vision/OCR 移植 — 复刻桌面 /api/chat/upload-image + /api/vision/classify
