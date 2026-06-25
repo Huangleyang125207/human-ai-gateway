@@ -29,7 +29,11 @@ cp "$GW/mobile/m/gw-journal.js"  "$WWW/gw-journal.js"
 cp "$GW/mobile/m/gw-chat.js"     "$WWW/gw-chat.js"
 cp "$GW/mobile/m/gw-app.js"      "$WWW/gw-app.js"
 
-# 22 tool shim(api 路由 + 后端调用)— gw-real-bridge.js 后续接通走它
+# bridge:接通 cd 5 件套 mock → mobile-api.js shim 真后端
+# 8 个 P0 patch:gatewayMd/scanIntent/days/tasks/water/journal/thread/sendChat + bus hooks
+cp "$GW/mobile/m/gw-real-bridge.js" "$WWW/gw-real-bridge.js"
+
+# 22 tool shim(api 路由 + 后端调用)
 cp "$GW/mobile/mobile-api.js"  "$WWW/mobile-api.js"
 
 # manifest.json — PWA 添加到主屏支持
