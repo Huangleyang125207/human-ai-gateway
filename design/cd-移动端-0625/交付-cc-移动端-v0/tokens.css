@@ -1,0 +1,102 @@
+/* ════════════════════════════════════════════════════════════════════
+   Gateway · 移动端 design tokens  ·  双模式(day / night)· 组件层零裸色值
+   ────────────────────────────────────────────────────────────────────
+   红线:
+   · 组件 CSS 只准用下面这些语义变量,不准写裸 hex / rgb。
+   · 字体只 vendor 锁版,绝不走 CDN(弱网/离线下 CDN 阻塞首屏,桌面端踩过)。
+     下面的 font stack 在 macOS/iOS 上落到系统 CJK(Songti / Kaiti),真机
+     打包时把同名 woff2 vendor 进 repo,变量名不动。
+   · day = 米黄纸(白天)· night = 深夜台灯(深褐底 + 暖白墨),共用变量名。
+   切换:document.documentElement.dataset.theme = 'day' | 'night'
+   ════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── 字体(vendor 锁版,勿走 CDN)── */
+  --font-serif: "Songti SC", "STSong", "Noto Serif SC", "Source Han Serif SC", Georgia, serif; /* 人 · 正文 · 标题 */
+  --font-kai:   "Kaiti SC", "STKaiti", "Kaiti TC", "Noto Serif SC", serif;                      /* AI 笔迹 */
+  --font-sans:  -apple-system, system-ui, "PingFang SC", "Helvetica Neue", sans-serif;          /* UI 标签 · 小字 */
+  --font-mono:  ui-monospace, "SF Mono", Menlo, monospace;                                      /* key · 时间戳 */
+
+  /* ── 尺寸 / 节奏 ── */
+  --hit: 44px;                 /* HIG 触控下限 */
+  --safe-top: 47px;            /* 真机换 env(safe-area-inset-top) */
+  --safe-bot: 34px;            /* 真机换 env(safe-area-inset-bottom) */
+  --gut: 22px;                 /* 页面左右沟槽 */
+  --r-soft: 14px;
+  --r-sheet: 22px;
+  --r-pill: 999px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-paper: cubic-bezier(0.32, 0.06, 0.13, 1);  /* 纸页落定 */
+  --t-fast: 0.22s;
+  --t-mid: 0.42s;
+  --t-slow: 0.9s;
+
+  /* ════ DAY · 米黄纸(默认)════ */
+  /* 纸面(从最底到最亮) */
+  --paper-base:   #f3e9d6;   /* 页面最底 */
+  --paper-raised: #f9f2e5;   /* 微微浮起(widget / entry 呼吸) */
+  --paper-bright: #fefaf2;   /* 最亮纸(信笺 / sheet / 纸条) */
+  --paper-sunken: #ebe0ca;   /* 凹陷(输入底 / 占位) */
+  /* 棕墨文字(从最深到最弱) */
+  --ink-strong: #3a3026;     /* 主文字 · 标题 · 正文 */
+  --ink-medium: #6a5b48;     /* 次要正文 */
+  --ink-soft:   #9a8a70;     /* 时间戳 · 标签 · 说明 */
+  --ink-faint:  #c2b298;     /* 装饰 · 占位 · 未填 */
+  /* 强调 */
+  --umber:        #a86e46;   /* 链接 · 今天 · 棕墨强调 */
+  --umber-deep:   #875634;   /* 棕墨按下 */
+  --vermilion:    #b14a2b;   /* 朱砂:印 · AI 签名点 · 删除痕迹 · 危险 */
+  --vermilion-soft:#b85a3b;
+  /* 线 / 光 / 质感 */
+  --line-soft:   rgba(58, 48, 38, 0.10);
+  --line-medium: rgba(58, 48, 38, 0.20);
+  --line-strong: rgba(58, 48, 38, 0.34);
+  --warm-glow:   rgba(200, 148, 86, 0.16);   /* 呼吸暖光 */
+  --fill-water:  rgba(96, 122, 130, 0.42);   /* 杯中水(淡青墨) */
+  --grain-opacity: 0.5;
+  --paper-shadow: 0 1px 0 rgba(255,252,245,0.6), 0 8px 24px rgba(58,48,38,0.07);
+  --sheet-shadow: 0 -10px 44px rgba(58,48,38,0.16);
+  --float-shadow: 0 22px 60px rgba(58,48,38,0.24);
+
+  /* 作者笔迹色(语义) */
+  --author-user: var(--ink-strong);   /* 用户 = 宋体棕墨 */
+  --author-ai:   var(--ink-medium);   /* AI = 文楷,略浅 */
+  --author-ai-mark: var(--vermilion); /* AI 的朱砂签记 */
+
+  /* chip 三态(AI 工具痕迹) */
+  --chip-doing-ink: var(--umber);
+  --chip-ok-ink:    var(--ink-medium);
+  --chip-ok-seal:   var(--vermilion);
+  --chip-fail-ink:  var(--vermilion);
+}
+
+/* ════ NIGHT · 深夜台灯(深褐底 + 暖白墨 + 琥珀)════ */
+/* 选择器用通用 [data-theme] 而非 :root —— 既可挂 <html> 整页切换,
+   也可挂任意容器做 day/night 并排对比(气味稿用后者)。 */
+[data-theme="night"] {
+  --paper-base:   #1b1815;
+  --paper-raised: #232019;
+  --paper-bright: #2c271f;
+  --paper-sunken: #14110d;
+  --ink-strong: #ece0c8;     /* 台灯下暖白纸色 */
+  --ink-medium: #b7a98d;
+  --ink-soft:   #897b64;
+  --ink-faint:  #5b5244;
+  --umber:        #d29a57;   /* 夜里棕墨提亮成琥珀 */
+  --umber-deep:   #b6803f;
+  --vermilion:    #d2633f;   /* 夜里朱砂提亮 */
+  --vermilion-soft:#c9694a;
+  --line-soft:   rgba(236, 224, 200, 0.09);
+  --line-medium: rgba(236, 224, 200, 0.17);
+  --line-strong: rgba(236, 224, 200, 0.30);
+  --warm-glow:   rgba(210, 154, 87, 0.12);
+  --fill-water:  rgba(150, 178, 188, 0.34);
+  --grain-opacity: 0.32;
+  --paper-shadow: 0 1px 0 rgba(255,250,240,0.04), 0 8px 24px rgba(0,0,0,0.4);
+  --sheet-shadow: 0 -10px 44px rgba(0,0,0,0.5);
+  --float-shadow: 0 22px 60px rgba(0,0,0,0.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-fast: 0.001ms; --t-mid: 0.001ms; --t-slow: 0.001ms; }
+}

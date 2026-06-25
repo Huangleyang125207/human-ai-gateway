@@ -1,0 +1,159 @@
+/* ════════════════════════════════════════════════════════════════════
+   mobile-overrides.css —— cd v0 没设计的局部组件 + token 化(全用 cd 变量)
+   ────────────────────────────────────────────────────────────────────
+   · 范围:onboarding 全流程(双钥匙 + 风格偏好题)+ openCard 贴张图按钮
+   · 原则:不写裸 hex,所有色 / 字体 / 间距走 cd tokens.css
+   · 不能跟 cd components.css 命名冲突(冲突的已在 mobile.js refactor 改完)
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ═══ openCard "+ 贴张图" 按钮(cd 没设计,我加的入口)═══ */
+.gw-card-attach {
+  float: right;
+  appearance: none; background: none;
+  border: 1px dashed var(--line-medium); border-radius: var(--r-pill);
+  padding: 2px 10px;
+  font: 11px var(--font-sans); color: var(--ink-soft);
+  cursor: pointer;
+}
+.gw-card-attach:active { background: var(--paper-sunken); }
+
+/* ═══ Onboarding(双钥匙 + 风格偏好题)═══ */
+.gw-onboard {
+  position: fixed; inset: 0; z-index: 90;
+  background: var(--paper-base);
+  display: flex; flex-direction: column;
+}
+.gw-onboard .gw-breath,
+.gw-onboard .gw-glow,
+.gw-onboard .gw-grain { position: absolute; }
+
+.gw-onboard-scroll {
+  position: relative; z-index: 1;
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding-top: calc(var(--safe-top) + 30px);
+}
+.gw-onboard-head { padding: 6px 26px 6px; }
+.gw-onboard-title {
+  font: 500 26px var(--font-serif);
+  color: var(--ink-strong);
+  letter-spacing: .04em;
+  margin-bottom: 10px;
+}
+.gw-onboard-sub {
+  font: 15px/1.85 var(--font-kai);
+  color: var(--ink-soft);
+}
+.gw-onboard-foot {
+  position: relative; z-index: 1;
+  padding: 14px 22px calc(16px + var(--safe-bot));
+  border-top: 1px solid var(--line-soft);
+}
+.gw-onboard-enter {
+  width: 100%; appearance: none; border: 0;
+  background: var(--ink-strong);
+  color: var(--paper-bright);
+  font: 500 16px var(--font-sans); letter-spacing: .06em;
+  padding: 15px; border-radius: var(--r-pill);
+  cursor: pointer;
+}
+.gw-onboard-skip {
+  display: block; width: 100%;
+  text-align: center;
+  margin-top: 12px; padding: 8px;
+  background: none; border: 0;
+  color: var(--ink-faint);
+  font: 13px var(--font-sans);
+  cursor: pointer;
+}
+
+/* ⑥ F 风格偏好两选(onboarding 末尾一题) */
+.gw-style-opts {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 12px;
+}
+.gw-style-opt {
+  appearance: none;
+  padding: 12px 14px;
+  background: var(--paper-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  color: var(--ink-medium);
+  font: 14px var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.gw-style-opt.on {
+  background: var(--warm-glow);
+  border-color: var(--umber);
+  color: var(--ink-strong);
+}
+
+/* ═══ key 输入(onboarding + 设置共用)═══ */
+.gw-key {
+  background: var(--paper-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.gw-key.ok { border-color: color-mix(in srgb, var(--umber) 40%, var(--line-soft)); background: color-mix(in srgb, var(--warm-glow) 60%, var(--paper-raised)); }
+.gw-key-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.gw-key-role { font: 500 14px var(--font-serif); color: var(--ink-strong); }
+.gw-key-tag { font: 12px var(--font-kai); color: var(--ink-soft); }
+.gw-key-desc { font: 12.5px/1.6 var(--font-kai); color: var(--ink-medium); margin-bottom: 10px; }
+.gw-key-row { display: flex; gap: 6px; }
+.gw-key-in {
+  flex: 1; appearance: none;
+  padding: 10px 12px;
+  background: var(--paper-base); border: 1px solid var(--line-medium);
+  border-radius: 8px;
+  font: 13px var(--font-mono);
+  color: var(--ink-strong);
+  outline: none;
+}
+.gw-key-test {
+  appearance: none; padding: 10px 14px;
+  background: var(--ink-strong); color: var(--paper-bright); border: 0;
+  border-radius: 8px;
+  font: 12px var(--font-sans); cursor: pointer;
+}
+.gw-key-status {
+  margin-top: 6px;
+  font: 11.5px var(--font-sans);
+  color: var(--ink-soft);
+}
+.gw-key-status.ok { color: var(--vermilion); }
+.gw-key-status.idle { color: var(--ink-faint); }
+
+/* ═══ 设置卡的局部行(cd 没设计,简化版)═══ */
+.gw-set { padding: 0 var(--gut) calc(var(--safe-bot) + 28px); }
+.gw-set-sec { margin-top: 28px; }
+.gw-set-sec-lab { font: 13px var(--font-kai); color: var(--ink-soft); margin-bottom: 10px; letter-spacing: 0.04em; }
+.gw-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.gw-row:last-child { border-bottom: 0; }
+.gw-row-main { flex: 1; min-width: 0; }
+.gw-row-title { font: 14px var(--font-serif); color: var(--ink-strong); margin-bottom: 2px; }
+.gw-row-desc { font: 12px/1.5 var(--font-kai); color: var(--ink-soft); }
+.gw-row-val { font: 12px var(--font-sans); color: var(--ink-soft); }
+.gw-toggle {
+  width: 38px; height: 22px; border-radius: 999px;
+  background: var(--paper-sunken);
+  position: relative; cursor: pointer;
+  transition: background var(--t-fast);
+}
+.gw-toggle::after {
+  content: ""; position: absolute;
+  top: 2px; left: 2px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--paper-bright);
+  box-shadow: 0 1px 3px rgba(40,34,26,0.2);
+  transition: left var(--t-fast) var(--ease);
+}
+.gw-toggle.on { background: var(--umber); }
+.gw-toggle.on::after { left: 18px; }

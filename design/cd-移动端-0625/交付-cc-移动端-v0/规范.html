@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gateway 移动端 · 设计规范(给 CC)</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<style>
+  html, body { margin: 0; }
+  body { background: #d8d3ca; color: #3a3026; font-family: -apple-system, system-ui, "PingFang SC", sans-serif; padding: 0 0 80px; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 32px; }
+  header.doc { padding: 56px 0 8px; }
+  .kicker { font: 600 11px/1 sans-serif; letter-spacing: 0.26em; text-transform: uppercase; color: #8a7f6e; }
+  h1.doc { font: 500 38px/1.15 "Songti SC", serif; color: #2e2820; margin: 14px 0 0; letter-spacing: 0.01em; }
+  .lede { font: 16px/1.7 "Songti SC", serif; color: #5a5043; max-width: 70ch; margin: 12px 0 0; }
+  .lede b { color: #a3502c; font-weight: 500; }
+  .redlines { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+  .redline { font: 12.5px sans-serif; color: #6a3b22; background: rgba(177,74,43,0.10); border: 1px solid rgba(177,74,43,0.22); border-radius: 999px; padding: 5px 13px; }
+
+  section.doc { margin-top: 56px; }
+  .sec-h { display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid rgba(58,48,38,0.16); padding-bottom: 10px; margin-bottom: 24px; }
+  .sec-n { font: 600 12px sans-serif; letter-spacing: 0.1em; color: #b87a4f; }
+  .sec-t { font: 500 23px "Songti SC", serif; color: #2e2820; }
+  .sec-note { font: 13px sans-serif; color: #8a7f6e; margin-left: auto; }
+
+  .grid { display: grid; gap: 22px; }
+  .demo { background: var(--paper-base); border-radius: 16px; padding: 20px; box-shadow: 0 1px 0 rgba(255,255,255,0.5), 0 10px 30px rgba(58,48,38,0.08); position: relative; overflow: hidden; }
+  .demo[data-theme="night"] { box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+  .demo .cap { position: absolute; top: 12px; right: 14px; font: 10.5px sans-serif; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); z-index: 5; }
+  .demo .demo-grain { position: absolute; inset: 0; opacity: var(--grain-opacity); mix-blend-mode: multiply; pointer-events: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E"); }
+  .demo > * { position: relative; z-index: 1; }
+  .demo-label { font: 600 13px sans-serif; color: var(--ink-medium); margin-bottom: 4px; }
+  .demo-sub { font: 12px sans-serif; color: var(--ink-soft); margin-bottom: 14px; }
+
+  /* tokens swatch */
+  .tok { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
+  .sw { border-radius: 10px; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06); }
+  .sw .chip { height: 56px; } .sw .meta { padding: 8px 10px; font: 11px sans-serif; background: #fff; }
+  .sw .meta b { display: block; color: #2e2820; font-weight: 600; font-size: 12px; }
+  .sw .meta span { color: #8a7f6e; font-family: ui-monospace, monospace; }
+
+  /* chip catalog table */
+  .chip-states { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+  .chip-states .col { flex: 1; min-width: 200px; }
+  .tool-table { width: 100%; border-collapse: collapse; }
+  .tool-table td { padding: 9px 8px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+  .tool-table .tg { width: 26px; color: var(--ink-soft); }
+  .tool-table .tn { font: 11px ui-monospace, monospace; color: var(--ink-faint); text-align: right; white-space: nowrap; }
+  .tool-table .grp td { background: color-mix(in srgb, var(--umber) 8%, transparent); font: 600 11px sans-serif; letter-spacing: 0.06em; text-transform: uppercase; color: var(--umber); border: 0; padding-top: 14px; }
+  .tool-table .lbl { font: 14px "Songti SC", serif; color: var(--ink-strong); }
+  .tool-table .lbl .arg { font-weight: 600; }
+
+  .map { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 18px; }
+  .step-n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--vermilion); color: var(--paper-bright); font: 600 12px sans-serif; }
+  .map .demo .demo-label { display: flex; align-items: center; gap: 9px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="doc">
+    <div class="kicker">Gateway 移动端 · v0 重做 · 设计规范 / 给 CC</div>
+    <h1 class="doc">五件套 · 静态对照表</h1>
+    <p class="lede">配 <b>gateway.html</b>(可跑原型)一起读:原型给手感,本页给"每一态长什么样、CC 接哪个 endpoint"。组件全在 <b>components.css</b>,色全走 <b>tokens.css</b> 语义变量 —— <b>组件层零裸色值</b>。</p>
+    <div class="redlines">
+      <span class="redline">MD 是真相 · 无 build</span>
+      <span class="redline">不卡片化 · 不 dashboard</span>
+      <span class="redline">AI 是空气 · 不是按钮</span>
+      <span class="redline">删除禁垃圾桶 / 新增禁 FAB+ / 等待禁 spinner / 对话禁纯气泡</span>
+      <span class="redline">双模式 day / night</span>
+      <span class="redline">390 基线 · 字体 vendor 不走 CDN</span>
+    </div>
+  </header>
+
+  <!-- 交付 #5 token -->
+  <section class="doc">
+    <div class="sec-h"><span class="sec-n">#5</span><span class="sec-t">Token · 双模式同一套变量</span><span class="sec-note">夜间不是反色 —— 棕墨提成琥珀、朱砂提亮</span></div>
+    <div class="tok" id="tok"></div>
+  </section>
+
+  <!-- 交付 #2 widget -->
+  <section class="doc">
+    <div class="sec-h"><span class="sec-n">#2</span><span class="sec-t">关怀区 4 widget · 竖向小报栏目</span><span class="sec-note">不齐高 / 不同款边框 / 墨线分隔</span></div>
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <div class="demo" data-theme="day"><span class="cap">日间</span><div class="demo-grain"></div><div class="care-mount"></div></div>
+      <div class="demo" data-theme="night"><span class="cap">夜间</span><div class="demo-grain"></div><div class="care-mount"></div></div>
+    </div>
+    <p class="lede" style="font-size:14px">八杯水 = 横排单行 8 杯,<b>滑动点亮</b>、触点放大、长按换图;今日打卡 = 横滑 chip,<b>点 toggle</b>、长按管理、余量≤3 贴"3d"药签(非未读红点);今日 PULSE = <b>一行小报</b>,不图表化;今天心情 = <b>单行 7 emoji</b>,本机 only 不进 md。状态:默认 / 圆满(全勾+8 杯)/ 空白 / 历史日只读。</p>
+  </section>
+
+  <!-- 交付 #3 chip -->
+  <section class="doc">
+    <div class="sec-h"><span class="sec-n">#3</span><span class="sec-t">AI tool chip · 三态 + 18 自然句</span><span class="sec-note">永久留存 · 不可点开成面板 · fail 可展开一行</span></div>
+    <div class="grid" style="grid-template-columns:1fr 1fr; margin-bottom:24px">
+      <div class="demo" data-theme="day"><span class="cap">日间 · 三态</span><div class="demo-grain"></div><div class="chip-mount"></div></div>
+      <div class="demo" data-theme="night"><span class="cap">夜间 · 三态</span><div class="demo-grain"></div><div class="chip-mount"></div></div>
+    </div>
+    <div class="demo" data-theme="day"><div class="demo-grain"></div>
+      <div class="demo-label">18 个 tool · 自然句翻译表 <span style="font-weight:400;color:var(--ink-soft)">(toolLabel() 真实输出;新增 tool 加一条,禁 raw JSON 漏出)</span></div>
+      <table class="tool-table" id="tooltable"></table>
+    </div>
+  </section>
+
+  <!-- 交付 #4 写操作 -->
+  <section class="doc">
+    <div class="sec-h"><span class="sec-n">#4</span><span class="sec-t">5 套写操作习语</span><span class="sec-note">每个动作落 md + author;纸的语义</span></div>
+    <div class="map">
+      <div class="demo" data-theme="day"><div class="demo-grain"></div>
+        <div class="demo-label"><span class="step-n">1</span>tap → openCard 编辑</div>
+        <div class="demo-sub">轻点条目进信笺编辑 · 锁时间 · 拼回 commits</div>
+        <div class="mini-card"></div>
+      </div>
+      <div class="demo" data-theme="day"><div class="demo-grain"></div>
+        <div class="demo-label"><span class="step-n">2</span>长按 480ms → 纸感 sheet</div>
+        <div class="demo-sub">改 / 加内容 / 划掉收纸 / 贴图 / 指给 AI 看</div>
+        <div class="mini-sheet"></div>
+      </div>
+      <div class="demo" data-theme="day"><div class="demo-grain"></div>
+        <div class="demo-label"><span class="step-n">3</span>左滑 60px → 撕痕删除</div>
+        <div class="demo-sub">露出朱砂撕痕暗区 · 飞出 · 非垃圾桶 icon</div>
+        <div class="mini-swipe"></div>
+      </div>
+      <div class="demo" data-theme="day"><div class="demo-grain"></div>
+        <div class="demo-label"><span class="step-n">4</span>撤回纸条 · 5s</div>
+        <div class="demo-sub">墨色进度条倒数 · 非 SaaS OK/Cancel</div>
+        <div class="mini-undo"></div>
+      </div>
+      <div class="demo" data-theme="day"><div class="demo-grain"></div>
+        <div class="demo-label"><span class="step-n">5</span>提笔(悬浮新建)+ 磨墨等待</div>
+        <div class="demo-sub">钢笔尖,非 FAB+;AI 处理 = 墨石晕开,非 spinner</div>
+        <div class="mini-nibgrind"></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script src="gw-mock.js"></script>
+<script src="gw-widgets.js"></script>
+<script src="gw-journal.js"></script>
+<script src="gw-chat.js"></script>
+<script>
+  // 让模态/手势 helper 有 root(本页只静态展示,给个壳避免报错)
+  GW.root = document.body;
+
+  /* tokens 色板 */
+  const TOK = [
+    ['--paper-base', '页面最底'], ['--paper-bright', '最亮纸/信笺'], ['--ink-strong', '主文字'],
+    ['--ink-soft', '时间/标签'], ['--umber', '链接/今天'], ['--vermilion', '朱砂/删除/AI印'],
+  ];
+  document.getElementById('tok').innerHTML = ['day', 'night'].map((mode) =>
+    TOK.map(([v, label]) => `<div class="sw" data-theme="${mode}"><div class="chip" style="background:var(${v})"></div><div class="meta"><b>${label}</b><span>${v} · ${mode}</span></div></div>`).join('')
+  ).join('');
+
+  /* 关怀区双模式 */
+  document.querySelectorAll('.care-mount').forEach((m) => {
+    const st = { dayKey: '06-25', tasks: JSON.parse(JSON.stringify(GW.tasks)), water: 6, mood: '🙂', enabled: ['pulse', 'mood'], dynWidgets: [], readonly: false };
+    const sec = document.createElement('section'); sec.className = 'gw-care'; sec.style.padding = '0';
+    m.appendChild(sec); GW.renderCare(sec, st);
+  });
+
+  /* chip 三态 */
+  function chip(name, args, state, error) {
+    const icon = GW.ICON[GW.toolGroupIcon(name)] || GW.ICON.dot;
+    let inner = `<span class="glyph">${icon}</span><span class="label">${GW.toolLabel(name, args)}</span>`;
+    if (state === 'doing') inner += `<span class="ink-pulse"></span>`;
+    else if (state === 'ok') inner += `<span class="seal-dot"></span>`;
+    return `<div class="gw-chip-tool ${state}">${inner}</div>` +
+      (state === 'fail' && error ? `<div class="gw-chip-fail-reason">${error}</div>` : '');
+  }
+  document.querySelectorAll('.chip-mount').forEach((m) => {
+    m.innerHTML = `<div class="gw-thread" style="padding:6px 2px;gap:12px;background:none">
+      ${chip('patch_journal_block', { time: '14:00' }, 'doing')}
+      ${chip('check_daily_task', { task_name: '鱼油' }, 'ok')}
+      ${chip('vision_classify', { attachment_url: 'cap.jpg' }, 'fail', '没填阿里云钥匙 · 去设置')}
+    </div>`;
+  });
+
+  /* 18 tool 自然句表 */
+  const GROUPS = [
+    ['日记写操作 · ★★★', [['patch_journal_block', { time: '14:00' }], ['insert_journal_block', { time: '19:00', title: '打篮球' }], ['append_journal_comment', { time: '15:00' }], ['read_today_schedule', {}], ['list_recent_days', { n: 7 }]]],
+    ['打卡管理 · ★★', [['check_daily_task', { task_name: '鱼油' }], ['set_daily_task_meta', { task_name: '鱼油' }], ['set_daily_task_image', { task_name: '鱼油' }], ['manage_daily_task', { action: 'add', task_name: '维C' }]]],
+    ['喝水', [['set_water_cup_image', {}]]],
+    ['搜索', [['search_journal', { query: '客户' }]]],
+    ['联网 · 三层降级', [['web_search', { query: 'M2 芯片对比' }], ['fetch_url', { url: 'https://techcrunch.com/x' }]]],
+    ['视觉 / OCR · 百炼', [['vision_classify', { attachment_url: '/attachments/26.6.25/cap_a3f2.jpg' }], ['ocr_image', { attachment_url: 'menu.jpg' }]]],
+    ['Widget · 动态', [['list_widgets', {}], ['set_widget_enabled', { id: 'mood', enabled: false }], ['add_widget', { title: '步数追踪', id: 'steps' }], ['remove_widget', { id: 'steps' }]]],
+  ];
+  document.getElementById('tooltable').innerHTML = GROUPS.map(([g, tools]) =>
+    `<tr class="grp"><td colspan="3">${g}</td></tr>` +
+    tools.map(([n, a]) => `<tr><td class="tg">${GW.ICON[GW.toolGroupIcon(n)] || GW.ICON.dot}</td><td class="lbl">${GW.toolLabel(n, a)}</td><td class="tn">${n}</td></tr>`).join('')
+  ).join('');
+
+  /* 写操作 mini 示例 */
+  document.querySelector('.mini-card').innerHTML = `<div style="position:relative;border-radius:12px;overflow:hidden;background:var(--paper-bright);box-shadow:var(--paper-shadow);padding:14px">
+    <div class="gw-card-kicker">改这一块</div>
+    <div style="margin-top:10px"><div class="gw-field-lab"># 标签</div><div class="gw-chips"><span class="gw-chip on">#gateway</span><span class="gw-chip">#a股</span></div></div>
+    <div style="margin-top:12px"><div class="gw-field-lab">时间块 · 锁</div><span class="gw-time-in" style="display:inline-block;padding:6px 10px">09</span> : <span class="gw-time-in" style="display:inline-block;padding:6px 10px">00</span></div>
+  </div>`;
+  document.querySelector('.mini-sheet').innerHTML = `<div style="border-radius:12px;overflow:hidden;background:var(--paper-bright);box-shadow:var(--paper-shadow);padding:6px 0">
+    <div class="gw-sheet-item" style="padding:9px 14px"><span class="glyph">${GW.ICON.edit}</span>改一块</div>
+    <div class="gw-sheet-item" style="padding:9px 14px"><span class="glyph">${GW.ICON.strike}</span>划掉收纸</div>
+    <div class="gw-sheet-item" style="padding:9px 14px"><span class="glyph" style="color:var(--vermilion)">${GW.ICON.point}</span>指给 AI 看 <span style="color:var(--vermilion);margin-left:4px">✦</span></div>
+  </div>`;
+  document.querySelector('.mini-swipe').innerHTML = `<div style="position:relative;border-radius:10px;overflow:hidden;height:84px">
+    <div class="gw-entry-del"><span>松手 · 收纸</span></div>
+    <div class="gw-entry" style="transform:translateX(-58px);background:var(--paper-base);padding:14px 0;grid-template-columns:36px 1fr">
+      <div class="gw-entry-time"><div class="hh">14</div><div class="mm">00</div></div>
+      <div><div class="gw-entry-title" style="font-size:15px">散步随想</div><div class="gw-entry-body" style="font-size:13px">分布的尾巴和猫的尾巴…</div></div>
+    </div>
+  </div>`;
+  document.querySelector('.mini-undo').innerHTML = `<div class="gw-undo on" style="position:relative;left:0;right:0;bottom:0">
+    <span class="gw-undo-msg">已删除「<b>散步随想</b>」</span><button class="gw-undo-btn">撤回</button>
+    <span class="gw-undo-bar" style="width:62%"></span>
+  </div>`;
+  document.querySelector('.mini-nibgrind').innerHTML = `<div style="display:flex;align-items:center;gap:18px">
+    <button class="gw-nib" style="position:relative;right:auto;bottom:auto">${GW.ICON.nib}</button>
+    <div class="gw-grind"><span class="gw-grind-stone"></span><span class="gw-grind-text">磨墨中…</span></div>
+  </div>`;
+</script>
+</body>
+</html>

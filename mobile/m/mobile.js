@@ -160,15 +160,15 @@
     var key = "gateway.mobile.setting/mood/" + date;
     var cur = "";
     try { cur = localStorage.getItem(key) || ""; } catch (e) {}
-    var block = el("div", "gw-care-block gw-mood-block",
+    var block = el("div", "gw-care-block",
       '<div class="gw-care-label">今天心情 <span style="opacity:.55">· 点一下选</span></div>');
-    var row = el("div", "gw-mood-row");
+    var row = el("div", "gw-moods");
     MOODS.forEach(function (m) {
-      var b = el("button", "gw-mood-opt" + (m === cur ? " on" : ""), m);
+      var b = el("button", "gw-mood" + (m === cur ? " on" : ""), m);
       b.addEventListener("click", function () {
         if (m === cur) { try { localStorage.removeItem(key); } catch (e) {} cur = ""; }
         else { try { localStorage.setItem(key, m); } catch (e) {} cur = m; }
-        row.querySelectorAll(".gw-mood-opt").forEach(function (x) { x.classList.toggle("on", x.textContent === cur); });
+        row.querySelectorAll(".gw-mood").forEach(function (x) { x.classList.toggle("on", x.textContent === cur); });
       });
       row.appendChild(b);
     });
@@ -184,9 +184,9 @@
     mobile_actions: [{ id: "tap", label: "展开看详细" }],
   }, { render: function (ctx) { return buildPulsePure(ctx || {}); } });
   function buildPulsePure(ctx) {
-    var block = el("div", "gw-care-block gw-pulse-mobile",
+    var block = el("div", "gw-care-block",
       '<div class="gw-care-label">今日 PULSE</div>');
-    var line = el("div", "gw-pulse-line");
+    var line = el("div", "gw-pulse");
     var tasks = ctx.tasks || [];
     var done = tasks.filter(function (t) { return t.checked; }).length;
     var water = ctx.water_filled | 0;
@@ -198,13 +198,14 @@
     }
     // 21:30 纸条状态 - 检查当天 md 21:30 H2 是不是已写
     var noteState = (ctx.j && ctx.j.has_note) ? "已写" : "待写";
+    var noteCls = (ctx.j && ctx.j.has_note) ? "" : " wait";
     var parts = [
-      '<span class="gw-pulse-cell"><b>' + done + '/' + (tasks.length || 0) + '</b> 打卡</span>',
-      '<span class="gw-pulse-cell"><b>' + water + '/8</b> 水</span>',
-      '<span class="gw-pulse-cell"><b>' + entries + '</b> entries</span>',
-      '<span class="gw-pulse-cell"><b>21:30</b> · ' + noteState + '</span>',
+      '<span class="cell"><b>' + done + '/' + (tasks.length || 0) + '</b> 打卡</span>',
+      '<span class="cell"><b>' + water + '/8</b> 水</span>',
+      '<span class="cell"><b>' + entries + '</b> entries</span>',
+      '<span class="cell"><b>21:30</b> · <span class="' + noteCls.trim() + '">' + noteState + '</span></span>',
     ];
-    line.innerHTML = parts.join('<span class="gw-pulse-sep">·</span>');
+    line.innerHTML = parts.join('<span class="sep">·</span>');
     block.appendChild(line);
     return block;
   }
@@ -699,9 +700,9 @@
         var label = toolLabel(m.name, m.args);
         var stateCls = m.state === "ok" ? "ok" : (m.state === "fail" ? "fail" : "doing");
         var icon = m.state === "ok" ? "✓" : (m.state === "fail" ? "✗" : "·");
-        box.appendChild(el("div", "gw-tool " + stateCls,
-          '<span class="gw-tool-ico">' + icon + '</span>' +
-          '<span class="gw-tool-lab">' + esc(label) + '</span>'));
+        box.appendChild(el("div", "gw-chip-tool " + stateCls,
+          '<span class="glyph">' + icon + '</span>' +
+          '<span class="label">' + esc(label) + '</span>'));
         return;
       }
       var msg = el("div", "gw-msg " + (m.who === "ai" ? "ai" : "me") + (m.err ? " err" : ""),
@@ -709,8 +710,8 @@
         '<div class="gw-bubble' + (m.streaming ? " gw-cursor" : "") + (m.err ? " err" : "") + '">' + (m.who === "ai" ? md(m.text) : esc(m.text)) + '</div>');
       // 用户消息附图缩略图
       if (m.attachments && m.attachments.length) {
-        var thumbs = el("div", "gw-msg-thumbs", m.attachments.map(function (a) {
-          return '<img class="gw-msg-thumb" src="' + esc(a.dataUrl || a.url) + '" alt="">';
+        var thumbs = el("div", "gw-msg-imgs", m.attachments.map(function (a) {
+          return '<img src="' + esc(a.dataUrl || a.url) + '" alt="">';
         }).join(""));
         msg.appendChild(thumbs);
       }
@@ -718,7 +719,7 @@
     });
     // AI 在想动画:brand/logo-animated.svg 是 Si-C 共价键(电子绕外圈 40s 一圈 +
     // 朱砂键 4s 脉动),设计 brief 的"AI 思考中,日记仍在呼吸"的视觉锚点
-    if (grinding) box.appendChild(el("div", "gw-grind", '<img class="gw-grind-logo" src="../../brand/logo-animated.svg" alt=""><span class="gw-grind-text">AI 在想…</span>'));
+    if (grinding) box.appendChild(el("div", "gw-grind", '<span class="gw-grind-stone"></span><span class="gw-grind-text">磨墨中…</span>'));
     v.appendChild(box);
     var sc = $("scroll"); sc.scrollTop = sc.scrollHeight;
   }
@@ -814,10 +815,10 @@
   // ── 底栏 ──
   function renderBottom() {
     var b = $("bottom"); b.innerHTML = "";
-    var oldFab = document.querySelector(".gw-fab-float"); if (oldFab) oldFab.remove();
+    var oldFab = document.querySelector(".gw-nib"); if (oldFab) oldFab.remove();
     if (state.tab === "journal") {
       // 悬浮 + (不占底栏空间)
-      var fab = el("button", "gw-fab gw-fab-float", I.plus); fab.setAttribute("aria-label", "新建条目");
+      var fab = el("button", "gw-nib", I.plus); fab.setAttribute("aria-label", "新建条目");
       fab.addEventListener("click", function () { openCard(); });
       $("gw").appendChild(fab);
     } else {

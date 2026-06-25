@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gateway · 移动端原型</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<style>
+  /* ── harness(mock,非产品)── */
+  html, body { margin: 0; height: 100%; }
+  body {
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    gap: 18px; padding: 28px 20px 56px;
+    font-family: -apple-system, system-ui, "PingFang SC", sans-serif;
+    background:
+      radial-gradient(120vw 60vh at 50% -10%, rgba(168,110,70,0.10), transparent 60%),
+      #d8d3ca;
+    color: #4a4034;
+  }
+  .bar { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; justify-content: center; }
+  .bar .title { font: 500 17px var(--font-serif, "Songti SC"), serif; color: #2e2820; letter-spacing: 0.02em; }
+  .bar .title b { color: #a3502c; font-weight: 500; }
+  .seg { display: inline-flex; gap: 2px; background: rgba(58,48,38,0.08); padding: 3px; border-radius: 10px; }
+  .seg button { appearance: none; border: 0; background: none; cursor: pointer; font: 13px -apple-system, system-ui; color: #7a7062; padding: 7px 16px; border-radius: 7px; transition: all 0.18s; }
+  .seg button.on { background: #fbf6ec; color: #2e2820; box-shadow: 0 1px 3px rgba(58,48,38,0.12); font-weight: 500; }
+  .hint { font: 12.5px -apple-system, system-ui; color: #8a7f6e; }
+  .hint b { color: #a3502c; font-weight: 600; }
+
+  .phone { width: 390px; height: 844px; border-radius: 50px; padding: 11px; background: #2b2620; box-shadow: 0 40px 90px rgba(40,34,26,0.30), 0 8px 24px rgba(40,34,26,0.18); flex: none; }
+  .phone[data-shell="night"] { background: #050403; }
+  .phone-screen { width: 100%; height: 100%; border-radius: 40px; overflow: hidden; position: relative; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <span class="title">Gateway · <b>移动端原型</b> · 日记 ⇄ 对话</span>
+    <div class="seg" id="theme-seg">
+      <button data-t="day" class="on">日间 · 米黄纸</button>
+      <button data-t="night">夜间 · 台灯</button>
+    </div>
+  </div>
+  <div class="hint">试试:滑<b>八杯水</b> · 点<b>打卡</b> · <b>长按</b>时间线条目 · <b>左滑</b>删除 · 点右下<b>提笔</b> · 切到<b>对话</b>发消息看磨墨/chip · 滑日期带到<b>26 建明天</b></div>
+
+  <div class="phone" id="phone" data-shell="day">
+    <div class="phone-screen" id="mount"></div>
+  </div>
+
+  <script src="gw-mock.js"></script>
+  <script src="gw-widgets.js"></script>
+  <script src="gw-journal.js"></script>
+  <script src="gw-chat.js"></script>
+  <script src="gw-app.js"></script>
+  <script>
+    // ?still=1 → 关过渡(截图/PDF/验证用;用户正常打开有动画)
+    if (location.search.indexOf('still') >= 0) document.documentElement.dataset.still = '';
+    const app = GW.mount(document.getElementById('mount'), { theme: 'day' });
+    const phone = document.getElementById('phone');
+    document.getElementById('theme-seg').addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      document.querySelectorAll('#theme-seg button').forEach((x) => x.classList.toggle('on', x === b));
+      phone.dataset.shell = b.dataset.t;
+      app.setTheme(b.dataset.t);
+    });
+  </script>
+</body>
+</html>
