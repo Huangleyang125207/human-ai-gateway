@@ -79,7 +79,7 @@ oracle:`tests/test_thread_routes.py` + `tests/test_thread_cas.py`
 | T2 | test_history_happy_returns_list_and_mtime | thread/history | ❌ | — | |
 | T3 | test_history_corrupt_returns_modal_payload_and_rings | thread/history | ❌ | — | ★Cannot-break:损坏→`status:'corrupt'`+baks,不空覆盖(5.17) |
 | T4 | test_restore_from_bak_roundtrip | restore-from-bak | ❌ | — | mobile 若无 bak 机制标 OUT |
-| **T5** | **test_thread_cas**(9 条:base_mtime/409/不动文件)| thread/save(grep 无 base_mtime/409)| 🔴 | — | ★已确认洞:mobile save 裸覆盖,无 CAS;多设备同步必踩 5.26 |
+| **T5** | **test_thread_cas**(9 条)| mobile-api.js threadSaveIsStale L477 + thread/save L1368 | ✅ | 4a99149 | ★Cannot-break CAS 实装齐(防 5.26 陈旧 tab 覆盖):T1 null base 放行 + T2 文件不存在 first save 放行 + T3 match mtime 放行 + T4 mismatch 409 + T5 垃圾值(string/array)不崩放行 + T6 字符串数字 base parseInt 正确比较 + T7 stale save 文件不动 + T9 non-list history 400。JS oracle 11/11 pass。 |
 | T6 | test_save_rejects_non_list_history_400 | thread/save 校验 | ❌ | — | |
 
 ---
