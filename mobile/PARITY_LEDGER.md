@@ -75,12 +75,12 @@ oracle:`tests/test_thread_routes.py` + `tests/test_thread_cas.py`
 
 | id | 契约(oracle test) | mobile shim 处 | 状态 | sha | 备注 |
 |----|---|---|---|---|---|
-| T1 | test_history_empty_when_no_file | thread/history | ❌ | — | 无文件→`{history:[],mtime:0}` |
-| T2 | test_history_happy_returns_list_and_mtime | thread/history | ❌ | — | |
+| T1 | test_history_empty_when_no_file | mobile-api.js GET /api/thread/history L1328 | ✅ | ea8d0e8 | 无文件 → `{history:[], mtime:0}` 字节级对齐桌面 oracle |
+| T2 | test_history_happy_returns_list_and_mtime | mobile-api.js GET /api/thread/history | ✅ | ea8d0e8 | save 后:返 history 数组字节匹配 + mtime > 0 + 无 `status:'corrupt'` 标记(正常路径)|
 | T3 | test_history_corrupt_returns_modal_payload_and_rings | thread/history | ❌ | — | ★Cannot-break:损坏→`status:'corrupt'`+baks,不空覆盖(5.17) |
 | T4 | test_restore_from_bak_roundtrip | restore-from-bak | ❌ | — | mobile 若无 bak 机制标 OUT |
 | **T5** | **test_thread_cas**(9 条)| mobile-api.js threadSaveIsStale L477 + thread/save L1368 | ✅ | 4a99149 | ★Cannot-break CAS 实装齐(防 5.26 陈旧 tab 覆盖):T1 null base 放行 + T2 文件不存在 first save 放行 + T3 match mtime 放行 + T4 mismatch 409 + T5 垃圾值(string/array)不崩放行 + T6 字符串数字 base parseInt 正确比较 + T7 stale save 文件不动 + T9 non-list history 400。JS oracle 11/11 pass。 |
-| T6 | test_save_rejects_non_list_history_400 | thread/save 校验 | ❌ | — | |
+| T6 | test_save_rejects_non_list_history_400 | mobile-api.js POST /api/thread/save L1368 `if (!Array.isArray(hist))` | ✅ | ea8d0e8 | history='oops' → 400 + 无 history 字段 → 400(契约边界:抽出'好心' try/except 不能静默不写)|
 
 ---
 
