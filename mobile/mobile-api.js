@@ -1404,10 +1404,13 @@
       //  · 新 H2 必 stamp @author marker(test_insert_block_stamps_{ai,user}_marker)
       //  · HTTP 默认 author='user'(user-trust;test_insert_block_http_stamps_user)
       //  · 显式传 author='ai' 用于 lazy 21:30 纸条 / AI tool 写入路径
+      //  · J6 missing time → 400 + J7 no journal file → 404(test_insert_block_*)
       var date = (body && body.date) || todayIso();
+      var time = body && body.time;
+      if (!time) return jsonResp({ ok: false, error: "缺 time" }, 400);
       return Store.readJournalMd(date).then(function (md) {
-        if (md === null) md = "";
-        var time = body.time, h = parseInt((time || "0:0").split(":")[0], 10), mm = (time || "0:00").split(":")[1];
+        if (md === null) return jsonResp({ ok: false, error: "no journal file for " + date }, 404);
+        var h = parseInt((time || "0:0").split(":")[0], 10), mm = (time || "0:00").split(":")[1];
         var author = (body && body.author) || "user";
         var titlePart = (body.tag ? "#" + body.tag + " " : "") + (body.title || "");
         // H2 末尾 stamp marker:" @user" / " @ai"(空格分隔,与桌面 AUTHOR_RE 兼容)

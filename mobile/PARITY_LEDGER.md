@@ -35,8 +35,8 @@ oracle 文件:`tests/test_journal_routes.py` + helper 层 `tests/test_authorship
 | J3 | test_tag_stats_top_and_default_for_new_user | tag-stats | ❌ | — | 新用户兜底 5 default tag |
 | J4 | test_new_day_creates_then_idempotent | new-day 骨架生成 | ❌ | — | 幂等;dayN 编号;半点格 |
 | J5 | test_insert_block_http_stamps_user | mobile-api.js L1386 insert-block(J-CB1 同 fix) | ✅ | 20081e4 | ★HTTP user-trust:POST 不传 author 默认 "user",新 H2 字节级 stamp "## #工作 新条目 @user" 字面对齐桌面 oracle assert。3/3 pass(status 200 + marker + body)。 |
-| J6 | test_insert_block_missing_time_400 | insert-block 校验 | ❌ | — | |
-| J7 | test_insert_block_no_journal_404 | insert-block | ❌ | — | |
+| J6 | test_insert_block_missing_time_400 | mobile-api.js insert-block L1404 校验 | ✅ | c716826 | 加 `if (!time) return 400`(旧实装是 fallback "0:0" 写 # 0：00 假成功);regression happy path 200 仍通 |
+| J7 | test_insert_block_no_journal_404 | mobile-api.js insert-block L1406 校验 | ✅ | c716826 | 加 `if (md === null) return 404`(旧实装是 `md=""` fallback 假装首次写)|
 | J8 | test_delete_block_clears_to_placeholder | delete-block | ❌ | — | 清块→`##`,别块不动 |
 | J9 | test_delete_block_unknown_time_404 | delete-block | ❌ | — | |
 | J10 | test_patch_http_user_can_patch_ai_block | mobile-api.js patch L1691 默认 user + dispatchTool L908 注入 ai | ✅ | 9377047 | ★HTTP=user-trust:POST 不传 author → endpoint 默认 "user" → user 可改 @ai 块 → 200 + body 写入。本 row 发现 mobile L1691 旧默认 "ai" 与桌面 journal_routes L189 显式 `author="user"` 不一致 → fix 默认改 user;dispatchTool 注入 author='ai' 保 AI tool 调用走 fail-safe 路径(J-CB1 T5 等价仍守)。JS oracle 6/6 + 桌面 31/32 GREEN(同 baseline 1 known canonical drift)。 |
