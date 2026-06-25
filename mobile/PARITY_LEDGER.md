@@ -63,7 +63,7 @@ oracle 文件:`tests/test_daily_tasks_routes.py`
 | D4 | test_meta_update_total_pills_daily_dose_and_clear | mobile-api.js POST /api/daily-tasks/meta L1233 | ✅ | bbca91f | total_pills="" / null / 0 → pop;set 数字 max(1, ...);本 commit fix:非 int("abc"/"x")→ 400(isBadInt 校验:string 前缀非 digit/- 或 isNaN 拒);regression:string 数字 "5" 仍接受。JS oracle 5/5 pass |
 | D5 | test_history_per_day_oldest_first | mobile-api.js GET /api/daily-tasks/history L1301 | ✅ | e4033d1 | 2 处 fix:① 返字段 `history`→`days` 对齐桌面 d["days"]) ② 排序 today→old 改 oldest→newest(i: 倒序生成)。null=无文件 / false=没勾 / true=勾。JS oracle 6/6 pass(local date 对齐) |
 | D6 | test_water_cup_get_set_roundtrip_reserved_key | mobile-api.js water-cup POST L1128 | ✅ | 4bb8787 | 字段 body.image → body.attachment_url(向后兼容 body.image fallback);缺 url → 400;GET 返存的 image_url。JS oracle 4/4 pass:① missing 400 ② attachment_url 200 ok ③ GET image_url 非 null ④ 旧 body.image 仍接受 |
-| D7 | test_delete_cascade_md_image_meta | delete | ❌ | — | md 双写目标 + image + meta 全清(5.15 肌酸丢 guard) |
+| D7 | test_delete_cascade_md_image_meta | mobile-api.js delete L1293 | ✅ | d8939e5 | 5.15 肌酸丢 guard 强化:cascade 清 md(removeSupplement)+ image(taskimg) + meta(taskmeta) + intake_log(taskintake,本 commit 修旧 leak)+ 返 image_removed 布尔。JS oracle 7/7 pass |
 | **D8** | test_check_rejects_future_and_catalog_is_writable_window | 同 D2 | ✅ | fde19c1 | 同 D2;5 assert oracle 全 pass(future_check_400 / twoAgo_check_400 / tomorrow_writable_false / yesterday_writable_per_hour / today_writable_true) |
 | D9 | test_backfill_progress_idempotent | (desktop-only repair) | ❌ | — | mobile 无对等可标 OUT |
 

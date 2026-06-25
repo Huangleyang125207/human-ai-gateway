@@ -1291,15 +1291,25 @@
       });
     },
     "POST /api/daily-tasks/delete": function (req, u, body) {
+      // D7 test_delete_cascade_md_image_meta(5.15 肌酸丢 guard):
+      // 删 task → cascade 清 md + image + meta + intake_log,返 image_removed
       var date = (body && body.date) || todayIso();
       var name = (body && body.task_name) || "";
       if (!name) return jsonResp({ ok: false, error: "缺 task_name" }, 400);
-      return Store.readJournalMd(date).then(function (md) {
+      return Promise.all([
+        Store.readJournalMd(date),
+        Store.getSetting("taskimg/" + name),  // 先看 image 是否存在
+      ]).then(function (rs) {
+        var md = rs[0];
+        var hadImage = !!rs[1];
         var p = [];
         if (md !== null) p.push(Store.writeJournalMd(date, removeSupplement(md, name)));
         p.push(Store.removeSetting("taskimg/" + name));
         p.push(Store.removeSetting("taskmeta/" + name));
-        return Promise.all(p).then(function () { return jsonResp({ ok: true, task_name: name }); });
+        p.push(Store.removeSetting("taskintake/" + name));  // 5.15 leak 修:清 intake_log
+        return Promise.all(p).then(function () {
+          return jsonResp({ ok: true, task_name: name, image_removed: hadImage });
+        });
       });
     },
     // 历史:近 N 天每天是否打勾,对齐 PC 端 /history(query: name + days)
