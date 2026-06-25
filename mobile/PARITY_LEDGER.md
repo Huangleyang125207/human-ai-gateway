@@ -37,8 +37,8 @@ oracle 文件:`tests/test_journal_routes.py` + helper 层 `tests/test_authorship
 | J5 | test_insert_block_http_stamps_user | mobile-api.js L1386 insert-block(J-CB1 同 fix) | ✅ | 20081e4 | ★HTTP user-trust:POST 不传 author 默认 "user",新 H2 字节级 stamp "## #工作 新条目 @user" 字面对齐桌面 oracle assert。3/3 pass(status 200 + marker + body)。 |
 | J6 | test_insert_block_missing_time_400 | mobile-api.js insert-block L1404 校验 | ✅ | c716826 | 加 `if (!time) return 400`(旧实装是 fallback "0:0" 写 # 0：00 假成功);regression happy path 200 仍通 |
 | J7 | test_insert_block_no_journal_404 | mobile-api.js insert-block L1406 校验 | ✅ | c716826 | 加 `if (md === null) return 404`(旧实装是 `md=""` fallback 假装首次写)|
-| J8 | test_delete_block_clears_to_placeholder | delete-block | ❌ | — | 清块→`##`,别块不动 |
-| J9 | test_delete_block_unknown_time_404 | delete-block | ❌ | — | |
+| J8 | test_delete_block_clears_to_placeholder | mobile-api.js delete-block L1765 | ✅ | 505af00 | 实装早已对齐:H1 行保留 + 替成 `##` placeholder + 跳过 body 到 `---`,别块字节不动;return `{ok, cleared, file}`。md 字节级 `# 9：00\n\n##\n\n---` 字面对齐桌面 oracle |
+| J9 | test_delete_block_unknown_time_404 | mobile-api.js delete-block L1781 `if (!found) return 404` | ✅ | 505af00 | 找不到 time block H1 → 404 |
 | J10 | test_patch_http_user_can_patch_ai_block | mobile-api.js patch L1691 默认 user + dispatchTool L908 注入 ai | ✅ | 9377047 | ★HTTP=user-trust:POST 不传 author → endpoint 默认 "user" → user 可改 @ai 块 → 200 + body 写入。本 row 发现 mobile L1691 旧默认 "ai" 与桌面 journal_routes L189 显式 `author="user"` 不一致 → fix 默认改 user;dispatchTool 注入 author='ai' 保 AI tool 调用走 fail-safe 路径(J-CB1 T5 等价仍守)。JS oracle 6/6 + 桌面 31/32 GREEN(同 baseline 1 known canonical drift)。 |
 | J11 | test_patch_routes_by_date_not_today | mobile-api.js L1688 `date = body.date \|\| todayIso()` | ✅ | 834f7b5 | ★date routing 5.x 修:patch 用 body.date 路由 readJournalMd + writeJournalMd,不 fallback today。oracle:past_day patch 200 + past md 含"改过去" + today key 仍 null(未误建)。JS oracle 4/4 pass + 桌面 15/15 GREEN。 |
 | J12 | test_patch_missing_new_md_400 | mobile-api.js patch L1700 校验 | ✅ | 2d5edb9 | 加 `if (body.new_md == null) return 400`(空串 "" 仍允许 = 真想清空 body);regression happy path + edge 空串 200 |
@@ -126,6 +126,11 @@ oracle:`tests/test_setup_routes.py`(21 条)。
 > **台账最大的洞**:这些 mobile 已 shim,但桌面**没** characterization → loop 无对照可对。
 > 每条**先写桌面 oracle(characterization / capture golden),它才从"无法对齐"变成可进 loop 的 row。**
 > 排序 = 双侧零覆盖 × mobile 高频 × 数据丢失风险。
+>
+> **✅ 6.25 更新(image_routes 抽取顺带补):N2/N4/N5/N6/N7/N8 的桌面 oracle 已就绪 ——
+> `tests/test_image_routes.py`(13 条,commit 505af00 P0 / 1871e57 抽出)。这 6 行从"需补 oracle"
+> 升级为"可进 loop 对齐"(打开 test_image_routes.py 读 assert = 契约)。剩 N1(journal/search)·
+> N3(water)· N9(web/fetch)· N10(widgets)仍需补 oracle。**
 
 | id | mobile 端点 | ↔桌面行为 | 怎么补 oracle(前置活) |
 |----|---|---|---|
