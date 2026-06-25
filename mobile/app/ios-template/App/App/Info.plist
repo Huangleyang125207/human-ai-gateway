@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>Gateway</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<true/>
+
+	<!-- ── 权限文案(iOS 14+ 缺这些会闪退,不是弹窗失败)── -->
+	<!-- critic 标的"日记 app 不必要 readWrite 相册权限",文案具体到"在 app 内访问您主动选中的单张照片" -->
+	<key>NSCameraUsageDescription</key>
+	<string>用于在日记里拍照贴图,只在您主动按下相机按钮时使用,不会自动开启或上传任何照片。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>用于让您从相册选择一张照片贴进日记,仅访问您主动选中的那张照片,其它照片我们看不到。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>用于(可选)把抠好图后的贴纸保存回您的相册,默认关闭,只在您主动按"保存到相册"时使用。</string>
+
+	<!-- ── ATS App Transport Security:不裸开 AllowsArbitraryLoads(审核拒),只白名单 known domain ── -->
+	<!-- fetch_url 已加 http→https 自动升;cleartext 错给 LLM hint;feedback-sink 走 HTTPS 已部署 -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<false/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<!-- DeepSeek 直连 -->
+			<key>api.deepseek.com</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<false/>
+				<key>NSExceptionMinimumTLSVersion</key>
+				<string>TLSv1.2</string>
+			</dict>
+			<!-- 阿里云百炼:vision + web_search 兜底 -->
+			<key>dashscope.aliyuncs.com</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<false/>
+				<key>NSExceptionMinimumTLSVersion</key>
+				<string>TLSv1.2</string>
+			</dict>
+			<!-- 360 搜 -->
+			<key>so.com</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<false/>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+			</dict>
+			<!-- silent-failure sink -->
+			<key>yanpaidb.cn</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<false/>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
+
+	<!-- ── 后台模式(③ C lazy 纸条 + ⑤ E 失败上报需要 short background fetch)── -->
+	<!-- 不申请 audio / location / VoIP 等审核严的 mode -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+
+	<!-- ── 状态栏样式跟 paper 米黄底配 dark 文字 ── -->
+	<key>UIStatusBarStyle</key>
+	<string>UIStatusBarStyleDarkContent</string>
+</dict>
+</plist>

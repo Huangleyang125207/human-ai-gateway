@@ -22,17 +22,30 @@ ls ios/App/App/PrivacyInfo.xcprivacy   # 已写 2025 强制隐私清单
 
 ---
 
-## 1. 装新依赖 + 同步到 Xcode
+## 1. 装新依赖 + sync iOS 配置模板 + 同步 Pod
+
+**关键**:`mobile/app/ios/` 在 .gitignore 里(Capacitor 生成物策略)。核心
+配置文件(Info.plist + PrivacyInfo.xcprivacy)放在 `mobile/app/ios-template/`,
+Phase 2 启动时**第一步**复制覆盖到真 iOS 目录:
 
 ```bash
 cd ~/human-ai-dev/gateway/mobile/app
 
+# 全新机器:ios/ 不存在时,先 cap add ios 让 Capacitor 生成骨架
+test -d ios || npx cap add ios
+
+# 关键:把模板复制到真 iOS 目录(覆盖 Capacitor 默认生成的空 Info.plist)
+cp -R ios-template/App/App/* ios/App/App/
+
 # 装 @capacitor/camera ^6(vision/OCR 需要)
 npm i @capacitor/camera@^6
 
-# 同步到 iOS Pod
+# 同步 plugin 到 iOS Pod
 npx cap sync ios
 ```
+
+**改 ios-template/ 后**:重跑 `cp -R ios-template/App/App/* ios/App/App/` +
+`npx cap sync ios` — 一行别忘。
 
 **预期看到**:
 - `Capacitor` / `CapacitorCamera` / `CapacitorPreferences` / `CapacitorFilesystem` / `CapacitorHttp` 5 个 Pod
