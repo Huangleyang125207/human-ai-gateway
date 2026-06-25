@@ -45,7 +45,7 @@ oracle 文件:`tests/test_journal_routes.py` + helper 层 `tests/test_authorship
 | J13 | test_tag_register_appends_and_commits | tag-aggregate register | ❌ | — | mobile 若不做聚合可标 OUT |
 | J14 | test_tag_register_rejects_dup_and_subtag | 同上 | ❌ | — | |
 | J15 | test_tag_aggregate_get_sections | tag-aggregate 读 | ❌ | — | |
-| **J-CB1** | **test_authorship**(13 条)| mobile-api.js patch L1674 + insert-block L1386 + append-comment L1644 + checkAuthor L510 | ✅ | b1c8a5b\* | ★Cannot-break 实装齐:T1 checkAuthor 默认 user fail-safe + T2 ai 拒 @user 块 (403) + T3 H2-rename guard (409;canonical 5.22 fixture vs 5.29 guard drift,mobile 跟桌面实装一致 reject) + T4 user 任意改 + T5 default ai 严 + T6 insert stamp @author marker (本 commit fix,HTTP 默认 user user-trust) + T7 append-comment 不动原 body。JS oracle 11/11 pass。\*(★Cannot-break stamp marker 真红→绿) |
+| **J-CB1** | **test_authorship**(13 条)| mobile-api.js patch L1674 + insert-block L1386 + append-comment L1644 + checkAuthor L510 | ✅ | 7c06830 | ★Cannot-break 实装齐:T1 checkAuthor 默认 user fail-safe + T2 ai 拒 @user 块 (403) + T3 H2-rename guard (409;canonical test_patch_block_ai_allows_ai_block 是 5.22 fixture vs 5.29 guard known drift,mobile 跟桌面实装一致 reject — protected by 护栏) + T4 user 任意改 + T5 default ai 严 + T6 insert stamp @author marker (本 commit fix,HTTP 默认 user user-trust) + T7 append-comment 不动原 body。JS oracle 11/11 pass。 |
 | **J-CB2** | test_patch_h2_rename(4) | patch H2 guard | ❌ | — | patch 不能当 insert 吃 entry |
 | **J-CB3** | test_insert_block_body(6) | insert 写 title+body 一体 | ❌ | — | |
 
