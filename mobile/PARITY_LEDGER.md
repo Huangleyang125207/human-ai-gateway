@@ -126,6 +126,11 @@ oracle:`tests/test_setup_routes.py`(21 条)。
 > **台账最大的洞**:这些 mobile 已 shim,但桌面**没** characterization → loop 无对照可对。
 > 每条**先写桌面 oracle(characterization / capture golden),它才从"无法对齐"变成可进 loop 的 row。**
 > 排序 = 双侧零覆盖 × mobile 高频 × 数据丢失风险。
+>
+> **✅ 6.25 更新(image_routes 抽取顺带补):N2/N4/N5/N6/N7/N8 的桌面 oracle 已就绪 ——
+> `tests/test_image_routes.py`(13 条,commit 505af00 P0 / 1871e57 抽出)。这 6 行从"需补 oracle"
+> 升级为"可进 loop 对齐"(打开 test_image_routes.py 读 assert = 契约)。剩 N1(journal/search)·
+> N3(water)· N9(web/fetch)· N10(widgets)仍需补 oracle。**
 
 | id | mobile 端点 | ↔桌面行为 | 怎么补 oracle(前置活) |
 |----|---|---|---|
