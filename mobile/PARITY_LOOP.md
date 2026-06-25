@@ -9,8 +9,14 @@
 
 ## Loop A — 收敛(self-paced,跑到对齐自动停)
 
+> **前置:NEEDS-ORACLE-FIRST 行(N1-N10)桌面没 oracle,对不了。** loop 挑到这种 row 时,
+> 第 0 步先按 ledger「怎么补 oracle」列**写桌面 characterization**(GREEN-LOCK 在 monolith 上 + 单独 commit),
+> 它从"无法对齐"变成可对的 row 后,再走下面的对齐流程。建议先把 N1-N4 的 oracle 补出来再大批对齐。
+
 ```
-/loop 移动端 parity 对齐。读 mobile/PARITY_LEDGER.md,挑优先级最高的一个 🔴/❌ row(P0 journal/daily-tasks 先)。
+/loop 移动端 parity 对齐。读 mobile/PARITY_LEDGER.md,挑优先级最高的一个 🔴/❌ row(P0 journal/daily-tasks 先;
+NEEDS-ORACLE-FIRST 的 N 行优先补 N1-N4)。**若该 row 在 NEEDS-ORACLE-FIRST 段 → 第0步先写桌面 characterization
+(按「怎么补 oracle」列,GREEN-LOCK 在 monolith + commit),再继续。**
 按 mobile/MIGRATION_PARITY_GUIDE.md 的 oracle 把 mobile-api.js(必要时含 mobile/m 前端)对齐到该 row 的桌面
 characterization 断言。验四件:① mobile/parity 的 oracle(写=golden 字节-diff,读=JSON 形状)红→绿
 ② 对应桌面 pytest STAY GREEN(.venv-test/bin/python -m pytest tests/<file> -q,绝不改 canonical)
