@@ -89,7 +89,7 @@ def test_patch_same_h2_passes_without_flag(existing_journal):
 def test_tool_spec_documents_allow_h2_rename():
     """schema 必须告诉 model 这个 flag 的存在 + use case,不然 model 永远不传。"""
     import re as _re
-    src = (ROOT / "server.py").read_text()
+    src = (ROOT / "tool_specs.py").read_text()  # TOOLS schema → tool_specs.py
     m = _re.search(
         r'"name":\s*"patch_journal_block".*?"properties":\s*\{(.*?)\}\s*,\s*\}\s*,\s*\}',
         src, _re.DOTALL,

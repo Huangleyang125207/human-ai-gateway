@@ -82,8 +82,8 @@ def test_tool_handler_no_nag_with_body(journal, monkeypatch):
 def test_schema_requires_body():
     import json
     schemas = json.dumps(server.TOOLS, ensure_ascii=False) if hasattr(server, "TOOLS") else ""
-    # 不依赖常量名,直接在 server.py 源里验 schema
-    src = Path(server.__file__).read_text(encoding="utf-8")
+    # TOOLS schema 6.25 抽到 tool_specs.py;直接在那源里验 schema
+    src = (Path(server.__file__).parent / "tool_specs.py").read_text(encoding="utf-8")
     i = src.find('"name": "insert_journal_block"')
     seg = src[i:i + 1200]
     assert '"body"' in seg, "schema 必须有 body 参数"
