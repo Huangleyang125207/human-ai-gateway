@@ -61,8 +61,8 @@
     function render() {
       st.readonly = dayState(st.dayKey) === 'past';
       gw.dataset.theme = st.theme;
+      // iOS 真状态栏在 webview 上方,删 cd 原型画的 9:41 + 假电池(避免重复)
       gw.innerHTML = `<div class="gw-grain"></div><div class="gw-glow"></div>
-        <div class="gw-statusbar"><span>${st.theme === 'night' ? '23:08' : '9:41'}</span><span class="sb-right">${GW.statusbarSVG()}</span></div>
         <div class="gw-scroll"></div>`;
       const scroll = gw.querySelector('.gw-scroll');
       if (st.subPage) { renderSub(scroll); return; }

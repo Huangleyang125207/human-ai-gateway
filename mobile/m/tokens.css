@@ -19,8 +19,8 @@
 
   /* ── 尺寸 / 节奏 ── */
   --hit: 44px;                 /* HIG 触控下限 */
-  --safe-top: 47px;            /* 真机换 env(safe-area-inset-top) */
-  --safe-bot: 34px;            /* 真机换 env(safe-area-inset-bottom) */
+  --safe-top: env(safe-area-inset-top, 47px);   /* iOS 真状态栏高,Simulator/iPhone 自动 */
+  --safe-bot: env(safe-area-inset-bottom, 34px); /* iOS home indicator,Simulator/iPhone 自动 */
   --gut: 22px;                 /* 页面左右沟槽 */
   --r-soft: 14px;
   --r-sheet: 22px;

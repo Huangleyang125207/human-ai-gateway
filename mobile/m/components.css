@@ -69,8 +69,9 @@
 /* ═══ 2 · 顶栏 + 日期带 ═══ */
 .gw-top {
   position: sticky; top: 0; z-index: 5; flex: none;
-  padding: 6px 0 10px;
-  background: linear-gradient(to bottom, var(--paper-base) 70%, transparent);
+  /* 顶栏 nav 推到 iOS 真状态栏下方(替删掉的 cd .gw-statusbar 假状态栏占位)*/
+  padding: calc(var(--safe-top) + 6px) 0 10px;
+  background: linear-gradient(to bottom, var(--paper-base) 78%, transparent);
   transition: transform var(--t-mid) var(--ease), opacity var(--t-fast);
   will-change: transform;
 }
