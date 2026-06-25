@@ -1124,9 +1124,14 @@
     "GET /api/water-cup": function () {
       return Store.getSetting("water_cup_img").then(function (img) { return jsonResp({ image_url: img || null }); });
     },
-    // 同 daily-tasks/set-image:存 base64 dataUrl 到 Preferences,客户端已端侧抠图过
+    // D6 test_water_cup_get_set_roundtrip_reserved_key:
+    //   POST 缺 url → 400;有 attachment_url → 200 ok;GET 返存的 image_url
+    //   桌面 server 端走抠图处理;mobile 端侧抠图后直接存 attachment_url
+    //   (兼容旧 body.image dataUrl 字段供已部署 client)
     "POST /api/water-cup": function (req, u, body) {
-      return Store.setSetting("water_cup_img", (body && body.image) || "").then(function () { return jsonResp({ ok: true }); });
+      var url = body && (body.attachment_url || body.image);
+      if (!url) return jsonResp({ ok: false, error: "缺 attachment_url" }, 400);
+      return Store.setSetting("water_cup_img", url).then(function () { return jsonResp({ ok: true }); });
     },
     "GET /api/journal/tag-stats": function (req, u) {
       // J3 test_tag_stats_top_and_default_for_new_user:
