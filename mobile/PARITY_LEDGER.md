@@ -40,7 +40,7 @@ oracle 文件:`tests/test_journal_routes.py` + helper 层 `tests/test_authorship
 | J8 | test_delete_block_clears_to_placeholder | delete-block | ❌ | — | 清块→`##`,别块不动 |
 | J9 | test_delete_block_unknown_time_404 | delete-block | ❌ | — | |
 | J10 | test_patch_http_user_can_patch_ai_block | mobile-api.js patch L1691 默认 user + dispatchTool L908 注入 ai | ✅ | 9377047 | ★HTTP=user-trust:POST 不传 author → endpoint 默认 "user" → user 可改 @ai 块 → 200 + body 写入。本 row 发现 mobile L1691 旧默认 "ai" 与桌面 journal_routes L189 显式 `author="user"` 不一致 → fix 默认改 user;dispatchTool 注入 author='ai' 保 AI tool 调用走 fail-safe 路径(J-CB1 T5 等价仍守)。JS oracle 6/6 + 桌面 31/32 GREEN(同 baseline 1 known canonical drift)。 |
-| J11 | test_patch_routes_by_date_not_today | patch date 路由 | ❌ | — | ★历史视图编辑别打到今天(5.x 修) |
+| J11 | test_patch_routes_by_date_not_today | mobile-api.js L1688 `date = body.date \|\| todayIso()` | ✅ | 834f7b5 | ★date routing 5.x 修:patch 用 body.date 路由 readJournalMd + writeJournalMd,不 fallback today。oracle:past_day patch 200 + past md 含"改过去" + today key 仍 null(未误建)。JS oracle 4/4 pass + 桌面 15/15 GREEN。 |
 | J12 | test_patch_missing_new_md_400 | patch 校验 | ❌ | — | |
 | J13 | test_tag_register_appends_and_commits | tag-aggregate register | ❌ | — | mobile 若不做聚合可标 OUT |
 | J14 | test_tag_register_rejects_dup_and_subtag | 同上 | ❌ | — | |
