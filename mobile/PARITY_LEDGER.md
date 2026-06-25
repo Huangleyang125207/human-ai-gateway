@@ -31,7 +31,7 @@ oracle 文件:`tests/test_journal_routes.py` + helper 层 `tests/test_authorship
 | id | 契约(oracle test) | mobile shim 处 | 状态 | sha | 备注 |
 |----|---|---|---|---|---|
 | J1 | test_today_returns_blocks | mobile-api.js GET /api/journal/today L1142 + parseJournal | ✅ | 02bc3ae | 返 `{file, date, blocks: [{time, h1_raw, h2: [{tags, title, body, commits}]}]}` 全字段对齐桌面 oracle。3/3 pass:date 字符串匹配 + blocks 是数组 + blocks 含"早醒"原文 |
-| J2 | test_days_lists_files | journal/days 等价 | ❌ | — | |
+| J2 | test_days_lists_files | mobile-api.js GET /api/journal/days L1135 + Store.listJournalDates | ✅ | ec44e93 | 返 `{days: [{date, stem, file}]}` length 跟桌面 listJournalDates 一致。3/3 pass:length==2 + has_today + has_past3(写两个 day fixture)|
 | J3 | test_tag_stats_top_and_default_for_new_user | tag-stats | ❌ | — | 新用户兜底 5 default tag |
 | J4 | test_new_day_creates_then_idempotent | new-day 骨架生成 | ❌ | — | 幂等;dayN 编号;半点格 |
 | J5 | test_insert_block_http_stamps_user | mobile-api.js L1386 insert-block(J-CB1 同 fix) | ✅ | 20081e4 | ★HTTP user-trust:POST 不传 author 默认 "user",新 H2 字节级 stamp "## #工作 新条目 @user" 字面对齐桌面 oracle assert。3/3 pass(status 200 + marker + body)。 |
