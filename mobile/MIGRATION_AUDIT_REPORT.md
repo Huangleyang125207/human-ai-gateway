@@ -10,7 +10,7 @@
 
 ## 0 · 一句话结论
 
-**桌面 80 endpoint / 41 oracle 文件 / ~280 test;移动 ~45 endpoint(其中 24 in-scope 完全 parity 对齐,21 个是 mobile-自创快路径或显式 OUT);ledger 34 ✅ + 14 OUT + 1 🟡(N2 OCR 真机阻塞)+ 0 ❌。**
+**桌面 80 endpoint / 41 oracle 文件 / ~280 test;移动 ~45 endpoint(其中 34 in-scope 完全 parity 对齐,1 待真机,19 显式 OUT);ledger 34 ✅ + 1 🟡(N2 OCR 真机阻塞)+ 19 OUT + 0 ❌(in-scope 共 54 row)。**
 
 桌面所有 7 个 Cannot-break ★ 家族(40+ assert)在 mobile 端全守住;canonical 自身 1 个 known drift documented;迁移**procedurally converged**,差 N2 真机 OCR 拍补剂瓶验最后一步。
 
@@ -90,10 +90,12 @@ Native plugin 后退链:**NativeOcr → CloudVision(N4 endpoint)→ BrowserStub(
 
 | 状态 | 数量 | rows / cluster | 备注 |
 |---|---|---|---|
-| **✅ 对齐** | **34** | P0 journal 15(J1-J12 + J-CB1/2/3) + P0 daily-tasks 6(D1-D8 − D9 OUT) + P1 thread 6(T1-T6) + X 漏收 4(X2-X5) + N 新晋 1(N4) + N image 共 1 | 全 sha 入 ledger |
+| **✅ 对齐** | **34** | P0 journal 15(J1-J12 + J-CB1/2/3) + P0 daily-tasks 8(D1-D8;D9 OUT) + P1 thread 6(T1-T6) + X 漏收 4(X2-X5) + N image 1(N4) | 全 sha 入 ledger |
 | **🟡 待验** | **1** | N2 OCR(`/api/cutout`) | plugin + endpoint + regex 就绪;待 iOS 16+ 真机拍补剂瓶 → ocr_pill_count = 60 验通 → ✅ |
-| **OUT** | **14** | mobile 自创 4(N1/N3/N9/N10)+ 架构分叉 4(N5/N6/N7/N8)+ 架构分叉 1(N2 原标 — 现升 🟡)+ 桌面专属 4(J13/J14/J15 + D9)+ 独立产品形态 1(X1 chat tool-loop)+ Setup 6(P1 → OUT,mobile 硬编绕开)| 显式产品决策 |
+| **OUT** | **19** | 桌面专属 4(J13/J14/J15 + D9)+ mobile 自创 4(N1/N3/N9/N10)+ 架构分叉 4(N5/N6/N7/N8)+ 独立产品形态 1(X1 chat tool-loop)+ Setup 整段 6(S1-S6,6.25 重判:mobile 硬编 configured:true 绕开双钥匙仪式)| 显式产品决策 |
 | **❌ 未查** | **0** | — | 全 row 显式判定 |
+
+**完整 in-scope row 总和:34 + 1 + 19 + 0 = 54**(报告前版"24"是 6.25 first-pass 旧估算,实际收尾 54)
 
 ### 3.1 收敛记录条目(从 [scan:ledger] 直引)
 
@@ -254,7 +256,7 @@ mobile-api.js cutout endpoint
 
 ### 6.4 桌面 endpoint 未在 ledger(completeness critic)
 
-scan agent 给出 80 PC endpoint,ledger 仅 in-scope 24 + OUT。**剩 ~56 个桌面 endpoint mobile 端无对应**,主要是:
+scan agent 给出 80 PC endpoint,ledger in-scope 54(34 ✅ + 1 🟡 + 19 OUT)。**剩 ~46 个桌面 endpoint mobile 端无对应**,主要是:
 - pulse 7 个 + board 4 个 + migration 1 个 + server/other 28 个 = 桌面专属 / 非用户高频
 - mobile UI 设计上**不渲染** PULSE dashboard / 留言板 / vault audit / history viewer 等
 - **已隐式 OUT,不在 ledger 但也不是 parity gap**(MIGRATION_PARITY_GUIDE.md §6 优先级表已声明 mobile = "用户高频" 优先)
@@ -321,8 +323,9 @@ Cutout 端侧抠主体 plugin **仅 iOS 17+**(Vision 前景实例 mask)。Androi
 | Mobile shim endpoint 数 | ~45(24 in-scope 对齐 + 21 mobile-自创 / OUT / stub)|
 | **ledger ✅ 对齐 rows** | **34** |
 | ledger 🟡 待验 rows | 1(N2 OCR) |
-| ledger OUT rows | 14 |
+| ledger OUT rows | **19**(桌面专属 4 + mobile 自创 4 + 架构分叉 4 + 独立产品 1 + Setup 6)|
 | ledger ❌ 缺口 rows | 0 |
+| **完整 in-scope row 总和** | **54** |
 | Cannot-break 守 family | 7(J-CB1/2/3 + T3 + T5 + D2/D8 + D7)|
 | Cannot-break assert 数 | 40+ |
 | 本次 loop commit 数 | **30+** row-by-row + 9 个 OUT 收口 + 1 PARITY CONVERGED + 1 OCR Phase A |

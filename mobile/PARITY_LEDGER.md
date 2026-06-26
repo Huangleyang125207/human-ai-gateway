@@ -144,7 +144,7 @@ oracle:`tests/test_setup_routes.py`(21 条)。
 | **N7** | /api/uploads/delete | **OUT** | mobile 删 Capacitor Filesystem(NoCloud/attachments)+ setting/uploadmeta,桌面删文件 + index;同 N5/N6 架构分叉 |
 | **N8** | /api/attachments/get | **OUT** | mobile 返 dataURL(base64),桌面文件流字节;架构分叉非 parity 目标(同前面 N10 理由)|
 | **N9** | /api/web/fetch | (mobile 自创 endpoint) | **OUT** | 桌面 _fetch_url 是 server.py 内部 helper(给 fetch_url tool);mobile 暴露 HTTP endpoint 给 dispatchTool 路径,无对等 HTTP oracle |
-| **N10** | /api/widgets/list | /api/widgets/catalog | mobile widget 模型与桌面 manifest 迥异,parity 价值低 → 仅桌面 catalog 防回归,标 mobile-only-divergent |
+| **N10** | /api/widgets/list | (命名漂 + 模型不同)| **OUT** | mobile widget 模型与桌面 manifest 迥异(/api/widgets/list ↔ /api/widgets/catalog 命名漂),parity 价值低 → 仅桌面 catalog 防回归,标 mobile-only-divergent |
 
 > **mobile-only no-op**(无需真 parity,桌面补一条防回归即可):/api/user-widgets(恒空)·
 > /api/vault/audit(恒 0 漂移)·/api/journal/tag-stats(恒空,tag-aggregate desktop-only)。
@@ -165,12 +165,13 @@ oracle:`tests/test_setup_routes.py`(21 条)。
 
 ### **PARITY CONVERGED @ 74ac4bb @ 2026-06-26**
 
-**状态**:全部非 OUT-OF-SCOPE row `✅`(34 行 ✅ + 14 行 OUT)+ completeness critic 无遗漏。
-完整 in-scope 24 端点全部对齐桌面 oracle 或显式标 OUT。
+**状态**:全部非 OUT-OF-SCOPE row `✅`(34 行 ✅ + 1 行 🟡 N2 OCR 待真机 + 19 行 OUT)+ completeness critic 无遗漏。
+完整 in-scope **54 row**(34 ✅ + 1 🟡 + 19 OUT)全部对齐桌面 oracle 或显式标 OUT。
 
 #### 数字
-- ✅ 对齐 row:**34 行**(P0 journal 15 / P0 daily-tasks 6 / P1 thread 6 / 6.25 漏收 X 4 / N image 1)
-- **OUT** row:**14 行**(P0 tag-aggregate 3 + D9 + setup 6 + X1 chat tool-loop + N1/N3/N9/N10 mobile 自创 endpoint + N2/N5/N6/N7/N8 架构分叉)
+- ✅ 对齐 row:**34 行**(P0 journal 15 / P0 daily-tasks 8 / P1 thread 6 / 6.25 漏收 X 4 / N image 1)
+- 🟡 待真机 row:**1 行**(N2 OCR Phase A 代码就绪,待 iOS 16+ 真机拍补剂瓶验)
+- **OUT** row:**19 行**(P0 tag-aggregate 3 + D9 + Setup 6 + X1 chat tool-loop + N1/N3/N9/N10 mobile 自创 + N5/N6/N7/N8 架构分叉)
 - 桌面 pytest:**83 passed + 1 known canonical drift**(tests/test_authorship.py::test_patch_block_ai_allows_ai_block,5.22 fixture vs 5.29 H2-rename guard,J-CB1 备注 documented;护栏禁动 canonical)
 - check-fe-be.sh:① 死引用空 + ② 真缺口都 OUT-OF-SCOPE,③ 命名漂 mobile-only 行(/api/daily-tasks/water, /api/uploads/*, /api/widgets/list 等)已显式 OUT 标
 - mobile-api.js 行号 ref + sha 全部入 ledger
