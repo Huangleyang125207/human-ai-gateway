@@ -995,17 +995,27 @@
       case "search_journal":
         return fch("/api/journal/search?query=" + encodeURIComponent(args.query || "") + "&days=" + (args.days || 30))
           .then(function (r) { return r.json(); });
-      // widget runtime tool — 直接调 window.gwWidgets,不走 endpoint(widget 是纯前端概念)
+      // widget runtime tool — Store 持久 + window.gwWidgets in-memory 双源
       case "list_widgets":
-        return Promise.resolve((typeof window !== "undefined" && window.gwWidgets)
-          ? { ok: true, widgets: window.gwWidgets.list() }
-          : { error: "widget runtime 未就绪" });
+        // 改 Store fallback:add_widget 已存 setting/widgets/,持久才是真源
+        return Store.listWidgetManifests().then(function (mfs) {
+          var live = (typeof window !== "undefined" && window.gwWidgets) ? window.gwWidgets.list() : [];
+          return { ok: true, widgets: mfs, live_count: live.length };
+        });
       case "set_widget_enabled":
-        if (typeof window !== "undefined" && window.gwWidgets && args.id) {
-          window.gwWidgets.setEnabled(args.id, !!args.enabled);
-          return Promise.resolve({ ok: true, id: args.id, enabled: !!args.enabled });
-        }
-        return Promise.resolve({ error: "widget runtime 未就绪或缺 id" });
+        if (!args.id) return Promise.resolve({ error: "缺 id" });
+        // 先读 Store manifest,改 enabled,写回 → in-memory 同步
+        return Store.getSetting("widgets/" + args.id).then(function (s) {
+          if (!s) return { error: "widget id=" + args.id + " 不存在(Store 里没找到)" };
+          var m; try { m = JSON.parse(s); } catch (e) { return { error: "manifest 解析失败" }; }
+          m.enabled = !!args.enabled;
+          return Store.setSetting("widgets/" + args.id, JSON.stringify(m)).then(function () {
+            if (typeof window !== "undefined" && window.gwWidgets && window.gwWidgets.setEnabled) {
+              try { window.gwWidgets.setEnabled(args.id, !!args.enabled); } catch (_) {}
+            }
+            return { ok: true, id: args.id, enabled: !!args.enabled };
+          });
+        });
       case "add_widget":
         if (!args.id || !args.template) return Promise.resolve({ error: "缺 id 或 template" });
         // 核心 widget 名保留,AI 不能覆盖
@@ -2372,6 +2382,101 @@
           var actions = (done && done.actions) || [];
           var names = actions.map(function (a) { return a.name; }).join(",");
           log("T16 widgets actions=" + actions.length + " tools=[" + names + "]");
+        }).then(function () {
+          // ★ T17 剩 journal:insert_journal_block(set_water_cup_image 留 T18)
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "用 insert_journal_block 在今天 # 17：00 H1 下插入新条目:title='self-test 插入',body='验 insert tool',tag='#验收'", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var names = actions.map(function (a) { return a.name; }).join(",");
+          log("T17 insert_journal_block actions=" + actions.length + " tools=[" + names + "]");
+        }).then(function () {
+          // ★ T18 set_water_cup_image
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "用 set_water_cup_image 把水杯图标换成 emoji 🥛(value='🥛')", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var names = actions.map(function (a) { return a.name; }).join(",");
+          log("T18 set_water_cup_image actions=" + actions.length + " tools=[" + names + "]");
+        }).then(function () {
+          // ★ T19 准备:先写一张 dummy attachment + 给 uploaded meta,让 vision/ocr 真能调
+          var dummyDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+          return Store.writeAttachment("2026-06-27", "test.png", dummyDataUrl)
+            .then(function () { return Store.writeUploadMeta("2026-06-27", "test.png", { kind: "test", uploaded_at: "2026-06-27T00:00:00Z" }); })
+            .then(function () { log("T19a dummy attachment 写入 OK"); });
+        }).then(function () {
+          // ★ T19 vision_classify(强制 prompt + deltas log)
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "立即调用 vision_classify tool,参数 attachment_url='/attachments/2026-06-27/test.png'。不要解释,直接 tool call。", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var deltas = events.filter(function (e) { return e.type === "delta"; }).map(function (e) { return e.text; }).join("").slice(0, 80);
+          var names = actions.map(function (a) { return a.name; }).join(",");
+          log("T19 vision_classify actions=" + actions.length + " tools=[" + names + "] AI说=" + deltas);
+        }).then(function () {
+          // ★ T20 ocr_image
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "立即调用 ocr_image tool,参数 attachment_url='/attachments/2026-06-27/test.png'。不要解释。", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var deltas = events.filter(function (e) { return e.type === "delta"; }).map(function (e) { return e.text; }).join("").slice(0, 80);
+          var names = actions.map(function (a) { return a.name; }).join(",");
+          log("T20 ocr_image actions=" + actions.length + " tools=[" + names + "] AI说=" + deltas);
+        }).then(function () {
+          // ★ T21 list_widgets(强制 prompt)
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "立即调用 list_widgets tool,无参数。不要解释。", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var deltas = events.filter(function (e) { return e.type === "delta"; }).map(function (e) { return e.text; }).join("").slice(0, 80);
+          var names = actions.map(function (a) { return a.name; }).join(",");
+          log("T21 list_widgets actions=" + actions.length + " tools=[" + names + "] AI说=" + deltas);
+        }).then(function () {
+          // ★ T22 set_widget_enabled + remove_widget
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "立即调用 set_widget_enabled tool,参数 widget_id='self-test-check', enabled=false。然后 remove_widget widget_id='self-test-check'。不要解释。", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var deltas = events.filter(function (e) { return e.type === "delta"; }).map(function (e) { return e.text; }).join("").slice(0, 80);
+          var names = actions.map(function (a) { return a.name; }).join(",");
+          log("T22 set_enabled+remove actions=" + actions.length + " tools=[" + names + "] AI说=" + deltas);
+        }).then(function () {
+          // ★ T23 delete_attachment
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "立即调用 delete_attachment tool,参数 attachment_url='/attachments/2026-06-27/test.png'。不要解释。", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var deltas = events.filter(function (e) { return e.type === "delta"; }).map(function (e) { return e.text; }).join("").slice(0, 80);
+          var names = actions.map(function (a) { return a.name; }).join(",");
+          log("T23 delete_attachment actions=" + actions.length + " tools=[" + names + "] AI说=" + deltas);
         }).then(function () {
           // 收尾
           return Store.removeSetting("__self_test__");
