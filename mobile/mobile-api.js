@@ -2272,9 +2272,12 @@
         log("T6 chat first SSE=" + first);
         // T7: 注入真 key 进 storage(user 自己 app 内的 flow)
         var realKey = (typeof window !== "undefined" && window.__GW_REAL_KEY__) || "";
+        var azKey = (typeof window !== "undefined" && window.__GW_REAL_AZ_KEY__) || "";
         if (!realKey) { log("T7 skip — no __GW_REAL_KEY__ injected"); return; }
         return Store.setSetting("deepseek_key", realKey).then(function () {
-          log("T7 real key 注入 setting/deepseek_key");
+          return azKey ? Store.setSetting("dashscope_key", azKey) : Promise.resolve();
+        }).then(function () {
+          log("T7 真 key 注入 deepseek=" + (!!realKey) + " dashscope=" + (!!azKey));
           // T8:简单 chat(无 tool)— 验 deepseek 真返
           return fetch("/api/chat", {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -2420,11 +2423,12 @@
           }).then(function (r) { return r.text(); });
         }).then(function (sse) {
           var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
-          var done = events.find(function (e) { return e.type === "done"; });
-          var actions = (done && done.actions) || [];
-          var deltas = events.filter(function (e) { return e.type === "delta"; }).map(function (e) { return e.text; }).join("").slice(0, 80);
-          var names = actions.map(function (a) { return a.name; }).join(",");
-          log("T19 vision_classify actions=" + actions.length + " tools=[" + names + "] AI说=" + deltas);
+          // 看 tool_call event 真触发(不只看 lastActions,actions 仅成功 push)
+          var calls = events.filter(function (e) { return e.type === "tool_call"; });
+          var results = events.filter(function (e) { return e.type === "tool_result"; });
+          var callNames = calls.map(function (e) { return e.name; }).join(",");
+          var resInfo = results.map(function (e) { return e.name + "(ok=" + e.ok + ",err=" + ((e.result && e.result.error) || "").slice(0, 40) + ")"; }).join("|");
+          log("T19 vision_classify call=[" + callNames + "] result=" + resInfo);
         }).then(function () {
           // ★ T20 ocr_image
           return fetch("/api/chat", {
@@ -2433,11 +2437,11 @@
           }).then(function (r) { return r.text(); });
         }).then(function (sse) {
           var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
-          var done = events.find(function (e) { return e.type === "done"; });
-          var actions = (done && done.actions) || [];
-          var deltas = events.filter(function (e) { return e.type === "delta"; }).map(function (e) { return e.text; }).join("").slice(0, 80);
-          var names = actions.map(function (a) { return a.name; }).join(",");
-          log("T20 ocr_image actions=" + actions.length + " tools=[" + names + "] AI说=" + deltas);
+          var calls = events.filter(function (e) { return e.type === "tool_call"; });
+          var results = events.filter(function (e) { return e.type === "tool_result"; });
+          var callNames = calls.map(function (e) { return e.name; }).join(",");
+          var resInfo = results.map(function (e) { return e.name + "(ok=" + e.ok + ",err=" + ((e.result && e.result.error) || "").slice(0, 40) + ")"; }).join("|");
+          log("T20 ocr_image call=[" + callNames + "] result=" + resInfo);
         }).then(function () {
           // ★ T21 list_widgets(强制 prompt)
           return fetch("/api/chat", {
