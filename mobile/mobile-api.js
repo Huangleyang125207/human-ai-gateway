@@ -2260,6 +2260,62 @@
       }).then(function (sse) {
         var first = (sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; })[0] || "").slice(0, 200);
         log("T6 chat first SSE=" + first);
+        // T7: 注入真 key 进 storage(user 自己 app 内的 flow)
+        var realKey = (typeof window !== "undefined" && window.__GW_REAL_KEY__) || "";
+        if (!realKey) { log("T7 skip — no __GW_REAL_KEY__ injected"); return; }
+        return Store.setSetting("deepseek_key", realKey).then(function () {
+          log("T7 real key 注入 setting/deepseek_key");
+          // T8:简单 chat(无 tool)— 验 deepseek 真返
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "ping(只回 OK,不用 tool)", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var deltas = events.filter(function (e) { return e.type === "delta"; }).map(function (e) { return e.text || ""; }).join("");
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var err = events.find(function (e) { return e.type === "error"; });
+          log("T8 chat naked deltas=" + deltas.slice(0, 60) + " actions=" + actions.length + " err=" + (err ? err.text : "none"));
+          // T9:触发 patch_journal_block tool — "把 16:30 那段改成 ..."
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "把今天 # 16：30 的一条改成新内容『self-test 验收』。tag 也加 #验收。务必用 patch_journal_block tool。", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var err = events.find(function (e) { return e.type === "error"; });
+          log("T9 chat→patch actions=" + actions.length + " a[0]=" + JSON.stringify(actions[0] || {}).slice(0, 150) + " err=" + (err ? err.text : "none"));
+        }).then(function () {
+          // T10:触发 check_daily_task tool — "打卡 鱼"
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "我吃了一颗鱼油,记一下打卡。用 check_daily_task。", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var err = events.find(function (e) { return e.type === "error"; });
+          log("T10 chat→打卡 actions=" + actions.length + " a[0]=" + JSON.stringify(actions[0] || {}).slice(0, 150) + " err=" + (err ? err.text : "none"));
+        }).then(function () {
+          // T11:触发 web_search tool — "搜一下 X"
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "用 web_search 搜一下 'deepseek v4 价格',简单 1 行回我。", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var err = events.find(function (e) { return e.type === "error"; });
+          log("T11 chat→搜 actions=" + actions.length + " a[0]=" + JSON.stringify(actions[0] || {}).slice(0, 150) + " err=" + (err ? err.text : "none"));
+        }).then(function () {
+          // 收尾:删 __self_test__ 真 key 不留(虽然 user 主动给)
+          return Store.removeSetting("__self_test__");
+        });
       });
     }).then(function () {
       var report = "[GW SELF-TEST]\n" + lines.join("\n");
