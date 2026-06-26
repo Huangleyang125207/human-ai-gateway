@@ -2313,7 +2313,67 @@
           var err = events.find(function (e) { return e.type === "error"; });
           log("T11 chat→搜 actions=" + actions.length + " a[0]=" + JSON.stringify(actions[0] || {}).slice(0, 150) + " err=" + (err ? err.text : "none"));
         }).then(function () {
-          // 收尾:删 __self_test__ 真 key 不留(虽然 user 主动给)
+          // ★ T12 journal 写簇:insert / append / search / list_recent_days
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "请依次:① list_recent_days 列最近 7 天日期 ② search_journal 搜 '验收' 这词 ③ append_journal_comment 在今天 16:30 那块加批注 'self-test 批注 1'。", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var names = actions.map(function (a) { return a.name; }).join(",");
+          log("T12 journal簇 actions=" + actions.length + " tools=[" + names + "]");
+        }).then(function () {
+          // ★ T13 daily-task 写簇:manage / set_daily_task_meta / set_water_cup_image
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "请依次:① manage_daily_task 新增日打卡『维生素 C』 ② set_daily_task_meta 给 鱼油（Swisse） 设 total_pills=60 daily_dose=2", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var names = actions.map(function (a) { return a.name; }).join(",");
+          log("T13 daily-task簇 actions=" + actions.length + " tools=[" + names + "]");
+        }).then(function () {
+          // ★ T14 web fetch:fetch_url
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "用 fetch_url 拉 https://example.com 简单看一眼", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var names = actions.map(function (a) { return a.name; }).join(",");
+          log("T14 fetch_url actions=" + actions.length + " tools=[" + names + "]");
+        }).then(function () {
+          // ★ T15 photo curator:list_my_uploads / search_my_uploads / ask_photo_curator
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "请依次:① list_my_uploads 列我图 ② search_my_uploads 搜 '鱼油' ③ ask_photo_curator 问我什么时候上传过补剂图", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var names = actions.map(function (a) { return a.name; }).join(",");
+          log("T15 photo curator actions=" + actions.length + " tools=[" + names + "]");
+        }).then(function () {
+          // ★ T16 widgets:list / add / set_enabled / remove
+          return fetch("/api/chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "请依次:① list_widgets 列 widget ② add_widget 加个 'self-test widget' 检查我每天的咖啡 ③ set_widget_enabled 关掉它", history: [] }),
+          }).then(function (r) { return r.text(); });
+        }).then(function (sse) {
+          var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+          var done = events.find(function (e) { return e.type === "done"; });
+          var actions = (done && done.actions) || [];
+          var names = actions.map(function (a) { return a.name; }).join(",");
+          log("T16 widgets actions=" + actions.length + " tools=[" + names + "]");
+        }).then(function () {
+          // 收尾
           return Store.removeSetting("__self_test__");
         });
       });
