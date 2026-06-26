@@ -1,0 +1,21 @@
+{
+  "name": "capacitor-native-ocr",
+  "version": "0.0.1",
+  "description": "端侧 OCR · iOS Vision(VNRecognizeTextRequest)+ Android ML Kit text recognition + PaddleOCR 兜底(无 GMS 设备)。完整离线 + 中文 + 数字识别(适合补剂瓶 60 粒 / 180 capsules 这种场景)",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "types": "src/index.d.ts",
+  "files": [
+    "src/",
+    "ios/",
+    "android/",
+    "CapacitorNativeOcr.podspec"
+  ],
+  "capacitor": {
+    "ios": { "src": "ios" },
+    "android": { "src": "android" }
+  },
+  "peerDependencies": {
+    "@capacitor/core": "^6.0.0"
+  }
+}

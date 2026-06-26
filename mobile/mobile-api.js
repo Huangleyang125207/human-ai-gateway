@@ -701,6 +701,44 @@
     return lines.join("\n");
   }
 
+  // ── 端侧 OCR 后抽颗数(N2 parity)──────────────────────
+  // 桌面 oracle 期望:"鱼油 60 粒" → ocr_pill_count = 60
+  // 中文/英文/补剂瓶常见 packaging 字串都 cover
+  function extractPillCount(ocrText) {
+    if (!ocrText) return 0;
+    var t = String(ocrText);
+    // 优先:数字 + (粒|片|颗|丸|capsules|tablets|softgels|ct|count)
+    var m = t.match(/(\d+)\s*(?:粒|片|颗|丸|softgels?|capsules?|tablets?|ct\b|count\b)/i);
+    if (m) return parseInt(m[1], 10);
+    // 次选:NET / 净含量 / 装量 / Net Content N
+    m = t.match(/(?:net\s*(?:content)?|净含量|装量)[\s:：]*(\d+)/i);
+    if (m) return parseInt(m[1], 10);
+    // 退一步:孤立 token 数字(避开 KSM-66 / SAM-e / B-12 这种品牌名连字符内数字)
+    // 严格:前后必须是行首/尾或空白/标点,排除 mg/iu/mcg/g/ml 剂量
+    var rest = t.replace(/\d+\s*(?:mg|mcg|μg|iu|g|ml|fl\s*oz)/gi, "");
+    var standalone = rest.match(/(?:^|[\s,，。;；:：])(\d+)(?=$|[\s,，。;；:：])/g) || [];
+    for (var i = 0; i < standalone.length; i++) {
+      var n = parseInt(standalone[i].replace(/\D/g, ""), 10);
+      if (n >= 10 && n <= 500) return n;
+    }
+    return 0;
+  }
+
+  // 无 native OCR(无 iOS Vision / 无 GMS)时云端兜底:走百炼 vision endpoint
+  function _ocrViaCloud(attachmentUrl, dataUrl) {
+    var url = attachmentUrl ||
+      "/attachments/" + todayIso() + "/inline-ocr-tmp." + Date.now() + ".jpg";
+    return fetch("/api/vision/classify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ attachment_url: url, extra_question: "把图里所有文字 OCR 出来,只返文字本身,不要解释。" }),
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      if (j && j.result && j.result.description) return j.result.description;
+      if (j && j.description) return j.description;
+      return "";
+    }).catch(function () { return ""; });
+  }
+
   // ── 空白一天模板(补剂段 + 半小时格) ───────────────────
   function emptyDayMd() {
     var out = [], h, mm, mins = ["00", "30"];
@@ -1233,6 +1271,71 @@
     "POST /api/daily-tasks/set-image": function (req, u, body) {
       if (!(body && body.task_name)) return jsonResp({ ok: false, error: "缺 task_name" });
       return Store.setSetting("taskimg/" + body.task_name, body.image || "").then(function () { return jsonResp({ ok: true }); });
+    },
+    // 端到端「抠图 + OCR + 写 image map + meta total_pills」— 对齐桌面 /api/cutout(N2 parity)
+    // 桌面 oracle:tests/test_image_routes.py::test_cutout_writes_image_map_and_ocr_pill_count
+    //   POST {attachment_url, task_name} → ok + ocr_pill_count + 写 taskimg + 写 taskmeta.total_pills
+    //   missing args → 400
+    // mobile 架构:端侧 cutout plugin 已抠好 PNG;本 endpoint 接 dataURL + name → native OCR plugin
+    //   → pill_count regex → setSetting roundtrip。无 native plugin(浏览器 / 无 GMS)→ 走 fallback
+    //   (调 /api/vision/classify with extra_question="OCR 出文字")
+    "POST /api/cutout": function (req, u, body) {
+      var name = body && body.task_name;
+      var url = body && body.attachment_url;
+      var inlineImage = body && body.image;  // 兼容:前端可直接传 dataURL(避免 attachment 中转)
+      if (!name) return jsonResp({ ok: false, error: "缺 task_name" }, 400);
+      if (!url && !inlineImage) return jsonResp({ ok: false, error: "缺 attachment_url 或 image" }, 400);
+
+      // 拿 dataURL:优先 inline,否则 attachment_url → readAttachment
+      var dataUrlP;
+      if (inlineImage) {
+        dataUrlP = Promise.resolve(inlineImage);
+      } else {
+        var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(url);
+        if (!m) return jsonResp({ ok: false, error: "attachment_url 格式错" }, 400);
+        dataUrlP = Store.readAttachment(m[1], m[2]);
+      }
+
+      return dataUrlP.then(function (dataUrl) {
+        if (!dataUrl) return jsonResp({ ok: false, error: "attachment 不存在" }, 404);
+
+        // 调 native OCR plugin(真机)/ stub(浏览器)
+        var ocrP;
+        var nativePlugin = (typeof window !== "undefined")
+          ? (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeOcr)
+          : null;
+        if (nativePlugin) {
+          ocrP = nativePlugin.recognize({ image: dataUrl, languages: ["zh-Hans", "en-US"] })
+            .catch(function (e) {
+              // native 失败(无 GMS / 无 iOS Vision)→ 云端 vision OCR 兜底
+              return _ocrViaCloud(url || null, dataUrl).then(function (text) {
+                return { text: text || "", blocks: [], engine: "CloudVision_fallback" };
+              });
+            });
+        } else {
+          // 浏览器:无 native plugin → 走 stub(返空,不阻断 cd 视觉层)
+          ocrP = Promise.resolve({ text: "", blocks: [], engine: "BrowserStub" });
+        }
+
+        return ocrP.then(function (r) {
+          var pillCount = extractPillCount(r.text);
+          var p = [Store.setSetting("taskimg/" + name, url || "inline")];
+          if (pillCount > 0) {
+            p.push(Store.getSetting("taskmeta/" + name).then(function (raw) {
+              var meta = {}; try { meta = raw ? JSON.parse(raw) : {}; } catch (e) {}
+              meta.total_pills = pillCount;
+              return Store.setSetting("taskmeta/" + name, JSON.stringify(meta));
+            }));
+          }
+          return Promise.all(p).then(function () {
+            return jsonResp({
+              ok: true, task_name: name,
+              ocr_pill_count: pillCount > 0 ? pillCount : null,
+              engine: r.engine, ocr_text: r.text,
+            });
+          });
+        });
+      });
     },
     // 改 meta:total_pills(瓶装颗数)/ daily_dose(每天 N 粒),对齐 PC 端 /meta
     "POST /api/daily-tasks/meta": function (req, u, body) {

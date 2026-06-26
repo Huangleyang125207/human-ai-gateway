@@ -1,0 +1,71 @@
+ext {
+    junitVersion = project.hasProperty('junitVersion') ? rootProject.ext.junitVersion : '4.13.2'
+    androidxAppCompatVersion = project.hasProperty('androidxAppCompatVersion') ? rootProject.ext.androidxAppCompatVersion : '1.6.1'
+    androidxJunitVersion = project.hasProperty('androidxJunitVersion') ? rootProject.ext.androidxJunitVersion : '1.1.5'
+    androidxEspressoCoreVersion = project.hasProperty('androidxEspressoCoreVersion') ? rootProject.ext.androidxEspressoCoreVersion : '3.5.1'
+    // ML Kit text recognition + 中文模型(无 GMS 国行 ROM 时,首次启动会回落 PaddleOCR — TODO 补)
+    mlkitTextRecognitionVersion = project.hasProperty('mlkitTextRecognitionVersion') ? rootProject.ext.mlkitTextRecognitionVersion : '16.0.0'
+    mlkitTextRecognitionChineseVersion = project.hasProperty('mlkitTextRecognitionChineseVersion') ? rootProject.ext.mlkitTextRecognitionChineseVersion : '16.0.0'
+}
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.0.0'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.20'
+    }
+}
+
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+android {
+    namespace "com.humanai.gateway.nativeocr"
+    compileSdk 34
+    defaultConfig {
+        minSdkVersion 22
+        targetSdkVersion 34
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+    lintOptions {
+        abortOnError false
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation project(':capacitor-android')
+
+    // Google ML Kit Text Recognition v2(中文走 zh-Hans 模型)
+    implementation "com.google.mlkit:text-recognition-chinese:$mlkitTextRecognitionChineseVersion"
+    // Latin 后备(让英文 + 数字也走 + 抗大小写)
+    implementation "com.google.mlkit:text-recognition:$mlkitTextRecognitionVersion"
+
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.espresso:espresso-core:$androidxEspressoCoreVersion"
+}

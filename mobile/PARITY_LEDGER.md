@@ -135,7 +135,7 @@ oracle:`tests/test_setup_routes.py`(21 条)。
 | id | mobile 端点 | ↔桌面行为 | 怎么补 oracle(前置活) |
 |----|---|---|---|
 | **N1** | /api/journal/search | (mobile 自创 endpoint) | **OUT** | 桌面 tool_search_journal 是 server.py 内部 helper,无 HTTP endpoint;mobile 暴露 /api/journal/search 给 LLM tool dispatch,行为映射 = tool 而非 endpoint parity |
-| **N2** | /api/daily-tasks/set-image | **OUT** | 桌面 /api/cutout 端 OCR pill count + 自动写 taskmeta total_pills;mobile 端侧抠图后只 setSetting taskimg/<name>(无 OCR + 无 meta 自动)。架构分叉:OCR 引擎不同 + 数据流分叉,行为不可 parity |
+| **N2** | /api/cutout | mobile-api.js L1237 /api/cutout + plugins/native-ocr (iOS Vision + Android MLKit) + extractPillCount L703 | 🟡 | 962fa8d | OUT → 🟡:plugin 工程 + Swift/Kotlin + JS endpoint + pill_count regex 全就绪。endpoint 6/6 pass(400 校验 + browser stub + 字段对齐桌面 oracle);extractPillCount 12/12 pass(中文 粒/片/颗 + 英文 capsules/softgels + Net Content + 品牌名 KSM-66/SAM-e/B-12 误识修)。**待真机验**:iOS 16+ 拍补剂瓶 → ocr_pill_count == bottle label。真机通过后改 ✅ |
 | **N4** | /api/vision/classify | mobile-api.js POST /api/vision/classify L1440 | ✅ | 74ac4bb | field + 校验对齐:① 缺 attachment_url → 400 ② bad 格式 → 400 ③ 不存在 attachment → 404。happy path 走真阿里云百炼 vision(需 dashscope_key),架构等价桌面 _gemini_classify_image。JS oracle 3/3 pass |
 | **N3** | /api/daily-tasks/water | (mobile 自创 endpoint) | **OUT** | 桌面 daily-tasks/check 一个 endpoint 通吃(intake/checked/toggle 三入口);mobile 拆水杯滑动单走 /water 走快路径,行为映射回 check |
 | **N4** | /api/vision/classify | _qwen_classify_image | mock vision API:url 校验 + cache-hit 不重调 + 默认描述 cache 回 meta |

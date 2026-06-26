@@ -15,7 +15,8 @@
     "@capacitor/core": "^6",
     "@capacitor/filesystem": "^6",
     "@capacitor/preferences": "^6",
-    "capacitor-cutout": "file:../plugins/cutout"
+    "capacitor-cutout": "file:../plugins/cutout",
+    "capacitor-native-ocr": "file:../plugins/native-ocr"
   },
   "devDependencies": {
     "@capacitor/android": "^6",

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- MLKit text recognition v2 模型走 Play Services 自动下,无 GMS 设备首次启动失败 →
+         走 PaddleOCR 兜底(TODO 补;现阶段抛 unavailable 让 JS 端 fall back 到云端百炼)-->
+
+    <application>
+        <!-- MLKit 自动模型下载;无 GMS 时不报错只 init 失败,JS 端判 available()==false 走云端 -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ica" />
+    </application>
+</manifest>
