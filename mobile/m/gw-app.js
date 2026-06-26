@@ -247,10 +247,17 @@
         return fetch('/api/setup/save-partial', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-        }).then(r => r.json()).then(r => {
+        }).then(r => r.json()).then(async r => {
           if (r && r.ok) {
-            setStatus(field, 'ok', '已保存 · 点测试验证');
-            GW.whisper(field === 'deepseek' ? 'DeepSeek key 已保存' : '百炼 key 已保存', false);
+            // ★ instant verify:立即读回看真存了
+            const cur = await fetch('/api/setup/current').then(rr => rr.json()).catch(() => ({}));
+            const stored = field === 'deepseek' ? cur.deepseek_key : cur.dashscope_key;
+            if (stored) {
+              setStatus(field, 'ok', '✓ 已保存 verify=' + maskKey(stored));
+              GW.whisper(field === 'deepseek' ? 'DeepSeek key 已保存' : '百炼 key 已保存', false);
+            } else {
+              setStatus(field, 'fail', '⚠ 写了但读不回 — Backend 路径 bug · saved=' + JSON.stringify(r).slice(0, 60) + ' · cur=' + JSON.stringify(cur).slice(0, 80));
+            }
           } else {
             setStatus(field, 'fail', '保存失败:' + (r && r.error || '未知'));
           }

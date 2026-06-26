@@ -37,8 +37,12 @@
   };
 
   // 真机:日记/打卡/对话落文件(Directory.Data 应用私有区);设置/key 走 Preferences。
-  var _cap = (typeof window !== "undefined" && window.Capacitor && window.Capacitor.Plugins) || null;
-  var _fs = _cap && _cap.Filesystem, _prefs = _cap && _cap.Preferences;
+  // ★ Capacitor plugin lazy resolve — IIFE 启动时 bridge 可能未就绪 (_cap=null),
+  //   写代码 cache 会永久 lock LocalBackend → save 假装 ok 但 storage 空。
+  //   解法:每次访问都 re-resolve window.Capacitor.Plugins,确保拿到 lazy-loaded plugin。
+  function _getCap() { return (typeof window !== "undefined" && window.Capacitor && window.Capacitor.Plugins) || null; }
+  function _getFs() { var c = _getCap(); return c && c.Filesystem; }
+  function _getPrefs() { var c = _getCap(); return c && c.Preferences; }
   var DIR = "DATA";
   function capPath(k) {
     if (k.indexOf("journal/") === 0) return "gw/journal/" + isoToStem(k.slice(8)) + ".md";
@@ -46,22 +50,32 @@
     if (k === "thread") return "gw/thread.json";
     return "gw/kv/" + k.replace(/[^\w.-]/g, "_") + ".txt";
   }
+  // ★ catch 不吞 write 错 — 之前 .catch(()=>{}) 让 setText 在 plugin fail 时假装 success,
+  //   导致 saveKey 返 ok:true 但 storage 空。现在 reject 让 caller 看到真错。
   var CapacitorBackend = {
     getText: function (k) {
-      if (k.indexOf("setting/") === 0 && _prefs) return _prefs.get({ key: k.slice(8) }).then(function (r) { return r && r.value != null ? r.value : null; }).catch(function () { return null; });
-      return _fs.readFile({ path: capPath(k), directory: DIR, encoding: "utf8" }).then(function (r) { return r.data; }).catch(function () { return null; });
+      var prefs = _getPrefs(), fs = _getFs();
+      if (k.indexOf("setting/") === 0 && prefs) return prefs.get({ key: k.slice(8) }).then(function (r) { return r && r.value != null ? r.value : null; }).catch(function () { return null; });
+      if (!fs) return Promise.resolve(null);
+      return fs.readFile({ path: capPath(k), directory: DIR, encoding: "utf8" }).then(function (r) { return r.data; }).catch(function () { return null; });
     },
     setText: function (k, v) {
-      if (k.indexOf("setting/") === 0 && _prefs) return _prefs.set({ key: k.slice(8), value: v }).catch(function () {});
-      return _fs.writeFile({ path: capPath(k), data: v, directory: DIR, encoding: "utf8", recursive: true }).catch(function (e) { console.error("[mobile-api] fs write 失败", k, e); });
+      var prefs = _getPrefs(), fs = _getFs();
+      if (k.indexOf("setting/") === 0 && prefs) return prefs.set({ key: k.slice(8), value: v });
+      if (!fs) return Promise.reject(new Error("Storage unavailable(_fs=null)"));
+      return fs.writeFile({ path: capPath(k), data: v, directory: DIR, encoding: "utf8", recursive: true });
     },
     remove: function (k) {
-      if (k.indexOf("setting/") === 0 && _prefs) return _prefs.remove({ key: k.slice(8) }).catch(function () {});
-      return _fs.deleteFile({ path: capPath(k), directory: DIR }).catch(function () {});
+      var prefs = _getPrefs(), fs = _getFs();
+      if (k.indexOf("setting/") === 0 && prefs) return prefs.remove({ key: k.slice(8) });
+      if (!fs) return Promise.resolve();
+      return fs.deleteFile({ path: capPath(k), directory: DIR }).catch(function () {});
     },
     keys: function (prefix) {
+      var fs = _getFs();
+      if (!fs) return Promise.resolve([]);
       if (prefix.indexOf("journal/") === 0) {
-        return _fs.readdir({ path: "gw/journal", directory: DIR }).then(function (r) {
+        return fs.readdir({ path: "gw/journal", directory: DIR }).then(function (r) {
           var files = (r && r.files) || [];
           return files.map(function (f) { var n = typeof f === "string" ? f : f.name; return "journal/" + stemToIso(n.replace(/\.md$/, "")); });
         }).catch(function () { return []; });
@@ -70,8 +84,14 @@
     },
   };
 
-  var Backend = _fs ? CapacitorBackend : LocalBackend;
-  console.log("[mobile-api] 存储后端 =", _fs ? "Capacitor Filesystem" : "localStorage(浏览器)");
+  // ★ Backend 改 wrapper 对象 — 每次方法调用都 lazy 决定 delegate,而不是 IIFE 启动时锁死。
+  //   Store 内全部 Backend.X(...) 一行不用改,真机 plugin lazy 就绪后立刻切到 CapacitorBackend。
+  var Backend = {
+    getText: function (k) { return (_getFs() ? CapacitorBackend : LocalBackend).getText(k); },
+    setText: function (k, v) { return (_getFs() ? CapacitorBackend : LocalBackend).setText(k, v); },
+    remove: function (k) { return (_getFs() ? CapacitorBackend : LocalBackend).remove(k); },
+    keys: function (prefix) { return (_getFs() ? CapacitorBackend : LocalBackend).keys(prefix); },
+  };
 
   var Store = {
     readJournalMd: function (date) { return Backend.getText("journal/" + date); },
@@ -1238,12 +1258,21 @@
     // 关键:必须 configured:true,否则被锁在无法关闭的设置弹窗后面
     "GET /api/setup-status": function () { return jsonResp({ configured: true, profile_count: 1 }); },
     "GET /api/setup/current": function () {
-      return Store.getSetting("deepseek_key").then(function (k) {
+      // 同时返桌面 contract(models[0].api_key)+ mobile 顶级字段(deepseek_key/dashscope_key)双兼容
+      return Promise.all([
+        Store.getSetting("deepseek_key"),
+        Store.getSetting("dashscope_key"),
+      ]).then(function (vals) {
+        var dsKey = vals[0] || "";
+        var azKey = vals[1] || "";
         return jsonResp({
-          models: [{ id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", api_key: k || "", base_url: "https://api.deepseek.com/v1" }],
+          models: [{ id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", api_key: dsKey, base_url: "https://api.deepseek.com/v1" }],
           default_model_id: "deepseek-v4-pro",
-          dashscope_api_key: "", dashscope_base_url: "", dashscope_vision_model: "",
+          dashscope_api_key: azKey, dashscope_base_url: "", dashscope_vision_model: "",
           baidu_cutout_api_key: "", baidu_cutout_secret_key: "",
+          // mobile 顶级字段(setup.js mobile 版 + gw-app.js 直接读)
+          deepseek_key: dsKey,
+          dashscope_key: azKey,
         });
       });
     },
@@ -2186,4 +2215,59 @@
   handlers["GET /api/journal/days"] = function (req, u) { return seedPromise.then(function () { return _origDays(req, u); }); };
   var _origTasks = handlers["GET /api/daily-tasks"];
   handlers["GET /api/daily-tasks"] = function (req, u) { return seedPromise.then(function () { return _origTasks(req, u); }); };
+
+  // ── 启动 self-test:Storage round-trip(写 → 读 → diff)─────────────
+  // 真机/simulator:把结果写到 setting/__self_test__ + console.log,debug 时可用
+  //   xcrun simctl get_app_container <UDID> com.humanai.gateway data
+  //   再 defaults read <plist>/Preferences/com.humanai.gateway.plist 看真存了什么
+  setTimeout(function () {
+    var lines = [];
+    function log(s) { lines.push(s); console.log("[GW SELF-TEST]", s); }
+    log("backend=" + (_getFs() ? "Capacitor" : "LocalStorage") + " cap=" + (!!_getCap()) + " fs=" + (!!_getFs()) + " prefs=" + (!!_getPrefs()));
+    var v1 = "sk-self-test-" + Math.random().toString(36).slice(2, 8);
+    Store.setSetting("__self_test__", v1).then(function () {
+      return Store.getSetting("__self_test__");
+    }).then(function (r1) {
+      log("T1 round-trip Store=" + (r1 === v1 ? "PASS" : "FAIL r=" + r1));
+      // T2:走 /api/setup/save-partial 同 onboarding 真路径
+      var key2 = "sk-onboard-" + Math.random().toString(36).slice(2, 8);
+      return fetch("/api/setup/save-partial", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deepseek_api_key: key2 }),
+      }).then(function (r) { return r.json(); }).then(function (j) {
+        log("T2 save-partial ok=" + (j && j.ok));
+        // T3:立即读 /api/setup/current 看真存了
+        return fetch("/api/setup/current").then(function (r) { return r.json(); });
+      }).then(function (cur) {
+        log("T3 current deepseek_key=" + (cur && cur.deepseek_key ? cur.deepseek_key.slice(0, 16) + "..." : "EMPTY"));
+        // T4:直读 Store 验同一 key
+        return Store.getSetting("deepseek_key");
+      }).then(function (raw) {
+        log("T4 Store.getSetting deepseek_key=" + (raw ? raw.slice(0, 16) + "..." : "EMPTY"));
+        // T5:模拟测试按钮 — /api/setup/test 用假 key 真打 deepseek(预期 401 + 友好翻译)
+        return fetch("/api/setup/test", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ label: "self-test", base_url: "https://api.deepseek.com/v1", api_key: "sk-fake-self-test", model: "deepseek-chat" }),
+        }).then(function (r) { return r.json(); });
+      }).then(function (t) {
+        var dbg = JSON.stringify((t && t.debug) || {}).slice(0, 120);
+        log("T5 setup/test ok=" + (t && t.ok) + " reason=" + ((t && t.reason) || "").slice(0, 60) + " dbg=" + dbg);
+        // T6:模拟 chat — chatViaDeepseek 路径,看 SSE 第一帧
+        return fetch("/api/chat", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: "ping", history: [] }),
+        }).then(function (r) { return r.text(); });
+      }).then(function (sse) {
+        var first = (sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; })[0] || "").slice(0, 200);
+        log("T6 chat first SSE=" + first);
+      });
+    }).then(function () {
+      var report = "[GW SELF-TEST]\n" + lines.join("\n");
+      return Store.setSetting("__self_test_report__", report);
+    }).catch(function (e) {
+      var report = "[GW SELF-TEST] 💥 EXCEPTION " + String(e && e.message || e) + "\n" + lines.join("\n");
+      console.log(report);
+      try { Store.setSetting("__self_test_report__", report); } catch (_) {}
+    });
+  }, 500);  // 等 500ms 让 Capacitor bridge 真就绪
 })();
