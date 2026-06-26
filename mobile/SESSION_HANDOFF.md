@@ -31,14 +31,22 @@ CapacitorStorage."taskmeta/鱼油（Swisse）" = {total_pills:60, daily_dose:2}
 CapacitorStorage."widgets/self-test-coffee" = {咖啡 widget HTML}
 ```
 
-## 剩 8/22 待验
+## ★ 22/22 全 PASS(commit `ce4ae29`)
+
+剩 8 个本 session 全验完(plist 法 + 双 key 注入 + tool_call event 真验证):
 
 ```
-⬜ insert_journal_block    ⬜ set_water_cup_image
-⬜ vision_classify         ⬜ ocr_image
-⬜ delete_attachment       ⬜ list_widgets
-⬜ remove_widget           ⬜ set_widget_enabled
+✅ insert_journal_block    ✅ set_water_cup_image(plist 真有 "🥛")
+✅ vision_classify         ✅ ocr_image
+   ↑ dispatcher 真触发,真打 qwen3-vl,empty_response 是 dummy 1x1 PNG 预期
+✅ delete_attachment       ✅ list_widgets(本轮改 Store-based fix)
+✅ remove_widget           ✅ set_widget_enabled(本轮改 Store-based fix)
 ```
+
+## 剩待做(本 session 不能,下次 session 用 MCP 法)
+
+- **UI 真操作验**:XcodeBuildMCP `tap` 真粘 key 真点测试按钮(本 session 没装 MCP)
+- **WebView console.log 实时**:OpenSafari `javascript` 真看 console(plist 法是间接,有时找 bug 慢)
 
 ## MCP 装好就绪
 
