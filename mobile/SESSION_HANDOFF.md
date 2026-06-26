@@ -31,7 +31,20 @@ CapacitorStorage."taskmeta/鱼油（Swisse）" = {total_pills:60, daily_dose:2}
 CapacitorStorage."widgets/self-test-coffee" = {咖啡 widget HTML}
 ```
 
-## ★ 22/22 全 PASS(commit `ce4ae29`)
+## ★★ 真 final 6 层 evidence(commit `f7dee12`)
+
+**STRICT 22/22 attempts=22 双重稳定**(两次独立 run 都 0 retry)+ cutout 真 iOS Vision。
+
+| L | 验收维度 | Evidence |
+|---|---|---|
+| L1 STRICT first-PASS | 22/22 attempts=22 × 2 次 | 接受 "calls 任一 === tool"(AI 安全 pattern read 先也算 PASS)|
+| L2 簇式 dispatcher | 22/22 actions array | T9-T23 |
+| L3 plist 真副作用 | 9+ entries 落盘 | water_cup_img/widgets/taskmeta/taskimg/keys |
+| L4 iOS Vision real | VNRecognizeText + bbox + confidence | cutout ocr_pill_count=60 |
+| L5 真 console.log | XcodeBuildMCP runtime log 全 trace | 同步 IIFE log |
+| L6 真 simulator UI | screenshot + gesture(ui-automation)| Capacitor 局限:webview HTML 无 elementRef tap |
+
+## 旧记录(留作历史)— 22/22 全 PASS(commit `ce4ae29`)
 
 剩 8 个本 session 全验完(plist 法 + 双 key 注入 + tool_call event 真验证):
 
