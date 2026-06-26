@@ -2410,11 +2410,23 @@
           var names = actions.map(function (a) { return a.name; }).join(",");
           log("T18 set_water_cup_image actions=" + actions.length + " tools=[" + names + "]");
         }).then(function () {
-          // ★ T19 准备:先写一张 dummy attachment + 给 uploaded meta,让 vision/ocr 真能调
-          var dummyDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
-          return Store.writeAttachment("2026-06-27", "test.png", dummyDataUrl)
-            .then(function () { return Store.writeUploadMeta("2026-06-27", "test.png", { kind: "test", uploaded_at: "2026-06-27T00:00:00Z" }); })
-            .then(function () { log("T19a dummy attachment 写入 OK"); });
+          // ★ T19a 真图准备:用 canvas 生成 "鱼油 60 粒" 真文字图(供 vision/ocr/cutout 验)
+          var canvas = document.createElement("canvas");
+          canvas.width = 400; canvas.height = 300;
+          var ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, 400, 300);
+          ctx.fillStyle = "#222222";
+          ctx.font = "bold 56px -apple-system, sans-serif";
+          ctx.textBaseline = "middle";
+          ctx.fillText("鱼油 60 粒", 50, 100);
+          ctx.font = "32px -apple-system, sans-serif";
+          ctx.fillStyle = "#666";
+          ctx.fillText("Swisse fish oil", 50, 180);
+          ctx.fillText("Omega-3 1000mg", 50, 230);
+          var realDataUrl = canvas.toDataURL("image/png");
+          return Store.writeAttachment("2026-06-27", "test.png", realDataUrl)
+            .then(function () { return Store.writeUploadMeta("2026-06-27", "test.png", { kind: "supplement", uploaded_at: "2026-06-27T00:00:00Z" }); })
+            .then(function () { log("T19a 真图(canvas '鱼油 60 粒')写入 size=" + realDataUrl.length); });
         }).then(function () {
           // ★ T19 vision_classify(强制 prompt + deltas log)
           return fetch("/api/chat", {
@@ -2469,7 +2481,28 @@
           var names = actions.map(function (a) { return a.name; }).join(",");
           log("T22 set_enabled+remove actions=" + actions.length + " tools=[" + names + "] AI说=" + deltas);
         }).then(function () {
-          // ★ T23 delete_attachment
+          // ★ T23a 真图重写(T22 用户删过 self-test-check widget,但 attachment 还在,确保 cutout 能拿)
+          var canvas = document.createElement("canvas");
+          canvas.width = 400; canvas.height = 300;
+          var ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, 400, 300);
+          ctx.fillStyle = "#222222"; ctx.font = "bold 56px -apple-system, sans-serif";
+          ctx.textBaseline = "middle";
+          ctx.fillText("鱼油 60 粒", 50, 100);
+          ctx.font = "32px -apple-system, sans-serif"; ctx.fillStyle = "#666";
+          ctx.fillText("Swisse fish oil", 50, 180);
+          ctx.fillText("Omega-3 1000mg", 50, 230);
+          var imgDataUrl = canvas.toDataURL("image/png");
+
+          // ★ T24 /api/cutout 端到端(真图 inline → native OCR / 云端兜底 → extractPillCount → meta total_pills)
+          return fetch("/api/cutout", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ task_name: "鱼油（Swisse）", image: imgDataUrl }),
+          }).then(function (r) { return r.json(); }).then(function (j) {
+            log("T24 /api/cutout ok=" + j.ok + " engine=" + j.engine + " ocr_pill_count=" + j.ocr_pill_count + " ocr_text=" + String(j.ocr_text || "").slice(0, 60));
+          });
+        }).then(function () {
+          // ★ T23 delete_attachment(原)
           return fetch("/api/chat", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ message: "立即调用 delete_attachment tool,参数 attachment_url='/attachments/2026-06-27/test.png'。不要解释。", history: [] }),
