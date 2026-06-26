@@ -19,6 +19,7 @@ sed -e 's#\.\./mobile-api\.js#./mobile-api.js#g' \
 # cd v0 (2026-06-25 v2 全套接管) tokens + components.css 双模式,零裸色值
 cp "$GW/mobile/m/tokens.css"            "$WWW/tokens.css"
 cp "$GW/mobile/m/components.css"        "$WWW/components.css"
+cp "$GW/mobile/m/copy-allow.css"        "$WWW/copy-allow.css"
 
 # cd v0 5 件套(顺序固定:mock → widgets → journal → chat → app)
 # gw-mock.js 含 mock data + gatewayMd stub + GW.ICON + toolLabel(18 自然句)

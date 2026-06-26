@@ -187,16 +187,17 @@
 
     function settings() {
       const s = document.createElement('div'); s.className = 'gw-set';
+      // 静态骨架先渲染(避免空白等 fetch),拿到真 key state 再 hydrate
       s.innerHTML = `
         <div class="gw-set-sec"><div class="gw-set-sec-lab">双钥匙 · 给它声音和眼睛</div>
-          <div class="gw-key ok"><div class="gw-key-head"><span class="gw-key-role">DeepSeek</span><span class="gw-key-tag">· 说话的那个</span></div>
-            <div class="gw-key-desc">对话、夹批、21:30 的纸条都从这把钥匙发声。</div>
-            <div class="gw-key-row"><input class="gw-key-in" value="sk-••••••••3f9a"><button class="gw-key-test">测试</button></div>
-            <div class="gw-key-status ok">已连通 · deepseek-chat</div></div>
-          <div class="gw-key"><div class="gw-key-head"><span class="gw-key-role">阿里云百炼</span><span class="gw-key-tag">· 看东西的那只眼</span></div>
-            <div class="gw-key-desc">看照片、抠图、贴纸都走这把钥匙。可选，填了才长出眼睛。</div>
-            <div class="gw-key-row"><input class="gw-key-in" placeholder="粘贴百炼 API Key…"><button class="gw-key-test">测试</button></div>
-            <div class="gw-key-status idle">未填 · 暂无视觉</div></div>
+          <div class="gw-key" data-key="deepseek"><div class="gw-key-head"><span class="gw-key-role">DeepSeek</span><span class="gw-key-tag">· 说话的那个</span></div>
+            <div class="gw-key-desc">对话、夹批、21:30 的纸条都从这把钥匙发声。<br><a href="https://platform.deepseek.com" target="_blank" style="color:var(--umber);text-decoration:underline">platform.deepseek.com</a> 注册 → API Keys → 创建 → 复制 sk-… 粘贴下方</div>
+            <div class="gw-key-row"><input class="gw-key-in" placeholder="粘贴 DeepSeek API Key (sk-…)" data-field="deepseek"><button class="gw-key-test" data-test="deepseek">测试</button></div>
+            <div class="gw-key-status idle">读取中…</div></div>
+          <div class="gw-key" data-key="dashscope"><div class="gw-key-head"><span class="gw-key-role">阿里云百炼</span><span class="gw-key-tag">· 看东西的那只眼</span></div>
+            <div class="gw-key-desc">看照片、抠图、贴纸都走这把钥匙。可选，填了才长出眼睛。<br><a href="https://bailian.console.aliyun.com" target="_blank" style="color:var(--umber);text-decoration:underline">bailian.console.aliyun.com</a> 新用户 100 万 token 免费 90 天</div>
+            <div class="gw-key-row"><input class="gw-key-in" placeholder="粘贴百炼 API Key…" data-field="dashscope"><button class="gw-key-test" data-test="dashscope">测试</button></div>
+            <div class="gw-key-status idle">读取中…</div></div>
         </div>
         <div class="gw-set-sec"><div class="gw-set-sec-lab">皮肤</div>
           <div class="gw-row"><div><div class="gw-row-title">私印小报</div><div class="gw-row-desc">深夜台灯 / 日间米黄纸，同一套纸。</div></div>
@@ -208,9 +209,115 @@
           <button class="gw-want">${GW.ICON.nib} 我想要新功能 / 新视觉</button>
           <div class="gw-want-sub">跳进对话告诉 AI，我们一起想。</div>
         </div>`;
+      // ── theme + skin + want(原 binding,不动)──
       s.querySelector('#skin').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; st.theme = b.dataset.t; render(); });
       s.querySelectorAll('.gw-toggle').forEach((t) => t.addEventListener('click', () => t.classList.toggle('on')));
       s.querySelector('.gw-want').addEventListener('click', () => { st.subPage = null; st.tab = 'chat'; render(); setTimeout(() => { const ta = gw.querySelector('.gw-chat-input'); if (ta) { ta.value = '我想要'; ta.focus(); ta.dispatchEvent(new Event('input')); } }, 60); });
+
+      // ── key state hydrate + bind(新增)──
+      function maskKey(k) { if (!k) return ''; const s = String(k); if (s.length < 8) return '••••'; return s.slice(0, 3) + '••••' + s.slice(-4); }
+      function setStatus(role, cls, text) {
+        const box = s.querySelector(`.gw-key[data-key="${role}"] .gw-key-status`);
+        if (!box) return;
+        box.className = 'gw-key-status ' + cls;
+        box.textContent = text;
+      }
+
+      // 1. 启动时 fetch 当前 key state
+      fetch('/api/setup/current').then(r => r.json()).then(cur => {
+        const ds = cur && cur.deepseek_key;
+        const az = cur && cur.dashscope_key;
+        const inDs = s.querySelector('.gw-key-in[data-field="deepseek"]');
+        const inAz = s.querySelector('.gw-key-in[data-field="dashscope"]');
+        if (inDs) inDs.placeholder = ds ? maskKey(ds) + '(已存,粘新值替换)' : '粘贴 DeepSeek API Key (sk-…)';
+        if (inAz) inAz.placeholder = az ? maskKey(az) + '(已存,粘新值替换)' : '粘贴百炼 API Key…';
+        setStatus('deepseek', ds ? 'ok' : 'idle', ds ? '已填 · 待测' : '未填 · AI 没声音');
+        setStatus('dashscope', az ? 'ok' : 'idle', az ? '已填 · 待测' : '未填 · AI 没眼睛');
+      }).catch(() => {
+        setStatus('deepseek', 'idle', '未填 · AI 没声音');
+        setStatus('dashscope', 'idle', '未填 · AI 没眼睛');
+      });
+
+      // 2. input blur 自动保存(用户粘贴 + 离开焦点)
+      function saveKey(field, val) {
+        if (!val || !val.trim()) return Promise.resolve();
+        const body = field === 'deepseek'
+          ? { deepseek_api_key: val.trim() }
+          : { dashscope_api_key: val.trim() };
+        return fetch('/api/setup/save-partial', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }).then(r => r.json()).then(r => {
+          if (r && r.ok) {
+            setStatus(field, 'ok', '已保存 · 点测试验证');
+            GW.whisper(field === 'deepseek' ? 'DeepSeek key 已保存' : '百炼 key 已保存', false);
+          } else {
+            setStatus(field, 'fail', '保存失败:' + (r && r.error || '未知'));
+          }
+        }).catch(e => setStatus(field, 'fail', '保存失败:' + e.message));
+      }
+      s.querySelectorAll('.gw-key-in').forEach(inp => {
+        inp.addEventListener('blur', () => saveKey(inp.dataset.field, inp.value));
+      });
+
+      // 3. 测试按钮:对齐桌面 shared/setup.js L265-275 contract
+      // 传完整四元组 {label, base_url, api_key, model} → 真打 chat.completions
+      const PROVIDER_DEFAULT = {
+        deepseek: { label: 'DeepSeek 测试', base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+        dashscope: { label: '百炼视觉测试', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-vl-flash' },
+      };
+      function friendlyError(reason) {
+        const r = String(reason || '');
+        if (/401|Unauthorized|invalid.*key|incorrect.*key/i.test(r)) return 'key 不对 — 复制时漏了字符 / 多了空格 / 漏了 sk-?';
+        if (/402|403|insufficient.*balance|余额不足|quota.*exceed/i.test(r)) return '余额不足 — 去充值(DeepSeek 起充 10 元 / 百炼新用户免费 100 万 token)';
+        if (/timeout|connection|network|网络|超时/i.test(r)) return '网卡了 — 换 WiFi 重试 / 检查代理';
+        if (/UnsupportedModel|model.*not.*found|不存在模型/i.test(r)) return 'model 不对 — 平台下线了某模型,换默认';
+        if (/429|rate.*limit/i.test(r)) return '限流了 — 等几秒重试';
+        return r;
+      }
+      s.querySelectorAll('.gw-key-test').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const field = btn.dataset.test;
+          const inp = s.querySelector(`.gw-key-in[data-field="${field}"]`);
+          const inputVal = inp && inp.value && inp.value.trim();
+          // 拿 key:优先 input 输入,空时 fetch /api/setup/current 拿存的
+          let api_key = inputVal;
+          if (!api_key) {
+            try {
+              const cur = await fetch('/api/setup/current').then(r => r.json());
+              api_key = field === 'deepseek' ? cur.deepseek_key : cur.dashscope_key;
+            } catch (_) {}
+          }
+          if (!api_key) {
+            setStatus(field, 'fail', '✗ 先粘 API Key 再测试');
+            return;
+          }
+          // 先保存新值
+          if (inputVal) await saveKey(field, inputVal);
+          btn.disabled = true; btn.textContent = '⋯ 测试中';
+          setStatus(field, 'idle', '测试中…');
+          const cfg = PROVIDER_DEFAULT[field];
+          try {
+            const r = await fetch('/api/setup/test', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ label: cfg.label, base_url: cfg.base_url, api_key: api_key, model: cfg.model }),
+            });
+            const j = await r.json();
+            if (j && j.ok) {
+              setStatus(field, 'ok', '✓ 已连通 · ' + (j.model || cfg.model));
+            } else {
+              const raw = (j && j.reason) || '未知';
+              const dbg = (j && j.debug) ? ' [' + JSON.stringify(j.debug).slice(0, 200) + ']' : '';
+              setStatus(field, 'fail', '✗ ' + friendlyError(raw) + ' · raw:' + String(raw).slice(0, 60) + dbg);
+            }
+          } catch (e) {
+            setStatus(field, 'fail', '✗ ' + friendlyError(e.message));
+          } finally {
+            btn.disabled = false; btn.textContent = '测试';
+          }
+        });
+      });
+
       return s;
     }
 

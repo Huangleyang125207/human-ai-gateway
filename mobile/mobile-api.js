@@ -285,9 +285,10 @@
     ], stream: false };
     var url = "https://api.deepseek.com/v1/chat/completions";
     var headers = { "Content-Type": "application/json", Authorization: "Bearer " + key };
-    var CapHttp = _cap && _cap.CapacitorHttp;
+    // lazy resolve(IIFE 顶部 _cap race fix,同 chatViaDeepseek)
+    var CapHttp = _getCapHttp();
     if (CapHttp) {
-      return CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 90, readTimeout: 90 })
+      return CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 15000, readTimeout: 90000 })
         .then(function (r) { return (r && r.data && r.data.choices && r.data.choices[0] && r.data.choices[0].message && r.data.choices[0].message.content) || ""; });
     }
     return realFetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload) })
@@ -357,7 +358,7 @@
     };
     var p;
     if (CapHttp) {
-      p = CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 60, readTimeout: 60 })
+      p = CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 15000, readTimeout: 60000 })
         .then(function (r) { return (r && r.data) || {}; });
     } else {
       p = realFetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
@@ -404,7 +405,7 @@
     var params = { q: query, pn: "1" };
     var p;
     if (CapHttp) {
-      p = CapHttp.get({ url: url, params: params, headers: headers, connectTimeout: 15, readTimeout: 15 })
+      p = CapHttp.get({ url: url, params: params, headers: headers, connectTimeout: 15000, readTimeout: 15000 })
         .then(function (r) { return (r && r.data) || ""; });
     } else {
       // 浏览器 dev fallback (CORS 大概率拦,但保留 path 让 dev 看到错误)
@@ -446,7 +447,7 @@
     };
     var p;
     if (CapHttp) {
-      p = CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 30, readTimeout: 30 })
+      p = CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 15000, readTimeout: 30000 })
         .then(function (r) { return (r && r.data) || {}; });
     } else {
       p = realFetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
@@ -1028,6 +1029,59 @@
 
   function pickReply(d) { return d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content; }
 
+  // 真打一次 chat.completions ping(对齐桌面 setup_test L89-105):
+  // 用 {api_key, base_url, model} 真打 POST base_url/chat/completions(messages=[ping], max_tokens=8)
+  // 通 → {ok:true, reply, model};不通 → {ok:false, reason: "HTTP <code>: <message>"}
+  function _setupTest(profile) {
+    var url = profile.base_url.replace(/\/+$/, "") + "/chat/completions";
+    var headers = { "Content-Type": "application/json", Authorization: "Bearer " + profile.api_key };
+    var payload = { model: profile.model, messages: [{ role: "user", content: "ping" }], max_tokens: 8, stream: false };
+    function parseReply(d) {
+      var msg = d && d.choices && d.choices[0] && d.choices[0].message;
+      return (msg && msg.content || "").slice(0, 80);
+    }
+    function translateError(httpStatus, body) {
+      // 复刻桌面 L100-105 错误翻译:截短常见 OAI SDK 长 error
+      if (body && body.error && body.error.message) return "HTTP " + (httpStatus || "?") + ": " + body.error.message;
+      if (typeof body === "string") return "HTTP " + (httpStatus || "?") + ": " + body.slice(0, 200);
+      return "HTTP " + (httpStatus || "?");
+    }
+    var CapHttp = _getCapHttp();
+    if (CapHttp) {
+      // CapacitorHttp 真机走原生 HTTP,绕 WKWebView CORS
+      // 单位是毫秒(Capacitor 6 文档):connect 15s / read 60s
+      return CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 15000, readTimeout: 60000 })
+        .then(function (r) {
+          var status = r && r.status;
+          var d = r && r.data;
+          if (status >= 200 && status < 300 && d && d.choices) {
+            return jsonResp({ ok: true, reply: parseReply(d), model: profile.model });
+          }
+          var rawBody = (typeof d === "string") ? d.slice(0, 200) : JSON.stringify(d || {}).slice(0, 200);
+          return jsonResp({ ok: false, reason: translateError(status, d), debug: { status: status, url: url, raw: rawBody } });
+        })
+        .catch(function (e) {
+          var em = String(e && e.message || e);
+          return jsonResp({ ok: false, reason: em.slice(0, 200), debug: { url: url, caphttp_err: em, has_window_cap: typeof window !== "undefined" && !!window.Capacitor } });
+        });
+    }
+    // 浏览器 fallback
+    var ctrl = (typeof AbortController === "function") ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 30000) : null;
+    return realFetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload), signal: ctrl && ctrl.signal })
+      .then(function (r) {
+        if (timer) clearTimeout(timer);
+        return r.json().then(function (d) { return { status: r.status, data: d }; });
+      })
+      .then(function (res) {
+        if (res.status >= 200 && res.status < 300 && res.data && res.data.choices) {
+          return jsonResp({ ok: true, reply: parseReply(res.data), model: profile.model });
+        }
+        return jsonResp({ ok: false, reason: translateError(res.status, res.data) });
+      })
+      .catch(function (e) { return jsonResp({ ok: false, reason: String(e && e.message || e).slice(0, 200) }); });
+  }
+
   // ── claim audit(Path X:防 AI 口头声称已写入但没真 tool call)──────
   // 桌面 chat_routes L280 _audit_unauthorized_claim 端口:5.22 msg 5/7 事故等价防御。
   // claim 措辞 + actions 空 → 自动加 disclaimer 让用户看到"AI 在撒谎"。
@@ -1076,7 +1130,10 @@
       var maxRounds = 5;
       var url = "https://api.deepseek.com/v1/chat/completions";
       var headers = { "Content-Type": "application/json", Authorization: "Bearer " + key };
-      var CapHttp = _cap && _cap.CapacitorHttp;
+      // lazy resolve CapacitorHttp:IIFE 顶部 cache 的 _cap 在 Capacitor bridge 未就绪时是 null
+      // → 走 fallback realFetch 但 WebView 跨域被 CORS 阻 → 用户看到"调用失败"
+      // 真机阶段(尤其首次启动后)必走 native HTTP 绕 CORS
+      var CapHttp = _getCapHttp();
 
       function callRound(round) {
         if (round >= maxRounds) {
@@ -1089,7 +1146,7 @@
         if (!lastRound) { payload.tools = TOOL_SPECS; payload.tool_choice = "auto"; }
         var fetchPromise;
         if (CapHttp) {
-          fetchPromise = CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 90, readTimeout: 90 })
+          fetchPromise = CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 15000, readTimeout: 90000 })
             .then(function (res) { return res && res.data; });
         } else {
           var abortCtrl = (typeof AbortController === "function") ? new AbortController() : null;
@@ -1766,7 +1823,7 @@
       var headers = { "User-Agent": "Mozilla/5.0 (gateway-fetch)" };
       var p;
       if (CapHttp) {
-        p = CapHttp.get({ url: url, headers: headers, connectTimeout: 15, readTimeout: 15 })
+        p = CapHttp.get({ url: url, headers: headers, connectTimeout: 15000, readTimeout: 15000 })
           .then(function (r) { return (r && r.data) || ""; });
       } else {
         p = realFetch(url, { headers: headers }).then(function (r) { return r.text(); });
@@ -2044,8 +2101,25 @@
       });
       return Promise.all(p).then(function () { return jsonResp({ ok: true }); });
     },
-    // 真机无法在 webview 里 CORS 自测 key,乐观返 ok;真验证发生在第一次聊天
-    "POST /api/setup/test": function () { return jsonResp({ ok: true, model: "deepseek-chat" }); },
+    // 设置栏测试按钮:对齐桌面 setup_routes.py L73 contract:
+    // body: {label, base_url, api_key, model} → 真打 ping → {ok, reply, model} 或 {ok:false, reason}
+    // 错误翻译复刻桌面 L100-105(截短长 OAI SDK error → "HTTP <code>: <message>")
+    "POST /api/setup/test": function (req, u, body) {
+      body = body || {};
+      var profile = {
+        label: body.label || "test",
+        base_url: body.base_url || "",
+        api_key: body.api_key || "",
+        model: body.model || "",
+      };
+      if (!profile.api_key || profile.api_key.indexOf("YOUR_") === 0) {
+        return jsonResp({ ok: false, reason: "api_key 是占位符或为空" });
+      }
+      if (!profile.model || !profile.base_url) {
+        return jsonResp({ ok: false, reason: "model 或 base_url 为空" });
+      }
+      return _setupTest(profile);
+    },
   };
 
   // ── EventSource 劫持 ─────────────────────────────────

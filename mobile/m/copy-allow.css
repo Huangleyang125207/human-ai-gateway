@@ -1,0 +1,26 @@
+/* mobile copy-allow — 白名单:特定文字类允许长按选 / 复制
+ * cd v0 components.css L31 全局禁了 .gw user-select 防系统长按气泡,但内容文本
+ * (chat 消息 / 日记 body / 错误状态 / debug 输出)用户希望能复制。
+ * 白名单方法:UI 控件类保留禁选,内容文本类开 select:text。
+ */
+
+.gw .gw-key-status,
+.gw .gw-msg-text,
+.gw .gw-entry-body,
+.gw .gw-comment,
+.gw .gw-card-body,
+.gw .gw-grind-text,
+.gw .gw-care p,
+.gw .gw-care .gw-pulse,
+.gw .gw-empty {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;  /* 允许 iOS 系统长按 → 复制气泡 */
+}
+
+/* 同时让 chat 消息文本可选 — 用户经常想复制 AI 回的内容 */
+.gw .gw-msg,
+.gw .gw-msg * {
+  -webkit-user-select: text;
+  user-select: text;
+}
