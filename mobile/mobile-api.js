@@ -1027,6 +1027,35 @@
   if (typeof window !== "undefined") { window.__gwTool = { specs: TOOL_SPECS, dispatch: dispatchTool }; }
 
   function pickReply(d) { return d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content; }
+
+  // ── claim audit(Path X:防 AI 口头声称已写入但没真 tool call)──────
+  // 桌面 chat_routes L280 _audit_unauthorized_claim 端口:5.22 msg 5/7 事故等价防御。
+  // claim 措辞 + actions 空 → 自动加 disclaimer 让用户看到"AI 在撒谎"。
+  var _CLAIM_PHRASE_RE = /记进|写进|搞定|已写[入好]|已加入|已添加|已保存|已记录|已贴|已落|已 ?patch|写好了|写完了|加好了|加完了|落进|saved|recorded|wrote|patched|done/i;
+  var _CLAIM_DISCLAIMER =
+    "\n\n*(server audit:本回合未触发任何 tool 调用,上面的「已写入/记进了」等措辞" +
+    "未对应真实动作 — 日记 / 聚合页没改。要真落请说『重试』或换一句指令。)*";
+  function _auditUnauthorizedClaim(content, actions) {
+    if ((actions && actions.length) || !content) return content;
+    if (!_CLAIM_PHRASE_RE.test(content)) return content;
+    return content + _CLAIM_DISCLAIMER;
+  }
+
+  // ── DSML 泄漏闸:strip AI 字面 <｜｜DSML｜｜...> 标签防裸渲染 ─────
+  // 桌面 chat_routes L201-219 等价:deepseek-v4-pro 偶尔把 tool_calls 当 content 文本吐,
+  // 全角 U+FF5C 或 ASCII | 命名空间;3 层 strip 防残留。
+  var _DSML_WRAPPER_RE = /<[｜|]{1,2}DSML[｜|]{1,2}tool_calls>[\s\S]*?<\/[｜|]{1,2}DSML[｜|]{1,2}tool_calls>/g;
+  var _DSML_INVOKE_STRIP_RE = /<[｜|]{1,2}DSML[｜|]{1,2}invoke[^>]*?>[\s\S]*?<\/[｜|]{1,2}DSML[｜|]{1,2}invoke>/g;
+  var _DSML_TAG_RE = /<\/?[｜|]{1,2}DSML[｜|]{1,2}[^>]*?>/g;
+  function _stripDsml(content) {
+    if (!content || content.indexOf("DSML") < 0) return content;
+    return content
+      .replace(_DSML_WRAPPER_RE, "")
+      .replace(_DSML_INVOKE_STRIP_RE, "")
+      .replace(_DSML_TAG_RE, "")
+      .replace(/\n{3,}/g, "\n\n");  // 收一下 strip 后多余空行
+  }
+
   // 多轮 tool 调用 loop:DeepSeek 返 tool_calls → dispatch → result push 回 → 再调,
   // 直到无 tool_calls 或达 maxRounds 上限(防 infinite loop)。
   // 最后一轮 force-no-tool(不传 tools)防 AI 永远在调用 tool 不出回应。
@@ -1035,6 +1064,9 @@
   var TOOL_FREQ_CAP = { web_search: 3, fetch_url: 5 };
   function chatViaDeepseek(body, key, model) {
     var freqCount = {};
+    // last_actions 累积:tool dispatch 成功 push;失败 / capped 不算"真动作"
+    // 用于 emit "done" 前的 claim audit(actions 空 + claim 措辞 → 加 disclaimer)
+    var lastActions = [];
     return Store.readJournalMd(todayIso()).then(function (todayMd) {
       var sys = "你是用户的日记协作 AI,语气温和、像深夜台灯下说话。\n\n" +
         "这是今天的日记:\n\n" + (todayMd || "(今天还没写)") +
@@ -1093,8 +1125,11 @@
               }
               events.push({ type: "tool_call", id: tc.id, name: name, args: args });
               return dispatchTool(name, args).then(function (result) {
-                events.push({ type: "tool_result", id: tc.id, name: name, ok: !(result && result.error), result: result });
+                var ok = !(result && result.error);
+                events.push({ type: "tool_result", id: tc.id, name: name, ok: ok, result: result });
                 messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(result || {}) });
+                // claim audit:仅 ok 真动作累积;ok=false 不算"真落"(防 AI 看"已记"但 dispatch 失败)
+                if (ok) lastActions.push({ name: name, args: args, result: result });
               }).catch(function (err) {
                 var e = String(err && err.message || err);
                 events.push({ type: "tool_result", id: tc.id, name: name, ok: false, error: e });
@@ -1103,9 +1138,12 @@
             });
             return Promise.all(ps).then(function () { return callRound(round + 1); });
           }
-          // 无 tool_calls = 终态
-          events.push({ type: "delta", text: msg.content || "(空回复)" });
-          events.push({ type: "done", actions: [], model_id: model || "deepseek" });
+          // 无 tool_calls = 终态:strip DSML 残留 + claim audit
+          var raw = msg.content || "(空回复)";
+          var cleaned = _stripDsml(raw);
+          var audited = _auditUnauthorizedClaim(cleaned, lastActions);
+          events.push({ type: "delta", text: audited });
+          events.push({ type: "done", actions: lastActions, model_id: model || "deepseek" });
           return events;
         }).catch(function (err) {
           var emsg = String(err && err.message || err);

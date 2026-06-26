@@ -113,7 +113,7 @@ oracle:`tests/test_setup_routes.py`(21 条)。
 
 | id | 契约(oracle test) | mobile 端点 | 状态 | sha | 备注 |
 |----|---|---|---|---|---|
-| X1 | test_chat_routes.py(15)+test_claim_audit | /api/chat | **OUT** | — | 独立产品形态(MIGRATION_PARITY_GUIDE §4④):mobile chat 是 thin DeepSeek SSE wrapper,无 tool loop / DSML 闸 / 流式 chokepoint。让手机 AI 写日记/打卡是独立设计任务,不按 parity 迁。SSE main path 已 working(本 session bridge 接通验证) |
+| X1 | test_chat_routes.py(15)+test_claim_audit | mobile-api.js chatViaDeepseek L1036(+L1038 audit + L1050 DSML strip)| 🟡 | 1ab6aa0 | **状态修正(6.26)**:旧 OUT 备注"thin SSE wrapper 无 tool loop"已过时 — mobile 实有 5 轮 tool loop + 22 TOOL_SPECS + frequency cap(L1035)。本次补两道守门:① `_auditUnauthorizedClaim` 端口桌面 chat_routes L280(AI 说"已记入"但 actions=[] → 加 disclaimer)② `_stripDsml` 端口桌面 L201-219 3 层正则(strip AI 字面 `<｜｜DSML｜｜>` 标签防裸渲染)。JS oracle 10/10 pass(5 claim audit + 5 DSML strip)。剩 OUT 部分:流式 chokepoint(mobile stream:false 设计)+ history image enrichment + tool_volume trim — 都是体验优化非 Cannot-break,待真用户反馈再决定 |
 | X2 | test_chat_routes + test_attachment_dedup | mobile-api.js POST /api/chat/upload-image L1400 | ✅ | 5db5f04 | sha 去重:首次返 {ok, url, deduped:false};同 sha 再上传返 deduped:true 同 url;missing dataUrl → 400;bad format(非 data:) → 400。JS oracle 4/4 pass |
 | X3 | test_web_search_resilience.py(3) | mobile-api.js /api/web/search | ✅ | 5db5f04 | 韧性降级:360 + 百炼任一失败/未配置返 `{ok:true, results:"[搜索后端全降级 — ...]", _all_degraded:true}` 不 throw;有 key 走真后端。JS oracle 1/1 pass |
 | X4 | test_authorship.py::test_append_comment_* | mobile-api.js /api/journal/append-comment L1644 | ✅ | 5db5f04 | ★批注 append-only,原 body 一字不动:status 200 + body intact + comment 在 body 之后 + 不存在时间块 → 404。JS oracle 5/5 pass(authorship boundary 守门) |
