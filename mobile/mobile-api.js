@@ -2515,6 +2515,69 @@
           var names = actions.map(function (a) { return a.name; }).join(",");
           log("T23 delete_attachment actions=" + actions.length + " tools=[" + names + "] AI说=" + deltas);
         }).then(function () {
+          // ★★★ STRICT 22-tool single-chat audit ★★★
+          // 每个 tool 独立一条 chat 强制 prompt,验 actions[0].name === expected_tool
+          // 防簇式漏验。串行跑 22 个,total ~ 200s。
+          // 先准备 dummy attachment(给 vision/ocr/delete 用)
+          var canvas2 = document.createElement("canvas");
+          canvas2.width = 300; canvas2.height = 200;
+          var ctx2 = canvas2.getContext("2d");
+          ctx2.fillStyle = "#fff"; ctx2.fillRect(0,0,300,200);
+          ctx2.fillStyle = "#000"; ctx2.font = "48px sans-serif";
+          ctx2.fillText("鱼油 60 粒", 30, 100);
+          var strictImg = canvas2.toDataURL("image/png");
+          var STRICT = [
+            { tool: "read_today_schedule", msg: "立即 call read_today_schedule(no args)。无其他动作。" },
+            { tool: "patch_journal_block", msg: "立即 call patch_journal_block:time='16:30',title='strict patch',body='strict test body',tag='#strict'。无其他动作。" },
+            { tool: "insert_journal_block", msg: "立即 call insert_journal_block:time='15:00',title='strict ins',body='strict ins body',tag='#strict'。无其他动作。" },
+            { tool: "append_journal_comment", msg: "立即 call append_journal_comment:time='16:30',body='strict comment'。无其他动作。" },
+            { tool: "search_journal", msg: "立即 call search_journal:query='strict'。无其他动作。" },
+            { tool: "list_recent_days", msg: "立即 call list_recent_days:n=5。无其他动作。" },
+            { tool: "check_daily_task", msg: "立即 call check_daily_task:task_name='鱼油（Swisse）',intake=1。无其他动作。" },
+            { tool: "manage_daily_task", msg: "立即 call manage_daily_task:action='add',task_name='strict-test-task'。无其他动作。" },
+            { tool: "set_daily_task_meta", msg: "立即 call set_daily_task_meta:task_name='strict-test-task',total_pills=30,daily_dose=1。无其他动作。" },
+            { tool: "set_water_cup_image", msg: "立即 call set_water_cup_image:emoji='🥛'。无其他动作。" },
+            { tool: "web_search", msg: "立即 call web_search:query='strict test'。无其他动作。" },
+            { tool: "fetch_url", msg: "立即 call fetch_url:url='https://example.com'。无其他动作。" },
+            { tool: "vision_classify", msg: "立即 call vision_classify:attachment_url='/attachments/2026-06-27/strict.png'。无其他动作。" },
+            { tool: "ocr_image", msg: "立即 call ocr_image:attachment_url='/attachments/2026-06-27/strict.png'。无其他动作。" },
+            { tool: "list_my_uploads", msg: "立即 call list_my_uploads:n=5。无其他动作。" },
+            { tool: "search_my_uploads", msg: "立即 call search_my_uploads:query='鱼油'。无其他动作。" },
+            { tool: "ask_photo_curator", msg: "立即 call ask_photo_curator:question='我什么时候拍过补剂?'。无其他动作。" },
+            { tool: "delete_attachment", msg: "立即 call delete_attachment:attachment_url='/attachments/2026-06-27/strict.png'。无其他动作。" },
+            { tool: "list_widgets", msg: "立即 call list_widgets(no args)。无其他动作。" },
+            { tool: "add_widget", msg: "立即 call add_widget:id='strict-w',title='strict widget',template='<div>strict</div>'。无其他动作。" },
+            { tool: "set_widget_enabled", msg: "立即 call set_widget_enabled:id='strict-w',enabled=false。无其他动作。" },
+            { tool: "remove_widget", msg: "立即 call remove_widget:id='strict-w'。无其他动作。" },
+          ];
+          var strictResults = [];
+          // 先写 strict dummy attachment
+          return Store.writeAttachment("2026-06-27", "strict.png", strictImg)
+            .then(function () { return Store.writeUploadMeta("2026-06-27", "strict.png", { kind: "strict" }); })
+            .then(function () {
+              // 串行跑 STRICT 22 个
+              var chain = Promise.resolve();
+              STRICT.forEach(function (t) {
+                chain = chain.then(function () {
+                  return fetch("/api/chat", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: t.msg, history: [] }),
+                  }).then(function (r) { return r.text(); }).then(function (sse) {
+                    var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
+                    var calls = events.filter(function (e) { return e.type === "tool_call"; });
+                    var firstCall = calls[0] && calls[0].name;
+                    var pass = firstCall === t.tool;
+                    strictResults.push({ tool: t.tool, called: firstCall || "NONE", pass: pass });
+                  });
+                });
+              });
+              return chain;
+            }).then(function () {
+              var passN = strictResults.filter(function (r) { return r.pass; }).length;
+              var failList = strictResults.filter(function (r) { return !r.pass; }).map(function (r) { return r.tool + "→" + r.called; }).join(";");
+              log("STRICT " + passN + "/22 PASS" + (failList ? " FAIL=[" + failList + "]" : ""));
+            });
+        }).then(function () {
           // 收尾
           return Store.removeSetting("__self_test__");
         });
