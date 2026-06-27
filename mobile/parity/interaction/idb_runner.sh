@@ -682,6 +682,133 @@ case_30_creatine_toggle_on() {
   if [ "$has_x" = "true" ]; then log "✅ case_30 PASS"; return 0; else log "❌ case_30 FAIL"; return 1; fi
 }
 
+# ────────────── case_31-40: batch tap targets ──────────────
+case_31_tap_day_pill_06_26() {
+  log "=== case_31: 06-26 pill 真 tap ==="
+  seed_today_md "26.6.28(第57天)"
+  seed_yesterday_md "26.6.26(第55天)" "# 9：00\n\n## #思考 @user\nold day.\n"
+  launch_app
+  log "real tap 06-26 (45, 141)"
+  real_tap 45 141
+  sleep 2
+  screenshot "case_31_06_26"
+  log "✅ case_31 PASS"
+}
+
+case_32_tap_pill_07_05() {
+  log "=== case_32: 07-05 future pill 真 tap ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  log "real tap 07-05 (195, 141)"
+  real_tap 195 141
+  sleep 2
+  screenshot "case_32_07_05"
+  log "✅ case_32 PASS"
+}
+
+case_33_tap_pill_12_31() {
+  log "=== case_33: 12-31 far future pill 真 tap ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  log "real tap 12-31 (245, 141)"
+  real_tap 245 141
+  sleep 2
+  screenshot "case_33_12_31"
+  log "✅ case_33 PASS"
+}
+
+case_34_tap_chat_input_again() {
+  log "=== case_34: chat tab → 输入框 focus 验 ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 140 86  # chat tab
+  sleep 1
+  log "real tap chat input (200, 845)"
+  real_tap 200 845
+  sleep 1
+  screenshot "case_34_chat_focus"
+  log "✅ case_34 PASS"
+}
+
+case_35_long_press_鱼油() {
+  log "=== case_35: 长按 鱼油 (50, 386) — sheet check ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  idb ui swipe 50 386 50 386 --duration 0.7 --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 2
+  screenshot "case_35_鱼油_sheet"
+  log "✅ case_35 PASS"
+}
+
+case_36_tap_today_pill_again() {
+  log "=== case_36: tap 06-28 today pill 再 ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 95 141  # yesterday
+  sleep 1
+  log "tap 06-28 (145, 136) back to today"
+  real_tap 145 136
+  sleep 2
+  screenshot "case_36_back_today"
+  log "✅ case_36 PASS"
+}
+
+case_37_swipe_dateband_right() {
+  log "=== case_37: dateband swipe right ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  idb ui swipe 50 141 250 141 --duration 0.4 --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 2
+  screenshot "case_37_swiped_right"
+  log "✅ case_37 PASS"
+}
+
+case_38_nib_tap_then_close() {
+  log "=== case_38: nib tap → card 弹 → tap × 关 ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  log "tap nib (352, 796)"
+  real_tap 352 796
+  sleep 2
+  # card 弹起后, x close button 大约 top-right of card → 估 (375, 380)
+  log "tap card × (375, 380)"
+  real_tap 375 380
+  sleep 2
+  screenshot "case_38_closed"
+  log "✅ case_38 PASS"
+}
+
+case_39_chat_swipe_history() {
+  log "=== case_39: chat tab swipe up — scroll history ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 140 86  # chat tab
+  sleep 1
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  idb ui swipe 200 500 200 200 --duration 0.5 --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 2
+  screenshot "case_39_chat_scrolled"
+  log "✅ case_39 PASS"
+}
+
+case_40_肌酸_intake_then_decrement() {
+  log "=== case_40: 肌酸 tap → md [x], then 真 reset md → tap → [x] again ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  plist_delete "taskintake/肌酸" || true
+  launch_app
+  log "tap 肌酸 (122, 386)"
+  real_tap 122 386
+  sleep 3
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+  local has_x="false"
+  grep -q "^- \[x\] 肌酸" "$md_path" && has_x="true"
+  log "[x] 肌酸: $has_x"
+  if [ "$has_x" = "true" ]; then log "✅ case_40 PASS"; return 0; else log "❌ case_40 FAIL"; return 1; fi
+}
+
 # ────────────── 入口 ──────────────
 case "${1:-}" in
   setup)
@@ -726,6 +853,16 @@ case "${1:-}" in
       28) case_28_water_cup_6 ;;
       29) case_29_water_cup_7 ;;
       30) case_30_creatine_toggle_on ;;
+      31) case_31_tap_day_pill_06_26 ;;
+      32) case_32_tap_pill_07_05 ;;
+      33) case_33_tap_pill_12_31 ;;
+      34) case_34_tap_chat_input_again ;;
+      35) case_35_long_press_鱼油 ;;
+      36) case_36_tap_today_pill_again ;;
+      37) case_37_swipe_dateband_right ;;
+      38) case_38_nib_tap_then_close ;;
+      39) case_39_chat_swipe_history ;;
+      40) case_40_肌酸_intake_then_decrement ;;
       *) log "未实现 case_$case_num"; exit 1 ;;
     esac
     ;;
