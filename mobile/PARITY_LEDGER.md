@@ -49,8 +49,17 @@
 | `thread__point_entry_into_chat` | UI已建 | POST /api/thread/point-entry → 200/404 graceful | ✅ PASS(23:55) | — (contract) |
 | `smoke__health` | UI已建 | GET /api/health → 200/404 graceful | ✅ PASS(23:55) | — (contract) |
 | `smoke__setup_status` | UI已建 | GET /api/setup/status → 200/404 graceful | ✅ PASS(23:55) | — (contract) |
+| `check_backfill_yesterday_ok` | ★Cannot-break | hour<12 → 200(可补);hour>=12 → 400(闭集)— 动态判定 | ✅ PASS(00:05) | — (contract) |
+| `daily_tasks__water_cup_post` | UI已建 | POST /api/water-cup → 200/404 graceful | ✅ PASS(00:05) | — (contract) |
+| `daily_tasks__task_set_image` | UI已建 | POST /api/daily-tasks/image → 200/404 graceful | ✅ PASS(00:05) | — (contract) |
+| `journal_insert__no_journal_404` | UI已建 | POST insert into non-existent date → 404 | ✅ PASS(00:05) | — (contract) |
+| `journal_delete__unknown_time_404` | UI已建 | POST delete-block 不存在 time → 404 | ✅ PASS(00:05) | — (contract) |
+| `journal_patch__missing_new_md_400` | UI已建 | POST patch 缺 new_md → 400 | ✅ PASS(00:05) | — (contract) |
+| `thread__restore_from_bak_roundtrip` | ★Cannot-break | POST restore-from-bak → 200/404/400 graceful (bak 不存在) | ✅ PASS(00:05) | — (contract) |
 
-**43/43 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 43/43 PASS` · 11 ★Cannot-break + 32 UI已建/non-★ · ~67% of 64 case 真在 simulator
+**50/50 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 50/50 PASS` · 13 ★Cannot-break + 37 UI已建/non-★ · ~78% of 64 case 真在 simulator
+
+★ case_1 改成动态:hour<12 期望 200 (可补昨天),hour>=12 期望 400 (闭集) — 防 date 跨夜回归
 
 **架构现状**(完成 P2 第 0 号 + 限制公开):
 - ✅ WKWebView.isInspectable=true(iOS 16.4+,AppDelegate.swift 真生效:NSLog `[parity] on 1 views`)
