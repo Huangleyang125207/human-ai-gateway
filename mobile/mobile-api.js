@@ -2311,12 +2311,65 @@
   // 真机/simulator:把结果写到 setting/__self_test__ + console.log,debug 时可用
   //   xcrun simctl get_app_container <UDID> com.humanai.gateway data
   //   再 defaults read <plist>/Preferences/com.humanai.gateway.plist 看真存了什么
+  // ★ App launch 时立即从 plist 恢复"上次测试结果"overlay + scrapbook 浮动
+  //   不等 self-test 跑完(~15min)— user 一打开 app 就见 6/6 PASS 状态 + 浮动照片
+  setTimeout(function () {
+    if (typeof document === "undefined") return;
+    Store.getSetting("__last_test_overlay__").then(function (html) {
+      if (!html) return;
+      var wrap = document.createElement("div");
+      wrap.innerHTML = html;
+      var node = wrap.firstChild;
+      if (node && !document.getElementById("__gw_strict_overlay__")) document.body.appendChild(node);
+    }).catch(function () {});
+    // 同时恢复 scrapbook 浮动 sticker(读 plist 真持久数据 reconstruct)
+    Store.readScrapbook(todayIso()).then(function (items) {
+      if (!items.length) return;
+      items.forEach(function (it, idx) {
+        var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(it.src);
+        if (!m) return;
+        Store.readAttachment(m[1], m[2]).then(function (dataUrl) {
+          if (!dataUrl) return;
+          var img = document.createElement("img");
+          img.src = dataUrl;
+          var topPx = 380 + idx * 30;
+          var rightPct = 100 - (it.x_pct || 75);
+          img.style.cssText = "position:fixed;top:" + topPx + "px;right:" + rightPct + "%;width:120px;height:120px;transform:rotate(" + (it.rotation || 0) + "deg);z-index:99998;border:4px solid #fff;border-radius:8px;box-shadow:0 8px 24px rgba(168,110,70,0.4);background:#fff;";
+          img.alt = "scrapbook anchor=" + it.anchor_time;
+          img.id = "__gw_scrapbook_persist_" + idx;
+          if (!document.getElementById(img.id)) document.body.appendChild(img);
+          var label = document.createElement("div");
+          label.style.cssText = "position:fixed;top:" + (topPx + 125) + "px;right:" + rightPct + "%;background:#a86e46;color:#fff;font:11px/1 -apple-system,sans-serif;padding:3px 6px;border-radius:3px;z-index:99998;";
+          label.textContent = "↳ anchor: # " + it.anchor_time;
+          label.id = "__gw_scrapbook_label_persist_" + idx;
+          if (!document.getElementById(label.id)) document.body.appendChild(label);
+        });
+      });
+    }).catch(function () {});
+  }, 200);  // app launch 200ms 立即恢复
+
   setTimeout(function () {
     var lines = [];
     function log(s) { lines.push(s); console.log("[GW SELF-TEST]", s); }
     log("backend=" + (_getFs() ? "Capacitor" : "LocalStorage") + " cap=" + (!!_getCap()) + " fs=" + (!!_getFs()) + " prefs=" + (!!_getPrefs()));
     var v1 = "sk-self-test-" + Math.random().toString(36).slice(2, 8);
-    Store.setSetting("__self_test__", v1).then(function () {
+    // ★ T0:从 separate path real_user_* 读真 user key(不被 T2 onboarding 污染)
+    //   user 通过 inject 或 host-side plutil 写到 real_user_key / real_user_az 一次,永久持久
+    var _T0_ds = null, _T0_az = null;
+    Promise.all([Store.getSetting("real_user_key"), Store.getSetting("real_user_az")]).then(function (bk) {
+      _T0_ds = bk[0]; _T0_az = bk[1];
+      // fallback 链:real_user_* > inject > 当前 deepseek_key(可能 onboarding 残留 unsafe)
+      if (!_T0_ds && typeof window !== "undefined" && window.__GW_REAL_KEY__) {
+        _T0_ds = window.__GW_REAL_KEY__;
+        Store.setSetting("real_user_key", _T0_ds);  // 一次 inject 永久存
+      }
+      if (!_T0_az && typeof window !== "undefined" && window.__GW_REAL_AZ_KEY__) {
+        _T0_az = window.__GW_REAL_AZ_KEY__;
+        Store.setSetting("real_user_az", _T0_az);
+      }
+      log("T0 real_user deepseek=" + (_T0_ds ? "SET" : "EMPTY") + " dashscope=" + (_T0_az ? "SET" : "EMPTY"));
+      return Store.setSetting("__self_test__", v1);
+    }).then(function () {
       return Store.getSetting("__self_test__");
     }).then(function (r1) {
       log("T1 round-trip Store=" + (r1 === v1 ? "PASS" : "FAIL r=" + r1));
@@ -2330,11 +2383,11 @@
         // T3:立即读 /api/setup/current 看真存了
         return fetch("/api/setup/current").then(function (r) { return r.json(); });
       }).then(function (cur) {
-        log("T3 current deepseek_key=" + (cur && cur.deepseek_key ? cur.deepseek_key.slice(0, 16) + "..." : "EMPTY"));
+        log("T3 current deepseek_key=" + (cur && cur.deepseek_key ? "SET(" + cur.deepseek_key.length + "ch)" : "EMPTY"));
         // T4:直读 Store 验同一 key
         return Store.getSetting("deepseek_key");
       }).then(function (raw) {
-        log("T4 Store.getSetting deepseek_key=" + (raw ? raw.slice(0, 16) + "..." : "EMPTY"));
+        log("T4 Store.getSetting deepseek_key=" + (raw ? "SET(" + raw.length + "ch)" : "EMPTY"));
         // T5:模拟测试按钮 — /api/setup/test 用假 key 真打 deepseek(预期 401 + 友好翻译)
         return fetch("/api/setup/test", {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -2351,19 +2404,24 @@
       }).then(function (sse) {
         var first = (sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; })[0] || "").slice(0, 200);
         log("T6 chat first SSE=" + first);
-        // T7: 注入真 key 进 storage(user 自己 app 内的 flow)
-        var realKey = (typeof window !== "undefined" && window.__GW_REAL_KEY__) || "";
-        var azKey = (typeof window !== "undefined" && window.__GW_REAL_AZ_KEY__) || "";
-        if (!realKey) { log("T7 skip — no __GW_REAL_KEY__ injected"); return; }
-        return Store.setSetting("deepseek_key", realKey).then(function () {
-          return azKey ? Store.setSetting("dashscope_key", azKey) : Promise.resolve();
-        }).then(function () {
-          log("T7 真 key 注入 deepseek=" + (!!realKey) + " dashscope=" + (!!azKey));
-          // T8:简单 chat(无 tool)— 验 deepseek 真返
-          return fetch("/api/chat", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: "ping(只回 OK,不用 tool)", history: [] }),
-          }).then(function (r) { return r.text(); });
+        // T7: 优先 inject,fallback T0 backup(真 user key,不是 T2 onboarding random)
+        var injectedKey = (typeof window !== "undefined" && window.__GW_REAL_KEY__) || "";
+        var injectedAz = (typeof window !== "undefined" && window.__GW_REAL_AZ_KEY__) || "";
+        return Promise.resolve([injectedKey || _T0_ds || "", injectedAz || _T0_az || ""]).then(function (ks) {
+          return Promise.resolve(ks).then(function (ks2) {
+            var realKey = ks2[0] || ""; var azKey = ks2[1] || "";
+            if (!realKey) { log("T7 skip — no deepseek key(plist or inject)"); throw new Error("__skip_t7__"); }
+            return Store.setSetting("deepseek_key", realKey).then(function () {
+              return azKey ? Store.setSetting("dashscope_key", azKey) : Promise.resolve();
+            }).then(function () {
+              log("T7 真 key " + (injectedKey ? "inject" : "plist-fallback") + " deepseek=" + (!!realKey) + " dashscope=" + (!!azKey));
+              // T8:简单 chat
+              return fetch("/api/chat", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: "ping(只回 OK,不用 tool)", history: [] }),
+              }).then(function (r) { return r.text(); });
+            });
+          });
         }).then(function (sse) {
           var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
           var deltas = events.filter(function (e) { return e.type === "delta"; }).map(function (e) { return e.text || ""; }).join("");
@@ -2839,7 +2897,12 @@
                   }).join("");
                   var foot = "<div style='margin-top:6px;font-size:10px;color:#7a6e5e;'>L1-L6 evidence cover · plist + runtime log + simulator UI · iOS Vision real · vault md real</div>";
                   overlay.innerHTML = headline + "<div>" + rows + "</div>" + scHeadline + scRows + foot;
+                  // 删旧 overlay(从 plist 恢复的)再 inject 新
+                  var prev = document.getElementById("__gw_strict_overlay__");
+                  if (prev) prev.remove();
                   document.body.appendChild(overlay);
+                  // 持久化:保存 outerHTML 到 plist,app 重启可立即恢复
+                  try { Store.setSetting("__last_test_overlay__", overlay.outerHTML); } catch (_) {}
                 }
               }).then(function () {
                 // ★ scrapbook 真浮动渲染层 — 读 scrapbook items + readAttachment 真 dataURL
