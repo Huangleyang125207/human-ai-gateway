@@ -72,6 +72,12 @@
     st.tasks.forEach((t) => {
       const done = t.today_intake >= t.daily_dose;
       const btn = el('button', 'gw-task' + (done ? ' done' : ''));
+      // P2 · snapshot_ui 定位(case daily_tasks__check_* 真 tap 鱼油 等)
+      btn.setAttribute('aria-label', `打卡 ${t.name}${done ? ' 已完成' : ` ${t.today_intake || 0}/${t.daily_dose}`}${st.readonly ? ' 只读' : ''}`);
+      btn.setAttribute('role', 'button');
+      btn.dataset.taskName = t.name;
+      btn.dataset.taskDone = done ? '1' : '0';
+      btn.dataset.taskReadonly = st.readonly ? '1' : '0';
       const ring = done
         ? `<svg class="ring" viewBox="0 0 46 46" fill="none"><circle cx="23" cy="23" r="21.5" stroke="var(--umber)" stroke-width="1.4"/></svg>`
         : `<svg class="ring" viewBox="0 0 46 46" fill="none"><circle cx="23" cy="23" r="21.5" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="2 3"/></svg>`;

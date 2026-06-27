@@ -103,6 +103,11 @@
       st.days.forEach((d) => {
         const b = document.createElement('button');
         b.className = 'gw-day ' + d.state + (d.key === st.dayKey ? ' sel' : '') + (d.state === 'creatable' ? ' future creatable' : '') + (d.state === 'locked' ? ' future locked' : '') + (d._born ? ' born' : '');
+        // P2 · 给 snapshot_ui 可定位(case daily_tasks/journal date-band 用)
+        b.setAttribute('aria-label', `日期 ${d.dow} ${d.num}${d.state === 'today' ? ' 今天' : (d.state === 'past' ? ' 过去日只读' : (d.state === 'locked' ? ' 未来日锁定' : ''))}`);
+        b.setAttribute('role', 'button');
+        b.dataset.dayKey = d.key;
+        b.dataset.dayState = d.state;
         b.innerHTML = `${d.state === 'today' ? '<span class="gw-day-seal"></span>' : ''}<span class="gw-day-dow">${d.dow}</span><span class="gw-day-num">${d.num}</span>${d.state === 'creatable' ? '<span class="gw-day-plus">+</span>' : ''}`;
         b.addEventListener('click', () => pickDay(d));
         band.appendChild(b);
