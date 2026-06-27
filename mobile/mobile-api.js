@@ -2406,7 +2406,14 @@
     }).catch(function () {});
   }, 200);  // app launch 200ms 立即恢复
 
-  setTimeout(function () {
+  // ★ Self-test 必须 gate — T2 故意写假 key `sk-onboard-XXXXXX` 覆盖 user 真 key,
+  //   每次 app launch 都跑 = 用户真 key 一直被擦,chat 永远报"还没填 DeepSeek key"。
+  //   仅 debug 模式(__GW_RUN_SELF_TEST__=true 或 inject 真 key)才跑。
+  var __selfTestEnabled = (typeof window !== "undefined") &&
+    (window.__GW_RUN_SELF_TEST__ === true || !!window.__GW_REAL_KEY__);
+  if (!__selfTestEnabled) {
+    console.log("[GW SELF-TEST] skipped (production mode; set __GW_RUN_SELF_TEST__=true to enable)");
+  } else setTimeout(function () {
     var lines = [];
     function log(s) { lines.push(s); console.log("[GW SELF-TEST]", s); }
     log("backend=" + (_getFs() ? "Capacitor" : "LocalStorage") + " cap=" + (!!_getCap()) + " fs=" + (!!_getFs()) + " prefs=" + (!!_getPrefs()));
