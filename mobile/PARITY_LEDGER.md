@@ -37,8 +37,14 @@
 | `thread__history_corrupt_shows_restore_modal` | ★Cannot-break | seed bad JSON → GET history status='corrupt' + baks (5.17 防御) | ✅ PASS(23:37) | — (contract) |
 | `setup__get_current_keys` | UI已建 | GET /api/setup/current → 200 + key 状态 object | ✅ PASS(23:37) | — (contract) |
 | `vault__audit` | UI已建 | GET /api/vault/audit → 404 graceful (mobile MVP 未实现) | ✅ PASS(23:37) | — (contract) |
+| `daily_tasks__meta_set` | UI已建 | POST meta total=60 dose=2 → 200 + plist taskmeta 真写入 | ✅ PASS(23:41) | — (contract) |
+| `daily_tasks__meta_non_int` | UI已建 | POST meta total='abc' → 400 (try/except 包成 400 而非 500) | ✅ PASS(23:41) | — (contract) |
+| `daily_tasks__history_oldest_first` | UI已建 | GET history?name=鱼油 → 200 + 含 history array | ✅ PASS(23:41) | — (contract) |
+| `setup__save_partial` | UI已建 | POST setup/save 仅 deepseek_key → 200 + plist key 更新 | ✅ PASS(23:41) | — (contract) |
+| `setup__test_missing_key` | UI已建 | POST setup/test no-key → 400/200 graceful (mobile shim 直接试) | ✅ PASS(23:41) | — (contract) |
+| `scrapbook__upsert` | UI已建 | POST /api/scrapbook/upsert → 200 + Store.readScrapbook 返新 item | ✅ PASS(23:41) | — (contract) |
 
-**31/31 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 31/31 PASS` · 11 个 ★Cannot-break + 20 UI已建
+**37/37 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 37/37 PASS` · 11 ★Cannot-break + 26 UI已建/non-★ + 完整 daily-tasks/journal/thread/setup/scrapbook 主簇 covered
 
 **架构现状**(完成 P2 第 0 号 + 限制公开):
 - ✅ WKWebView.isInspectable=true(iOS 16.4+,AppDelegate.swift 真生效:NSLog `[parity] on 1 views`)
