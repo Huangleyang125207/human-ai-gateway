@@ -6,6 +6,27 @@
 
 ---
 
+## 0. 两层:交互层(case 本体)撑在契约层(golden 底座)上
+
+迁移的"对不对"分两层,**别只验下面那层**:
+
+```
+交互层   真 tap → 屏幕效果 + plist 落账 + 截图     ← case 本体 = feature 真存在的判据
+    ↑ 撑在 ↑
+契约层   callApi → md/plist 字节(golden)          ← 数据底座,快、CI 能跑,但只证"引擎对"
+```
+
+- **交互层是本体**:`callApi(golden.input)` 跳过 UI 事件 + 重渲染,只验后端 shim 引擎;**真 click 才验"用户点了到底对不对"**。
+  完整交互用例(64 条,带 tap 序列 + `snapshot_ui` 断言 + plist + 截图 + 负例)见 **[`INTERACTION_TEST_CASES.md`](INTERACTION_TEST_CASES.md)**,
+  在 simulator 上怎么跑见 **[`parity/interaction/run-cases.md`](parity/interaction/run-cases.md)**。
+- **契约层是底座**:本文件 §3-§6 讲的 golden(`capture-golden.py` 产)是交互层之下的数据校验——
+  交互最终落的字节必须 == golden,否则两端 md 分叉、git 合不了。
+- 一句话:**§3-§6 = 怎么造底座;`INTERACTION_TEST_CASES.md` = 站在用户那侧的 case 本体。
+  底座绿 ≠ 完事,交互层(真 simulator tap)绿才算迁对。** §4 的五步工作流第 ② 步"写 self-test"
+  的标准形态就是一条交互 case(真 tap),`callApi` 退成 CI 里的契约层快测。
+
+---
+
 ## 1. 一句话范式 + 为什么"代码搬不动、契约搬得动"
 
 **范式**：移动端不是桌面 `server.py` 的翻译；它是同一份**产品契约**在 JS/iOS 环境下的**重新实现**，由 self-test 钉死正确性。
@@ -265,6 +286,16 @@ self-test 跑在 `harness.mjs` 上，当前缺两个钩子，**这是落地本�
 - `assertShape(actual, expected)` / `assertBytesEqual(a, b)` / `assertStatus(resp, code)`
 
 harness 钩子接通前，self-test 无法运行——所以 **接 `loadShim`/`callApi` 是第 0 号迁移任务**，先于任何 feature case。
+（注：`loadShim`/`callApi` 是**契约层**的 node 跑法,已接通,`node mobile/parity/run.mjs` 可跑。）
+
+### 7.3 交互层 —— `INTERACTION_TEST_CASES.md` + `parity/interaction/`
+
+契约层之上是交互层(§0)。两件套:
+
+- **[`INTERACTION_TEST_CASES.md`](INTERACTION_TEST_CASES.md)** —— 64 条交互 case 的人读规格(前置 seed → 真 tap → ①屏幕 ②plist ③截图 → golden 底座 → 负例),按簇 + ★Cannot-break 标注 + 执行 checklist。
+- **[`parity/interaction/cases.mjs`](parity/interaction/cases.mjs)** —— 同 64 条的机器可读索引(runner 迭代用)。
+- **[`parity/interaction/run-cases.md`](parity/interaction/run-cases.md)** —— XcodeBuildMCP runner 协议:每条 case 的 `build_run_sim → seed → tap → snapshot_ui 断言 → 读 plist → screenshot → 比 golden` 步骤 + **前置:mobile/m tap 目标要有 accessibility 可定位特征**(webview 元素靠 text/aria 暴露给 snapshot_ui)。
+- case 名 = endpoint key,三处(INTERACTION_TEST_CASES / cases.mjs / PARITY_LEDGER 行)对齐。
 
 ---
 
