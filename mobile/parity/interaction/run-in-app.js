@@ -280,6 +280,87 @@
     return { name: name, pass: pass, actual_writable: actual };
   }
 
+  // ─── case_7: journal_authorship__ai_refuses_user_block ★Cannot-break ─────
+  // author=ai 改 @user 块 → 403 + md 字节不变(8 层防御核心)
+  async function case_7() {
+    var name = "journal_authorship__ai_refuses_user_block";
+    log("=== " + name + " ★Cannot-break ===");
+    var yesterday = new Date(new Date().getTime() - 86400000);
+    var ytmI = iso(yesterday);
+    var USER_BLOCK = "# 9：00\n\n## #思考 早醒 @user\n昨晚睡得晚。\n";
+    await T.Store.writeJournalMd(ytmI, USER_BLOCK);
+    log("seed yesterday with @user 块");
+    var mdBefore = await T.Store.readJournalMd(ytmI);
+
+    var resp = await T.dispatch("POST", "/api/journal/patch", {
+      date: ytmI, time: "9:00", author: "ai",
+      new_md: "## #思考 早醒 @user\nAI 想改但不该。\n"
+    });
+    log("POST patch author=ai status: " + resp.status + " body: " + JSON.stringify(resp.body).slice(0, 200));
+
+    var mdAfter = await T.Store.readJournalMd(ytmI);
+    var mdUnchanged = mdBefore === mdAfter;
+    log("md unchanged: " + mdUnchanged + " (before " + mdBefore.length + "B, after " + mdAfter.length + "B)");
+
+    var pass = resp.status === 403 && mdUnchanged;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + " (status=" + resp.status + " mdUnchanged=" + mdUnchanged + ")\n");
+    return { name: name, pass: pass, status: resp.status, mdUnchanged: mdUnchanged };
+  }
+
+  // ─── case_8: journal_authorship__ai_allows_ai_block ★Cannot-break ─────────
+  // author=ai 改 @ai 块 → 200 + md 改(positive,authorship 不误伤 AI 自身)
+  async function case_8() {
+    var name = "journal_authorship__ai_allows_ai_block";
+    log("=== " + name + " ★Cannot-break ===");
+    var yesterday = new Date(new Date().getTime() - 86400000);
+    var ytmI = iso(yesterday);
+    var AI_BLOCK = "# 10：00\n\n## #投资 KV cache @ai\n推 RDMA 思路。\n";
+    await T.Store.writeJournalMd(ytmI, AI_BLOCK);
+    log("seed yesterday with @ai 块");
+
+    var resp = await T.dispatch("POST", "/api/journal/patch", {
+      date: ytmI, time: "10:00", author: "ai",
+      new_md: "## #投资 KV cache @ai\nAI 接管:RDMA + GDS 流水。\n"
+    });
+    log("POST patch @ai author=ai status: " + resp.status + " body: " + JSON.stringify(resp.body).slice(0, 200));
+
+    var mdAfter = await T.Store.readJournalMd(ytmI);
+    var mdHasNewBody = (mdAfter || "").indexOf("RDMA + GDS 流水") >= 0;
+    log("md 含新正文: " + mdHasNewBody);
+
+    var pass = resp.status === 200 && mdHasNewBody;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + " (status=" + resp.status + " mdHasNewBody=" + mdHasNewBody + ")\n");
+    return { name: name, pass: pass, status: resp.status, mdHasNewBody: mdHasNewBody };
+  }
+
+  // ─── case_9: journal_h2guard__ai_rename_blocked ★Cannot-break ────────────
+  // patch new_md H2 跟 existing 不同 + 缺 allow_h2_rename → 409 + md 不变
+  async function case_9() {
+    var name = "journal_h2guard__ai_rename_blocked";
+    log("=== " + name + " ★Cannot-break ===");
+    var yesterday = new Date(new Date().getTime() - 86400000);
+    var ytmI = iso(yesterday);
+    var ORIGINAL = "# 17：00\n\n## #探索 小红书 AI 产业链预警 @ai\n\n把昨天讨论的 capex 整理一下。\n";
+    await T.Store.writeJournalMd(ytmI, ORIGINAL);
+    var mdBefore = await T.Store.readJournalMd(ytmI);
+    log("seed yesterday with 17:00 @ai block, " + mdBefore.length + "B");
+
+    // 改 H2 第一行 + 缺 allow_h2_rename
+    var resp = await T.dispatch("POST", "/api/journal/patch", {
+      date: ytmI, time: "17:00", author: "ai",
+      new_md: "## #探索 小红书牛奶 Omega-3 科普 @ai\n\n标题被改了。\n"
+    });
+    log("POST patch H2 mismatch status: " + resp.status + " body: " + JSON.stringify(resp.body).slice(0, 200));
+
+    var mdAfter = await T.Store.readJournalMd(ytmI);
+    var mdUnchanged = mdBefore === mdAfter;
+    log("md unchanged: " + mdUnchanged);
+
+    var pass = resp.status === 409 && mdUnchanged;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + " (status=" + resp.status + " mdUnchanged=" + mdUnchanged + ")\n");
+    return { name: name, pass: pass, status: resp.status, mdUnchanged: mdUnchanged };
+  }
+
   // ─── runner ─────────────────────────────────────────────────
   (async function () {
     var results = [];
@@ -295,6 +376,12 @@
     catch (e) { log("EXCEPTION case_5: " + (e && e.message || e)); results.push({ name: "case_5", pass: false, err: String(e) }); }
     try { results.push(await case_6()); }
     catch (e) { log("EXCEPTION case_6: " + (e && e.message || e)); results.push({ name: "case_6", pass: false, err: String(e) }); }
+    try { results.push(await case_7()); }
+    catch (e) { log("EXCEPTION case_7: " + (e && e.message || e)); results.push({ name: "case_7", pass: false, err: String(e) }); }
+    try { results.push(await case_8()); }
+    catch (e) { log("EXCEPTION case_8: " + (e && e.message || e)); results.push({ name: "case_8", pass: false, err: String(e) }); }
+    try { results.push(await case_9()); }
+    catch (e) { log("EXCEPTION case_9: " + (e && e.message || e)); results.push({ name: "case_9", pass: false, err: String(e) }); }
 
     var pass = results.filter(function (r) { return r.pass; }).length;
     var total = results.length;

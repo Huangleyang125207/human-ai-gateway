@@ -12,8 +12,11 @@
 | `daily_tasks__catalog_writable_tomorrow` | ★Cannot-break | GET catalog?date=tomorrow 返 is_writable=false(未来必锁) | ✅ PASS(22:15) | 同上 |
 | `daily_tasks__catalog_fresh` | UI已建 | GET /api/daily-tasks → tasks 8 个、is_today=true、is_writable=true | ✅ PASS(22:51) | 同 case_6 |
 | `daily_tasks__check_default_dose1` | UI已建 | 真 tap 肌酸 → ① UI .done class ② md `- [x] 肌酸` ③ plist `taskintake/肌酸={today:1}` ④ 真 SyntheticTap → toggle → emit('pulse') → POST | ✅ PASS(22:51) | [case_6_check_default_dose1.png](parity/interaction/screenshots/case_6_check_default_dose1.png) |
+| `journal_authorship__ai_refuses_user_block` | ★Cannot-break | POST patch author=ai 改 @user 块 → 403 + md 字节零变化 (authorship 8 层防御红线) | ✅ PASS(22:59) | — (contract) |
+| `journal_authorship__ai_allows_ai_block` | ★Cannot-break | POST patch author=ai 改 @ai 块 → 200 + md 真改新正文 (authorship 不误伤 AI 自身) | ✅ PASS(22:59) | — (contract) |
+| `journal_h2guard__ai_rename_blocked` | ★Cannot-break | POST patch new_md H2 != existing + 缺 allow_h2_rename → 409 + md 字节零变化 (5.29 事故反向防御) | ✅ PASS(22:59) | — (contract) |
 
-**6/6 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 6/6 PASS`
+**9/9 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 9/9 PASS`
 
 **架构现状**(完成 P2 第 0 号 + 限制公开):
 - ✅ WKWebView.isInspectable=true(iOS 16.4+,AppDelegate.swift 真生效:NSLog `[parity] on 1 views`)
