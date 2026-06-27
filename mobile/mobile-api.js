@@ -1325,7 +1325,10 @@
     },
     "GET /api/user-widgets": function () { return jsonResp({ active: [] }); },
     "GET /api/water-cup": function () {
-      return Store.getSetting("water_cup_img").then(function (img) { return jsonResp({ image_url: img || null }); });
+      // 对齐 PC contract:{ok, image_url_present},+ 保留 image_url 给 mobile UI
+      return Store.getSetting("water_cup_img").then(function (img) {
+        return jsonResp({ ok: true, image_url_present: !!img, image_url: img || null });
+      });
     },
     // D6 test_water_cup_get_set_roundtrip_reserved_key:
     //   POST 缺 url → 400;有 attachment_url → 200 ok;GET 返存的 image_url
