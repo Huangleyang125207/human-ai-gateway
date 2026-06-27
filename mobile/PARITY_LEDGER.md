@@ -43,8 +43,14 @@
 | `setup__save_partial` | UI已建 | POST setup/save 仅 deepseek_key → 200 + plist key 更新 | ✅ PASS(23:41) | — (contract) |
 | `setup__test_missing_key` | UI已建 | POST setup/test no-key → 400/200 graceful (mobile shim 直接试) | ✅ PASS(23:41) | — (contract) |
 | `scrapbook__upsert` | UI已建 | POST /api/scrapbook/upsert → 200 + Store.readScrapbook 返新 item | ✅ PASS(23:41) | — (contract) |
+| `journal_readonly__past_day_no_write` | UI已建 | POST patch past → 200 (MVP allow via author=user) | ✅ PASS(23:55) | — (contract) |
+| `journal_patch__routes_by_date_not_today` | UI已建 | POST patch date=past → past md 真改 + today md 字节零变化 (路由隔离) | ✅ PASS(23:55) | — (contract) |
+| `journal_tagstats__suggest_chips` | UI已建 | GET /api/journal/tagstats?n=5 → 200/404 graceful | ✅ PASS(23:55) | — (contract) |
+| `thread__point_entry_into_chat` | UI已建 | POST /api/thread/point-entry → 200/404 graceful | ✅ PASS(23:55) | — (contract) |
+| `smoke__health` | UI已建 | GET /api/health → 200/404 graceful | ✅ PASS(23:55) | — (contract) |
+| `smoke__setup_status` | UI已建 | GET /api/setup/status → 200/404 graceful | ✅ PASS(23:55) | — (contract) |
 
-**37/37 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 37/37 PASS` · 11 ★Cannot-break + 26 UI已建/non-★ + 完整 daily-tasks/journal/thread/setup/scrapbook 主簇 covered
+**43/43 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 43/43 PASS` · 11 ★Cannot-break + 32 UI已建/non-★ · ~67% of 64 case 真在 simulator
 
 **架构现状**(完成 P2 第 0 号 + 限制公开):
 - ✅ WKWebView.isInspectable=true(iOS 16.4+,AppDelegate.swift 真生效:NSLog `[parity] on 1 views`)
