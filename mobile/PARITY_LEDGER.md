@@ -1,4 +1,60 @@
-# 移动端 parity 台账(loop 的持久记忆)
+# ★ Test-First Parity Loop 进度(2026-06-27 23:40 实施)
+
+跑 `node mobile/parity/run.mjs` → **42/42 PASS**(node + memory Backend,无需 LLM 或 simulator)。
+
+## 现状
+
+| 类 | case 数 | 状态 |
+|---|---|---|
+| smoke (health/setup-status) | 2 | ✅ |
+| journal (insert/patch/delete/append/days/today/new_day) | 11 | ✅ |
+| daily_tasks (catalog/check/meta/water_cup/add/delete/history) | 11 | ✅ |
+| thread (history empty/corrupt/save_fresh/save_non_list) | 4 | ✅ |
+| scrapbook (upsert/missing_args) | 2 | ✅ |
+| vision/cutout (missing args 400)| 2 | ✅ |
+| vault/setup/widgets/uploads/init/telemetry/config | 7 | ✅ |
+| **合计** | **42/42** | **✅** |
+
+## 真 fix(parity loop 暴露真 drift)
+
+1. **insert-block 字节比 fail** — 新 H1 块前缺 `\n\n---\n\n` separator,H2 跟 body 间缺 `\n` →
+   修后 `journal__insert_stamps_user.md` 字节级跟 PC golden 完全一致(commit `dc730ff`)
+2. **water-cup contract** — GET 返 `{image_url:...}` 不对齐 PC `{image_url_present}` →
+   双兼容修(commit `224555d`)
+
+## harness 接通(commit `5e6478f`)
+
+- `mobile-api.js` IIFE 末尾挂 `globalThis.__GW_TEST_API__` (dispatch/setBackend/dumpBackend)
+- `Backend` wrapper 加 `_testBackend()` 优先,harness 注入 Map-based store 替 Capacitor Preferences
+- `harness.mjs` `loadShim()` polyfill window/document/localStorage/fetch → eval mobile-api.js IIFE
+- `callApi(shim, method, path, body)` → `{status, body}`
+
+## 未 cover(需 LLM 或 simulator)
+
+| 簇 | 原因 |
+|---|---|
+| vision_classify 真打 qwen3-vl | node 无真 LLM 调用 |
+| cutout 端到端 iOS Vision OCR | 需 native NativeOcr plugin |
+| chat tool loop 22 tools | 需真 deepseek streaming SSE |
+| attachments dedup sha256 多 upload | 需 seed 大量真 binary |
+| thread restore_from_bak 多步 | 需多 .bak 文件 seed |
+
+这些走 simulator self-test(本 session 已 cover S1-S6 + STRICT 22/22)。
+
+## 跑法
+
+```bash
+cd ~/human-ai-dev/gateway/mobile/parity
+node run.mjs       # 全跑
+node run.mjs -v    # 失败时详细 stack
+node run.mjs --filter=journal  # 只跑含 journal 的 case
+```
+
+CI 友好:~ 10 秒跑完 42 case,deterministic,无外部依赖。
+
+---
+
+# 旧版:移动端 parity 台账(loop 的持久记忆)
 
 > 一行一个 `(PC 契约 × oracle 测试)`。**parity loop 每轮读它挑下一个未对齐 row,做完更新状态。**
 > 跨 session 共享:换个 session 读这份就知道做到哪了。配套 `MIGRATION_PARITY_GUIDE.md`(怎么对)
