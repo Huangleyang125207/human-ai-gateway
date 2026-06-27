@@ -2725,7 +2725,7 @@
                 }
                 window.__chatRetry = chatRetry;
                 // S3: 日记 chat 记 9:30 时间块
-                return chatRetry("立即 call insert_journal_block:time='15:00',tag='record',title='S3-record',body='self-test S3 entry'。无其他动作。", "insert_journal_block", 3).then(function (r) {
+                return chatRetry("立即 call insert_journal_block:time='15:00',tag='record',title='S3-record',body='self-test S3 entry'。无其他动作。", "insert_journal_block", 5).then(function (r) {
                   var didInsert = r.hit;
                   // 真读 vault md 验
                   return Store.readJournalMd("2026-06-27").then(function (md) {
@@ -2746,9 +2746,9 @@
                   "立即 call insert_journal_block:time='15:00',tag='work',title='S4-3',body='S4 fourth entry'。无其他动作。",
                 ];
                 var cr = window.__chatRetry;
-                return cr(msgs[0], "insert_journal_block", 3)
-                  .then(function () { return cr(msgs[1], "insert_journal_block", 3); })
-                  .then(function () { return cr(msgs[2], "insert_journal_block", 3); })
+                return cr(msgs[0], "insert_journal_block", 5)
+                  .then(function () { return cr(msgs[1], "insert_journal_block", 5); })
+                  .then(function () { return cr(msgs[2], "insert_journal_block", 5); })
                   .then(function () { return Store.readJournalMd("2026-06-27"); })
                   .then(function (md) {
                   md = md || "";
@@ -2770,7 +2770,7 @@
                   method: "POST", headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ date: "2026-06-27", time: "10:00", tag: "私密", title: "用户专属", body: "user only", author: "user" }),
                 }).then(function (r) { return r.json(); }).then(function () {
-                  return window.__chatRetry("(已确认 10:00 块存在)立即直接 call patch_journal_block:time='10:00',new_md='## #私密 AI 强改 @ai\\nAI overwrite'。不要先 read,直接 patch。", "patch_journal_block", 3);
+                  return window.__chatRetry("(已确认 10:00 块存在)立即直接 call patch_journal_block:time='10:00',new_md='## #私密 AI 强改 @ai\\nAI overwrite'。不要先 read,直接 patch。", "patch_journal_block", 5);
                 }).then(function (rr) {
                   var events = rr.events;
                   var results = events.filter(function (e) { return e.type === "tool_result"; });
@@ -2801,7 +2801,7 @@
                     }).then(function (r) { return r.text(); });
                   }).then(function (sse) {
                     // 用 chatRetry 模式 — 3 次尝试 直到 AI 调 place_scrapbook_image
-                    return window.__chatRetry("立即 call place_scrapbook_image:attachment_url='/attachments/2026-06-27/s6-breakfast.png',date='2026-06-27',anchor_time='9:30',x_pct=70。直接 tool call,不要解释。", "place_scrapbook_image", 3);
+                    return window.__chatRetry("立即 call place_scrapbook_image:attachment_url='/attachments/2026-06-27/s6-breakfast.png',date='2026-06-27',anchor_time='9:30',x_pct=70。直接 tool call,不要解释。", "place_scrapbook_image", 5);
                   }).then(function (rr) {
                     var didCall = rr.hit;
                     return Store.readScrapbook("2026-06-27").then(function (items) {
