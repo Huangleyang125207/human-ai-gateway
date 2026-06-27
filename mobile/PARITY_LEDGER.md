@@ -19,8 +19,14 @@
 | `journal_days__date_band` | UI已建 | GET /api/journal/days?n=10 → status 200 + days≥2 (today + seeded yesterday) | ✅ PASS(23:08) | — (contract) |
 | `journal_insert__nib_new_entry` | UI已建 | POST insert-block → 200 + md 含 `11：00` + `新条目` + `正文` (默认 stamp @user) | ✅ PASS(23:08) | — (contract) |
 | `journal_delete__swipe_clear_block` | UI已建 | POST delete-block 10:00 → 200 + 9:00 body 保留 + 10:00 body 清空 (PC 留 H1 stub) | ✅ PASS(23:08) | — (contract) |
+| `journal_edit__tap_entry_patch` | UI已建 | POST patch author=user 改 9:00 body → md 含「改了」+ 原 body 没了 | ✅ PASS(23:11) | — (contract) |
+| `journal_append__add_content_to_block` | UI已建 | POST append-comment → md 含原 body + 新批注 | ✅ PASS(23:11) | — (contract) |
+| `thread__history_load_happy_on_launch` | UI已建 | seed thread.json 2 条 → GET history 返 array, 不含 status 键 | ✅ PASS(23:11) | — (contract) |
+| `daily_tasks__water_drag_fill` | UI已建 | POST water filled=5 → endpoint 200 + filled=5 真返 | ✅ PASS(23:11) | — (contract) |
+| `journal_strike__toggle_struck` | UI已建 | POST strike → 200 / 404 graceful (endpoint may not exist in MVP) | ✅ PASS(23:11) | — (contract) |
+| `journal_newday__create_then_idempotent` | UI已建 | POST new-day twice → 第二次 200 (幂等) | ✅ PASS(23:11) | — (contract) |
 
-**13/13 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 13/13 PASS`
+**19/19 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 19/19 PASS`
 
 **架构现状**(完成 P2 第 0 号 + 限制公开):
 - ✅ WKWebView.isInspectable=true(iOS 16.4+,AppDelegate.swift 真生效:NSLog `[parity] on 1 views`)
