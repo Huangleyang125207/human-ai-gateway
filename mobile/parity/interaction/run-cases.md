@@ -1,9 +1,34 @@
-# 交互用例 Runner 协议(XcodeBuildMCP)
+# 交互用例 Runner 协议(fb-idb 真 OS-level tap)
 
-> 把 `cases.mjs` 里一条交互 case 真在 iOS simulator 上跑出来的标准流程。
-> XcodeBuildMCP 工具是 **agent 调用**的(没有纯脚本 runner)——所以"runner"= **agent 按本协议逐条执行**;
-> 本文件就是那个 tap/assert 封装:把"一条 case"变成"一串确定的 XcodeBuildMCP 调用 + 三道断言"。
-> 人读规格见 [`../../INTERACTION_TEST_CASES.md`](../../INTERACTION_TEST_CASES.md);两层模型见 [`../../TEST_FIRST_MIGRATION.md`](../../TEST_FIRST_MIGRATION.md) §0。
+> **重大修订(2026-06-28 00:45)** — webview 内 SyntheticTap 跑 64/64 PASS 是 fake-green。
+> 没经过 Capacitor Preferences 真实部署链(node Map mock),错过两个真核心 bug:
+>   1. self-test 每次启动擦 user 真 deepseek_key(commit f44ca3c)
+>   2. Capacitor Preferences group="NSUserDefaults" 配错被当字面 prefix(commit d98bd74)
+>
+> **现协议** — 用 **fb-idb**(Facebook,Appium 同款 SimulatorBridge IPC,GitHub 4k+ stars)
+> Simulator 上真注入 OS-level touch event,绕开 Mac mouse event 链。
+>
+> 装:`brew tap facebook/fb && brew trust facebook/fb && brew install idb-companion`
+>     `pip3 install fb-idb` → client 在 `~/Library/Python/3.9/bin/idb`
+> 验:`idb ui tap 122 75 --udid <SIMID>` → "对话" tab 真切换(屏幕 obvious 反馈)
+>
+> **真 tap 链**(本协议 mandate):
+>   1. seed app state via simctl(plist + Documents/gw/journal md)
+>   2. launch app
+>   3. webview 内 `__GW_TEST_API__.dumpRects()` 把 selector→viewport rect 写进 plist
+>   4. Bash 读 plist 拿 rect
+>   5. `idb ui tap <rect.center.x> <rect.center.y>` 真注入 touch
+>   6. screenshot + 读 plist + 比 md = 三道断言
+>
+> 真 tap 走 SimulatorBridge IPC → WKWebView 收到 touch → JS pointer event → handler →
+> fetch → endpoint → plist 改 / md 改。这是 user 用手指点屏幕的完整链。
+
+人读规格见 [`../../INTERACTION_TEST_CASES.md`](../../INTERACTION_TEST_CASES.md);
+两层模型见 [`../../TEST_FIRST_MIGRATION.md`](../../TEST_FIRST_MIGRATION.md) §0。
+
+---
+
+## (旧文档保留)XcodeBuildMCP a11y tree 协议
 
 ---
 
