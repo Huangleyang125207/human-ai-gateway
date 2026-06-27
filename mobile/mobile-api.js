@@ -2406,6 +2406,49 @@
     }).catch(function () {});
   }, 200);  // app launch 200ms 立即恢复
 
+  // ★ 永久 dump chip rects 给 idb_runner.sh 用(launch+3s 后写 plist)
+  setTimeout(function() {
+    try {
+      var rects = [];
+      document.querySelectorAll('.gw-task').forEach(function(el) {
+        var r = el.getBoundingClientRect();
+        rects.push({
+          name: el.dataset.taskName,
+          x: Math.round(r.left + r.width/2),
+          y: Math.round(r.top + r.height/2)
+        });
+      });
+      var navTabs = {};
+      document.querySelectorAll('.gw-nav-item').forEach(function(el) {
+        var r = el.getBoundingClientRect();
+        navTabs[el.dataset.tab || el.textContent.trim()] = {x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2)};
+      });
+      var dayPills = [];
+      document.querySelectorAll('.gw-day').forEach(function(el) {
+        var r = el.getBoundingClientRect();
+        dayPills.push({
+          key: el.dataset.dayKey,
+          state: el.dataset.dayState,
+          x: Math.round(r.left + r.width/2),
+          y: Math.round(r.top + r.height/2)
+        });
+      });
+      var nib = document.querySelector('.gw-nib');
+      var nibRect = nib ? nib.getBoundingClientRect() : null;
+      var data = {
+        chips: rects,
+        navTabs: navTabs,
+        dayPills: dayPills,
+        nib: nibRect ? {x: Math.round(nibRect.left + nibRect.width/2), y: Math.round(nibRect.top + nibRect.height/2)} : null,
+        viewport: {w: window.innerWidth, h: window.innerHeight}
+      };
+      if (window.__GW_TEST_API__) {
+        window.__GW_TEST_API__.Store.setSetting('__ui_rects__', JSON.stringify(data));
+      }
+      console.log('[ui-rects]', JSON.stringify(data));
+    } catch (e) { console.warn('[ui-rects] dump failed', e); }
+  }, 2500);
+
   // ★ Self-test 必须 gate — T2 故意写假 key `sk-onboard-XXXXXX` 覆盖 user 真 key,
   //   每次 app launch 都跑 = 用户真 key 一直被擦,chat 永远报"还没填 DeepSeek key"。
   //   仅 debug 模式(__GW_RUN_SELF_TEST__=true 或 inject 真 key)才跑。

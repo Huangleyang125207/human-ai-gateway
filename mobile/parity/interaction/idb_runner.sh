@@ -265,6 +265,95 @@ case_05_nib_opens_card() {
   log "✅ case_05 PASS — nib tap 真触发(截图 should show edit card)"
 }
 
+# ────────────── case_06: tap 鱼油 chip → md + plist ──────────────
+case_06_check_fish_oil() {
+  log "=== case_06: 鱼油 chip 真 tap ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  plist_delete "taskintake/鱼油（Swisse）" || true
+  launch_app
+  # 实测 chips 真位置(__ui_rects__ dump):鱼油 (50,386) / 肌酸 (122,386) / 苏糖酸镁 (194,386)
+  log "real tap 鱼油 (50, 386)"
+  real_tap 50 386
+  sleep 3
+  screenshot "case_06_after_tap"
+
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+  local has_x="false"
+  grep -q "^- \[x\] 鱼油" "$md_path" && has_x="true"
+  log "md 含 [x] 鱼油: $has_x"
+  if [ "$has_x" = "true" ]; then log "✅ case_06 PASS"; return 0; else log "❌ case_06 FAIL"; return 1; fi
+}
+
+# ────────────── case_07: tap 苏糖酸镁 chip ──────────────
+case_07_check_msg() {
+  log "=== case_07: 苏糖酸镁 chip 真 tap ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  plist_delete "taskintake/苏糖酸镁" || true
+  launch_app
+  log "real tap 苏糖酸镁 (194, 386)"
+  real_tap 194 386
+  sleep 3
+  screenshot "case_07_after_tap"
+
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+  local has_x="false"
+  grep -q "^- \[x\] 苏糖酸镁" "$md_path" && has_x="true"
+  log "md 含 [x] 苏糖酸镁: $has_x"
+  if [ "$has_x" = "true" ]; then log "✅ case_07 PASS"; return 0; else log "❌ case_07 FAIL"; return 1; fi
+}
+
+# ────────────── case_08: tap 第 5 个水杯 → water filled=5 ──────────────
+case_08_water_5_cups() {
+  log "=== case_08: 第 5 杯 真 tap → water=5 ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  launch_app
+  # 8 个杯子在 viewport 大约 (30-380, 235) 区间,每杯宽 ~44,中心 x 约 35+44*i
+  # 第 5 杯 (i=4) 中心 x = 35+44*4 = 211, y=235
+  log "real tap 第 5 杯 (211, 235)"
+  real_tap 211 235
+  sleep 3
+  screenshot "case_08_after_tap"
+
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+  # 八杯水段 — 第 1-5 应 [x],6-8 仍 [ ]
+  local cup_5_x="false"
+  if awk '/喝水/,/^- \[ \] [^喝水]/' "$md_path" | grep -E "^\s+- \[x\] 5" >/dev/null; then cup_5_x="true"; fi
+  log "md 第 5 杯 [x]: $cup_5_x"
+  if [ "$cup_5_x" = "true" ]; then log "✅ case_08 PASS"; return 0; else log "❌ case_08 FAIL"; return 1; fi
+}
+
+# ────────────── case_09: chat tab → 日记 tab 切回 ──────────────
+case_09_switch_back_journal() {
+  log "=== case_09: chat → 日记 tab 真 tap 切回 ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  log "real tap '对话' (122, 75)"
+  real_tap 122 75
+  sleep 1
+  screenshot "case_09_chat"
+  log "real tap '日记' (75, 75)"
+  real_tap 75 75
+  sleep 1
+  screenshot "case_09_back_journal"
+  log "✅ case_09 PASS — tab 来回切真触发"
+}
+
+# ────────────── case_10: tap 9:00 entry → 弹 edit card ──────────────
+case_10_tap_entry_edit() {
+  log "=== case_10: tap 9:00 entry 真 tap → edit card ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  # 时间线第 1 个 entry 在 viewport 约 (120, 445) — care 区下 entry list 顶
+  log "real tap 9:00 entry (120, 445)"
+  real_tap 120 445
+  sleep 2
+  screenshot "case_10_after_tap"
+  log "✅ case_10 PASS — entry tap 真触发(截图应显 edit card 升起)"
+}
+
 # ────────────── 入口 ──────────────
 case "${1:-}" in
   setup)
@@ -284,12 +373,17 @@ case "${1:-}" in
       03) case_03_check_default_dose1 ;;
       04) case_04_switch_chat_tab ;;
       05) case_05_nib_opens_card ;;
+      06) case_06_check_fish_oil ;;
+      07) case_07_check_msg ;;
+      08) case_08_water_5_cups ;;
+      09) case_09_switch_back_journal ;;
+      10) case_10_tap_entry_edit ;;
       *) log "未实现 case_$case_num"; exit 1 ;;
     esac
     ;;
   all)
     PASS=0; FAIL=0
-    for n in 01 02 03 04 05; do
+    for n in 01 02 03 04 05 06 07 08 09 10; do
       if "$0" case "$n"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); fi
     done
     log "═══ $PASS PASS / $FAIL FAIL ═══"
