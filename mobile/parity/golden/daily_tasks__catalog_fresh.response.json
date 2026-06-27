@@ -1,0 +1,25 @@
+{
+  "tasks": [
+    {
+      "name": "鱼油",
+      "checked": false,
+      "image_url": null,
+      "total_pills": null,
+      "daily_dose": 1,
+      "today_intake": 0,
+      "remaining": null
+    },
+    {
+      "name": "维生素D",
+      "checked": false,
+      "image_url": null,
+      "total_pills": null,
+      "daily_dose": 1,
+      "today_intake": 0,
+      "remaining": null
+    }
+  ],
+  "date": "2026-06-26",
+  "is_today": true,
+  "is_writable": true
+}

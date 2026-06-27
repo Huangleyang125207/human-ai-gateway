@@ -1,0 +1,19 @@
+{
+  "image_orphans": [
+    {
+      "task": "鱼油",
+      "path": "data/daily-task-images/missing.png"
+    }
+  ],
+  "image_recoverable": [],
+  "meta_orphans": [
+    {
+      "task": "幽灵",
+      "intake_log_days": 1
+    }
+  ],
+  "aggregate_broken_links": [],
+  "checked_at": "2026-06-26T11:00:00",
+  "total_drift": 2,
+  "aggregate_broken_count": 0
+}

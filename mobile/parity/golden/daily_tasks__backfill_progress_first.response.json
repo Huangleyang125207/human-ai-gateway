@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "touched": [
+    {
+      "task": "维生素D",
+      "date": "2026-06-26",
+      "intake": 2,
+      "dose": 3
+    }
+  ],
+  "touched_count": 1,
+  "skipped_no_file": []
+}

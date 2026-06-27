@@ -1,0 +1,7 @@
+{
+  "status": 200,
+  "body": {
+    "ok": false,
+    "error": "注册 parent tag(不带 /sub);sub-tag 自动 roll-up"
+  }
+}

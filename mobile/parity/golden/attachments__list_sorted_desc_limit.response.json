@@ -1,0 +1,15 @@
+{
+  "items": [
+    {
+      "date": "2026-06-25",
+      "filename": "b.png",
+      "ocr_text": ""
+    },
+    {
+      "date": "2026-06-22",
+      "filename": "c.png",
+      "ocr_text": ""
+    }
+  ],
+  "total": 3
+}

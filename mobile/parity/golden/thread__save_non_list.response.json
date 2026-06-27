@@ -1,0 +1,5 @@
+{
+  "history_str": 400,
+  "history_missing": 400,
+  "detail": "history must be a list"
+}

@@ -1,0 +1,3 @@
+{
+  "error": "block @ 9:00 是 @user 所有,AI 不能 patch。想加评论用 append_journal_comment;想新加 entry 用 insert_journal_block。"
+}

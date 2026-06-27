@@ -1,0 +1,8 @@
+{
+  "history": [],
+  "mtime": 0,
+  "status": "corrupt",
+  "error": "<elided>",
+  "baks": [],
+  "message": "thread-history 读取失败 — 选 bak 恢复或 start-fresh,别直接覆盖。"
+}

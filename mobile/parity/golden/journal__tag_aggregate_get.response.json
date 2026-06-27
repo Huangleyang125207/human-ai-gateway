@@ -1,0 +1,15 @@
+{
+  "sections": [
+    {
+      "tag": "yanpai",
+      "description": "---",
+      "columns": [
+        "日期",
+        "时间",
+        "链接",
+        "内容"
+      ],
+      "rows": []
+    }
+  ]
+}

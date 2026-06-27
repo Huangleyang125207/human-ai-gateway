@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "task_name": "鱼油",
+  "md_results": [
+    {
+      "file": "data/daily-task-images/daily-tasks.md",
+      "ok": true
+    },
+    {
+      "file": "data/daily-task-images/26.6.26(g).md",
+      "ok": true
+    }
+  ],
+  "image_removed": true
+}

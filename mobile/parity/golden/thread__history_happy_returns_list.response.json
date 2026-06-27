@@ -1,0 +1,13 @@
+{
+  "history": [
+    {
+      "role": "user",
+      "content": "嗨"
+    },
+    {
+      "role": "assistant",
+      "content": "在"
+    }
+  ],
+  "mtime": 0
+}

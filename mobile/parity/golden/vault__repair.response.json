@@ -1,0 +1,18 @@
+{
+  "fixed_images": 1,
+  "remaining": {
+    "image_orphans": [],
+    "image_recoverable": [
+      {
+        "task": "鱼油",
+        "old_path": "data/daily-task-images/yuyou.png",
+        "new_path": "data/daily-task-images/yuyou.png"
+      }
+    ],
+    "meta_orphans": [],
+    "aggregate_broken_links": [],
+    "checked_at": "2026-06-26T11:00:00",
+    "total_drift": 1,
+    "aggregate_broken_count": 0
+  }
+}

@@ -1,0 +1,3 @@
+{
+  "error": "block @ 17:00 已有 H2:`## #探索 小红书 AI 产业链预警 @ai`。你的 new_md 第一个 H2 是:`## #探索 小红书牛奶 Omega-3 科普 @ai` — 不一样。patch_journal_block 会**整段替换**,原 H2 + body 会被吃掉。如果想给块加新 H2 → 用 insert_journal_block(append,不覆盖)。如果用户明示要改这个 entry 的标题 → 重传带 allow_h2_rename=true。如果真要替换 = 放弃原 entry(数据丢失),先 read_today_schedule 确认要丢什么,再在 new_md 里同时写原 H2 段 + 新 H2 段。"
+}

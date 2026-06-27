@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "旧"
+  },
+  {
+    "role": "assistant",
+    "content": "新增一条"
+  }
+]

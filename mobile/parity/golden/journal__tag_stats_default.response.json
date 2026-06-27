@@ -1,0 +1,29 @@
+{
+  "tags": [
+    {
+      "tag": "工作",
+      "count": 0,
+      "default": true
+    },
+    {
+      "tag": "饮食",
+      "count": 0,
+      "default": true
+    },
+    {
+      "tag": "运动",
+      "count": 0,
+      "default": true
+    },
+    {
+      "tag": "探索",
+      "count": 0,
+      "default": true
+    },
+    {
+      "tag": "投资",
+      "count": 0,
+      "default": true
+    }
+  ]
+}

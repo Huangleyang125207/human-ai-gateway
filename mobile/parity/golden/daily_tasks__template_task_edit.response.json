@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "results": [
+    {
+      "file": "data/daily-task-images/daily-tasks.md",
+      "ok": true
+    },
+    {
+      "file": "data/daily-task-images/26.6.26(g).md",
+      "ok": true
+    }
+  ]
+}

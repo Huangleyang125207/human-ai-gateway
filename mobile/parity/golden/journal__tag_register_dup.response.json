@@ -1,0 +1,7 @@
+{
+  "status": 200,
+  "body": {
+    "ok": false,
+    "error": "#yanpai 已经注册过了"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "status": 409,
+  "detail": {
+    "conflict": true,
+    "message": "stale base_mtime — reload server history before saving"
+  }
+}
