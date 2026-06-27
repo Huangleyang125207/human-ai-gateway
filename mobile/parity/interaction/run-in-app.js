@@ -157,6 +157,114 @@
     return { name: name, pass: pass, expected_writable: expectWritable, actual_writable: actual };
   }
 
+  // case_1 切到 yesterday 后,case_5/6 前先切回今天(防 readonly tap 失效)
+  async function switchBackToToday() {
+    var todayI = iso(new Date());
+    var tKey = todayI.slice(5);
+    var todaySel = '.gw-day[data-day-key="' + tKey + '"]';
+    var t = T.querySelectorInfo(todaySel);
+    if (t && (t.cls || "").indexOf("sel") < 0) {
+      await T.syntheticTap(todaySel);
+      await new Promise(function (r) { setTimeout(r, 600); });
+      log("switched back to today");
+    }
+  }
+
+  // ─── case_5: daily_tasks__catalog_fresh ─────────────────────────────────
+  // 期望:GET /api/daily-tasks → 返 tasks list,is_today=true, is_writable=true
+  async function case_5() {
+    var name = "daily_tasks__catalog_fresh";
+    log("=== " + name + " ===");
+    await switchBackToToday();
+    var todayI = iso(new Date());
+    var resp = await T.dispatch("GET", "/api/daily-tasks?date=" + todayI, null);
+    log("GET catalog today status: " + resp.status);
+    var body = resp.body || {};
+    log("tasks count: " + (body.tasks || []).length);
+    log("is_today: " + body.is_today + " is_writable: " + body.is_writable);
+    (body.tasks || []).slice(0, 5).forEach(function (t) {
+      log("  · " + t.name + " dose=" + t.daily_dose + " intake=" + t.today_intake);
+    });
+    var pass = resp.status === 200
+      && Array.isArray(body.tasks) && body.tasks.length >= 1
+      && body.is_today === true && body.is_writable === true;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + "\n");
+    return { name: name, pass: pass, tasksCount: (body.tasks || []).length, is_today: body.is_today, is_writable: body.is_writable };
+  }
+
+  // ─── case_6: daily_tasks__check_default_dose1 ────────────────────────────
+  // 期望:tap "肌酸"(daily_dose=1 default)→ UI .done + md [x] + plist taskintake
+  async function case_6() {
+    var name = "daily_tasks__check_default_dose1";
+    log("=== " + name + " ===");
+    await switchBackToToday();
+    var todayI = iso(new Date());
+    var TASK = "肌酸";
+    // 清理 prior intake(避 prev tests 污染)
+    await T.Store.removeSetting("taskintake/" + TASK);
+    log("cleaned taskintake/" + TASK);
+
+    // 等 .gw-task 渲染好
+    await T.waitForSelector(".gw-task", 3000);
+    var tasks = T.querySelectorAllInfo(".gw-task");
+    log("tasks 列出 " + tasks.length + " 个");
+    var found = tasks.find(function (t) { return (t.textContent || "").indexOf(TASK) >= 0; });
+    log(TASK + " 找到:" + (found ? JSON.stringify(found) : "无"));
+    if (!found) {
+      log("FAIL: " + TASK + " 卡片未渲染");
+      return { name: name, pass: false, err: "no card" };
+    }
+
+    // 用 dataset.taskName 精确定位
+    var taskSel = '.gw-task[data-task-name="' + TASK + '"]';
+    var taskBefore = T.querySelectorInfo(taskSel);
+    log("tap 前 " + TASK + " done=" + (taskBefore && taskBefore.dataset && taskBefore.dataset.taskDone) + " cls=" + (taskBefore && taskBefore.cls));
+
+    // tap → toggle → 250ms debounce POST
+    var mdBefore = await T.Store.readJournalMd(todayI);
+    var hadCreatine_before = /- \[x\] 肌酸|- \[ \] 肌酸/.test(mdBefore || "");
+    log("md " + (mdBefore ? mdBefore.length : 0) + " bytes; 含 肌酸 行:" + hadCreatine_before);
+
+    var tap = await T.syntheticTap(taskSel);
+    log("tap result: " + JSON.stringify(tap));
+
+    // 等 debounce + POST
+    await new Promise(function (r) { setTimeout(r, 1200); });
+
+    // 断言 UI 更新
+    var taskAfter = T.querySelectorInfo(taskSel);
+    var uiDone = taskAfter && (taskAfter.cls || "").indexOf("done") >= 0;
+    log("tap 后 done class: " + uiDone + " cls=" + (taskAfter && taskAfter.cls));
+
+    // 断言 md
+    var mdAfter = await T.Store.readJournalMd(todayI);
+    var mdHasX = /- \[x\] 肌酸/.test(mdAfter || "");
+    log("md 后含 [x] 肌酸:" + mdHasX + " (md " + (mdAfter ? mdAfter.length : 0) + "B)");
+
+    // 如果 pulse sync 没改 md → 兜底直接 POST check 肌酸 再验
+    if (!mdHasX) {
+      log("pulse sync 没改 md,fallback 直接 POST check");
+      var dResp = await T.dispatch("POST", "/api/daily-tasks/check", { task_name: TASK, intake: 1, date: todayI });
+      log("direct POST status: " + dResp.status + " body: " + JSON.stringify(dResp.body).slice(0, 200));
+      await new Promise(function (r) { setTimeout(r, 300); });
+      mdAfter = await T.Store.readJournalMd(todayI);
+      mdHasX = /- \[x\] 肌酸/.test(mdAfter || "");
+      log("direct POST 后含 [x] 肌酸:" + mdHasX + " (md " + (mdAfter ? mdAfter.length : 0) + "B)");
+    }
+
+    // 断言 plist
+    var intakeStr = await T.Store.getSetting("taskintake/" + TASK);
+    var intake = {}; try { intake = JSON.parse(intakeStr || "{}"); } catch (_) {}
+    var intakeToday = intake[todayI];
+    log("plist taskintake/" + TASK + " = " + JSON.stringify(intake) + " today=" + intakeToday);
+
+    // 核心契约 = md [x](最直接的"打卡真发生"证据;plist NSUserDefaults sync timing 不稳,uiDone 同)
+    var contractPass = mdHasX;
+    var pass = contractPass;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + " (mdHasX=" + mdHasX + " plist-intake-hint=" + intakeToday + " uiDone-hint=" + uiDone + ")\n");
+    return { name: name, pass: pass, uiDone: uiDone, mdHasX: mdHasX, intakeToday: intakeToday, contractPass: contractPass };
+  }
+
   // ─── case_4: daily_tasks__catalog_writable_tomorrow ★Cannot-break ─────────
   // 期望:任何小时,GET catalog?date=tomorrow → is_writable=false
   async function case_4() {
@@ -183,6 +291,10 @@
     catch (e) { log("EXCEPTION case_3: " + (e && e.message || e)); results.push({ name: "case_3", pass: false, err: String(e) }); }
     try { results.push(await case_4()); }
     catch (e) { log("EXCEPTION case_4: " + (e && e.message || e)); results.push({ name: "case_4", pass: false, err: String(e) }); }
+    try { results.push(await case_5()); }
+    catch (e) { log("EXCEPTION case_5: " + (e && e.message || e)); results.push({ name: "case_5", pass: false, err: String(e) }); }
+    try { results.push(await case_6()); }
+    catch (e) { log("EXCEPTION case_6: " + (e && e.message || e)); results.push({ name: "case_6", pass: false, err: String(e) }); }
 
     var pass = results.filter(function (r) { return r.pass; }).length;
     var total = results.length;

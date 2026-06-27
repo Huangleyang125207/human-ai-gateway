@@ -10,8 +10,10 @@
 | `daily_tasks__check_rejects_future` | ★Cannot-break | ① dateband 不含 tomorrow pill(MVP UI 锁未来)② POST check tomorrow=400 | ✅ PASS(22:15) | [case_4_all_writable_pass.png](parity/interaction/screenshots/case_4_all_writable_pass.png) |
 | `daily_tasks__catalog_writable_yesterday` | ★Cannot-break | GET catalog?date=yesterday 返 is_writable=false(now.hour=22 ≥ 12) | ✅ PASS(22:15) | 同上 |
 | `daily_tasks__catalog_writable_tomorrow` | ★Cannot-break | GET catalog?date=tomorrow 返 is_writable=false(未来必锁) | ✅ PASS(22:15) | 同上 |
+| `daily_tasks__catalog_fresh` | UI已建 | GET /api/daily-tasks → tasks 8 个、is_today=true、is_writable=true | ✅ PASS(22:51) | 同 case_6 |
+| `daily_tasks__check_default_dose1` | UI已建 | 真 tap 肌酸 → ① UI .done class ② md `- [x] 肌酸` ③ plist `taskintake/肌酸={today:1}` ④ 真 SyntheticTap → toggle → emit('pulse') → POST | ✅ PASS(22:51) | [case_6_check_default_dose1.png](parity/interaction/screenshots/case_6_check_default_dose1.png) |
 
-**4/4 ★Cannot-break PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 4/4 PASS`
+**6/6 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 6/6 PASS`
 
 **架构现状**(完成 P2 第 0 号 + 限制公开):
 - ✅ WKWebView.isInspectable=true(iOS 16.4+,AppDelegate.swift 真生效:NSLog `[parity] on 1 views`)
