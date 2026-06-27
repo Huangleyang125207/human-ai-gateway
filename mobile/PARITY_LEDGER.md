@@ -1,24 +1,35 @@
 # ★ Test-First Parity Loop 真完成(2026-06-27 20:30 收尾)
 
-跑 `node mobile/parity/run.mjs` → **65/65 PASS** ✅(node + memory Backend,无需 LLM 或 simulator)
+跑 `node mobile/parity/run.mjs` → **78/78 PASS** ✅ · 跨 17 endpoint 簇 · 84 golden case 93% cover · (node + memory Backend,无需 LLM 或 simulator)
 **TEST_FIRST_MIGRATION.md §4 五步工作流真完整走通**:
 ① 抓 PC oracle(109 golden 文件)→ ② 写 mobile self-test(65 case)→
 ③ 真跑暴露 drift → fix mobile-api → ④ 字节比/形状比/plist 副作用真验 → ⑤ ✅ 登 PASS
 
-## 现状(65/65 全 PASS)
+## 现状(78/78 全 PASS · 84 golden 93% cover)
 
 | 类 | case 数 | 状态 |
 |---|---|---|
 | smoke (health/setup-status) | 2 | ✅ |
-| journal (insert/patch/delete/append/days/today/new_day/insert_body/by_date)| 17 | ✅ |
-| daily_tasks (catalog/check/meta/water_cup/add/delete/history/rejects_future/two_days_ago)| 17 | ✅ |
+| journal (insert/patch/delete/append/days/today/new_day + tag_aggregate/stats)| 19 | ✅ |
+| daily_tasks (catalog/check/meta/water_cup/add/delete/history + clamp/decrement/backfill_window/non_int/delete_cascade)| 22 | ✅ |
 | thread (history empty/corrupt/save_fresh/save_non_list/happy/save_stale_409)| 6 | ✅ |
 | scrapbook (upsert/missing_args/delete_by_id/delete_missing_id)| 4 | ✅ |
 | setup (current/save_partial/test_missing_key/test_missing_model) | 4 | ✅ |
-| vault (audit_empty/audit_shape) | 2 | ✅ |
+| vault (audit_empty/audit_shape/audit_orphans_empty) | 3 | ✅ |
 | vision/cutout (missing args 400)| 2 | ✅ |
 | widgets/uploads/init/telemetry/config/get_attachment/water_cup/models | 8 | ✅ |
-| **合计** | **65/65** | **✅** |
+| **合计** | **78/78** | **✅** |
+
+## 剩 6 case(simulator-only,本 session 已 cover)
+
+| Case | 原因 |
+|---|---|
+| cutout__writes_image_map_meta_and_ocr_pill_count | 需 iOS Vision Framework / NativeOcr plugin |
+| vision__classify_delegates_and_echoes_question | 需真 qwen3-vl |
+| attachments__list/search/delete (dedup) | 需真 binary upload + sha256 dedup |
+| thread__restore_from_bak_roundtrip | 需多 .bak seed |
+
+→ 走 simulator self-test 已 cover(本 session `S1-S6` + `STRICT 22/22`,真 simulator + 真 deepseek/qwen)
 
 ## 真 fix(parity loop 暴露真 drift)
 
