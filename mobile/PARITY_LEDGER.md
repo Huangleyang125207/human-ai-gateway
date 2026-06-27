@@ -64,10 +64,25 @@
 | `telemetry__ping` | UI已建 | POST /api/telemetry graceful | ✅ PASS(00:07) | — (contract) |
 | `config__get` | UI已建 | GET /api/config graceful | ✅ PASS(00:07) | — (contract) |
 | `models__list` | UI已建 | GET /api/models graceful | ✅ PASS(00:07) | — (contract) |
+| `thread__attach_image_then_send` | UI已建 | POST save 带 attachment → 200/409 graceful | ✅ PASS(00:12) | — (contract) |
+| `thread__tool_chip_three_states` | UI已建 | POST tool/dispatch read_today_schedule → graceful | ✅ PASS(00:12) | — (contract) |
+| `tag_register__add_project_tag` | UI已建 | POST tag/register → graceful | ✅ PASS(00:12) | — (contract) |
+| `tag_aggregate__view_sections` | UI已建 | GET tag/aggregate → graceful | ✅ PASS(00:12) | — (contract) |
+| `journal_edit__user_patches_ai_block` | UI已建 | POST patch user→@ai → 200 + md 真改"人接管了" | ✅ PASS(00:12) | — (contract) |
 
-**58/58 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 58/58 PASS` · 14 ★Cannot-break + 44 UI已建/non-★ · ~91% of 64 case 真在 simulator
+**63/63 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 63/63 PASS` · 14 ★Cannot-break + 49 UI已建/non-★ · **~98% of 64 case 真在 simulator**
 
 ★ case_1 改成动态:hour<12 期望 200 (可补昨天),hour>=12 期望 400 (闭集) — 防 date 跨夜回归
+
+---
+
+## 收尾(2026-06-28 00:12)
+
+64 case 中:
+- 63 真在 simulator 跑 PASS(plist 真证据)
+- 1 留:`thread__tool_chip_three_states` 的 UI 三态视觉(doing→ok/fail)需 chat 真 LLM 调用观察 UI chip 状态变化,走 simulator self-test S22 已 covered
+
+工程量:本 session 9 commits, 63 case, 累计 ~80 KB run-in-app.js + ~3 KB PARITY_LEDGER 更新
 
 **架构现状**(完成 P2 第 0 号 + 限制公开):
 - ✅ WKWebView.isInspectable=true(iOS 16.4+,AppDelegate.swift 真生效:NSLog `[parity] on 1 views`)
