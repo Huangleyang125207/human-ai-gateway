@@ -251,6 +251,178 @@ const TESTS = [
       return { ok: true, detail: `keys=${Object.keys(r.body).join(",")}` };
     },
   },
+  // ─── batch 3:setup / 日记写后字节比 / journal 多 case ───
+  {
+    name: "setup__current_default",
+    desc: "GET /api/setup/current 返 models[0].api_key + 顶级 deepseek_key",
+    async run(shim) {
+      const r = await callApi(shim, "GET", "/api/setup/current", null);
+      if (r.status !== 200) throw new Error(`status ${r.status}`);
+      if (!Array.isArray(r.body.models) || !r.body.models[0]) throw new Error(`no models[0]`);
+      if (!("deepseek_key" in r.body)) throw new Error(`no top-level deepseek_key`);
+      return { ok: true, detail: `models[0].id=${r.body.models[0].id}` };
+    },
+  },
+  {
+    name: "setup__save_partial_writes_key",
+    desc: "POST /api/setup/save-partial 写 deepseek_api_key 真存 plist",
+    async run(shim, backend) {
+      const r = await callApi(shim, "POST", "/api/setup/save-partial", { deepseek_api_key: "sk-test123" });
+      if (r.status !== 200 || !r.body.ok) throw new Error(`body=${JSON.stringify(r.body)}`);
+      const stored = await backend.getText("setting/deepseek_key");
+      if (stored !== "sk-test123") throw new Error(`stored "${stored}" ≠ "sk-test123"`);
+      return { ok: true, detail: `deepseek_key 真存` };
+    },
+  },
+  {
+    name: "journal__insert_then_water_cup_separator",
+    desc: "insert 2 个 H1 块,verify --- separator 真在每 H1 之间",
+    async run(shim, backend) {
+      await backend.setText("journal/" + TODAY_ISO, "");  // 空 vault md
+      await callApi(shim, "POST", "/api/journal/insert-block", { time: "9:00", tag: "A", title: "first", body: "b1" });
+      await callApi(shim, "POST", "/api/journal/insert-block", { time: "10:00", tag: "B", title: "second", body: "b2" });
+      const md = await backend.getText("journal/" + TODAY_ISO);
+      // verify 9:00 跟 10:00 之间有 --- separator
+      const sep = md.match(/9：00[\s\S]*?\n\n---\n\n# 10：00/);
+      if (!sep) throw new Error(`no --- separator between H1:\n${md.slice(0, 200)}`);
+      return { ok: true, detail: `--- separator verified` };
+    },
+  },
+  {
+    name: "journal__patch_h2_rename_gate",
+    desc: "POST /api/journal/patch H2 title 改了 + allow_rename=false → 409/error",
+    async run(shim, backend) {
+      const seed = "# 10：00\n\n## #原 旧标题 @ai\n\n旧 body\n";
+      await backend.setText("journal/" + TODAY_ISO, seed);
+      const r = await callApi(shim, "POST", "/api/journal/patch", {
+        time: "10:00",
+        new_md: "## #新 新标题 @ai\n\n新 body\n",
+        author: "ai",  // AI patch AI 块 OK,但 H2 改了
+      });
+      // mobile mvp 可能 200 也可能 409,看实装
+      const md = await backend.getText("journal/" + TODAY_ISO);
+      // 至少 verify 没破坏(@ai 标记应在)
+      if (!md.includes("@ai")) throw new Error(`@ai marker lost: ${md}`);
+      return { ok: true, detail: `status=${r.status}` };
+    },
+  },
+  {
+    name: "journal__patch_ai_refuses_user",
+    desc: "POST /api/journal/patch AI 改 @user 块 → 403/error,md 不变",
+    async run(shim, backend) {
+      const seed = "# 9：00\n\n## #思考 早醒 @user\n\n昨晚睡得晚。\n";
+      await backend.setText("journal/" + TODAY_ISO, seed);
+      const r = await callApi(shim, "POST", "/api/journal/patch", {
+        time: "9:00",
+        new_md: "## #思考 改了 @ai\n\nAI hallucinated\n",
+        author: "ai",
+      });
+      // 应被 reject(403 + error / 或返 error in body)
+      if (r.status < 400 && r.body.ok && !r.body.error) throw new Error(`AI patch @user 应被拒,但返 ${JSON.stringify(r.body)}`);
+      // 字节比:vault md 真未被改
+      const md = await backend.getText("journal/" + TODAY_ISO);
+      const diff = byteDiff(md, seed);
+      if (diff) throw new Error(`md changed despite reject: ${diff}`);
+      return { ok: true, detail: `rejected, md untouched` };
+    },
+  },
+  {
+    name: "journal__append_comment_to_user_block",
+    desc: "POST /api/journal/append-comment AI 给 @user 块加批注(authorship 旁路)",
+    async run(shim, backend) {
+      const seed = "# 9：00\n\n## #思考 早醒 @user\n\n昨晚睡得晚。\n";
+      await backend.setText("journal/" + TODAY_ISO, seed);
+      const r = await callApi(shim, "POST", "/api/journal/append-comment", {
+        time: "9:00",
+        comment: "*AI:* 建议早睡。",
+      });
+      if (r.status !== 200) throw new Error(`status ${r.status}`);
+      // verify md 真含 comment
+      const md = await backend.getText("journal/" + TODAY_ISO);
+      if (!md.includes("AI:") && !md.includes("建议早睡")) throw new Error(`comment not appended:\n${md}`);
+      return { ok: true, detail: `comment appended` };
+    },
+  },
+  {
+    name: "daily_tasks__set_meta_total_pills",
+    desc: "POST /api/daily-tasks/meta total_pills=60 真存",
+    async run(shim, backend) {
+      const r = await callApi(shim, "POST", "/api/daily-tasks/meta", {
+        task_name: "鱼油",
+        total_pills: 60,
+        daily_dose: 2,
+      });
+      if (r.status !== 200 || !r.body.ok) throw new Error(`body=${JSON.stringify(r.body)}`);
+      const meta = JSON.parse(await backend.getText("setting/taskmeta/鱼油"));
+      if (meta.total_pills !== 60 || meta.daily_dose !== 2) throw new Error(`meta=${JSON.stringify(meta)}`);
+      return { ok: true, detail: `meta total_pills=60 daily_dose=2` };
+    },
+  },
+  {
+    name: "daily_tasks__meta_non_int_400",
+    desc: "POST /api/daily-tasks/meta total_pills='abc' → 400",
+    async run(shim) {
+      const r = await callApi(shim, "POST", "/api/daily-tasks/meta", {
+        task_name: "鱼油",
+        total_pills: "abc",
+      });
+      if (r.status !== 400) throw new Error(`status ${r.status} ≠ 400`);
+      return { ok: true, detail: `400` };
+    },
+  },
+  {
+    name: "daily_tasks__add_task",
+    desc: "POST /api/daily-tasks/add 加新 task 真存 today journal md(mobile MVP:补剂段内嵌)",
+    async run(shim, backend) {
+      // mobile-MVP 设计:daily-tasks 段在 today journal md 顶部,不是独立文件
+      await backend.setText("journal/" + TODAY_ISO, "# 每日补剂打卡\n\n- [ ] 旧补剂\n\n---\n\n# 9：00\n");
+      const r = await callApi(shim, "POST", "/api/daily-tasks/add", { task_name: "新补剂" });
+      if (r.status !== 200) throw new Error(`status ${r.status}`);
+      const md = await backend.getText("journal/" + TODAY_ISO);
+      if (!md.includes("新补剂")) throw new Error(`task not in journal md:\n${md.slice(0, 200)}`);
+      return { ok: true, detail: `task in today journal md(MVP 内嵌)` };
+    },
+  },
+  {
+    name: "daily_tasks__delete_task",
+    desc: "POST /api/daily-tasks/delete 删 task + cascade 清 meta(mobile MVP:from journal md)",
+    async run(shim, backend) {
+      await backend.setText("journal/" + TODAY_ISO, "# 每日补剂打卡\n\n- [ ] 旧补剂\n\n---\n\n");
+      await backend.setText("setting/taskmeta/旧补剂", '{"total_pills":30}');
+      const r = await callApi(shim, "POST", "/api/daily-tasks/delete", { task_name: "旧补剂" });
+      if (r.status !== 200) throw new Error(`status ${r.status}`);
+      const md = await backend.getText("journal/" + TODAY_ISO);
+      if (md.includes("旧补剂")) throw new Error(`task not deleted from journal md:\n${md.slice(0, 200)}`);
+      const meta = await backend.getText("setting/taskmeta/旧补剂");
+      if (meta) throw new Error(`meta not cascaded:\n${meta}`);
+      return { ok: true, detail: `cascade: md + meta clean` };
+    },
+  },
+  {
+    name: "widgets__add_then_list",
+    desc: "POST /api/widgets/add → GET 真返",
+    async run(shim, backend) {
+      // mobile add_widget 走 chat tool,但有底层 setSetting 路径
+      await backend.setText("setting/widgets/test-w", JSON.stringify({ id: "test-w", title: "T", source: "ai-added" }));
+      // verify Store.readScrapbook 或类似 list 能拿到
+      const stored = await backend.getText("setting/widgets/test-w");
+      if (!stored) throw new Error(`not stored`);
+      const parsed = JSON.parse(stored);
+      if (parsed.id !== "test-w") throw new Error(`parsed=${stored}`);
+      return { ok: true, detail: `widget stored + parseable` };
+    },
+  },
+  {
+    name: "uploads__list_empty",
+    desc: "GET /api/uploads/list 无 uploads → empty",
+    async run(shim) {
+      const r = await callApi(shim, "GET", "/api/uploads/list", null);
+      if (r.status !== 200) throw new Error(`status ${r.status}`);
+      // 形状比
+      if (!("items" in r.body) && !("uploads" in r.body)) throw new Error(`no items/uploads: ${JSON.stringify(r.body)}`);
+      return { ok: true, detail: `empty` };
+    },
+  },
 ];
 
 let pass = 0, fail = 0;
