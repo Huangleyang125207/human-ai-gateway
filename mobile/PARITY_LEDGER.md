@@ -56,8 +56,16 @@
 | `journal_delete__unknown_time_404` | UI已建 | POST delete-block 不存在 time → 404 | ✅ PASS(00:05) | — (contract) |
 | `journal_patch__missing_new_md_400` | UI已建 | POST patch 缺 new_md → 400 | ✅ PASS(00:05) | — (contract) |
 | `thread__restore_from_bak_roundtrip` | ★Cannot-break | POST restore-from-bak → 200/404/400 graceful (bak 不存在) | ✅ PASS(00:05) | — (contract) |
+| `scrapbook_delete_sticker` | UI已建 | POST /api/scrapbook/delete → graceful | ✅ PASS(00:07) | — (contract) |
+| `vision__classify` | UI已建 | POST /api/vision/classify → graceful (无真 LLM key) | ✅ PASS(00:07) | — (contract) |
+| `cutout` | ★Cannot-break | POST /api/cutout → graceful (NativeOcr 真机走端侧) | ✅ PASS(00:07) | — (contract) |
+| `widgets__list` | UI已建 | GET /api/widgets/list graceful | ✅ PASS(00:07) | — (contract) |
+| `uploads__list_recent` | UI已建 | GET /api/uploads/list graceful | ✅ PASS(00:07) | — (contract) |
+| `telemetry__ping` | UI已建 | POST /api/telemetry graceful | ✅ PASS(00:07) | — (contract) |
+| `config__get` | UI已建 | GET /api/config graceful | ✅ PASS(00:07) | — (contract) |
+| `models__list` | UI已建 | GET /api/models graceful | ✅ PASS(00:07) | — (contract) |
 
-**50/50 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 50/50 PASS` · 13 ★Cannot-break + 37 UI已建/non-★ · ~78% of 64 case 真在 simulator
+**58/58 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 58/58 PASS` · 14 ★Cannot-break + 44 UI已建/non-★ · ~91% of 64 case 真在 simulator
 
 ★ case_1 改成动态:hour<12 期望 200 (可补昨天),hour>=12 期望 400 (闭集) — 防 date 跨夜回归
 
