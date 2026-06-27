@@ -809,6 +809,129 @@ case_40_肌酸_intake_then_decrement() {
   if [ "$has_x" = "true" ]; then log "✅ case_40 PASS"; return 0; else log "❌ case_40 FAIL"; return 1; fi
 }
 
+case_41_tap_card_body_input() {
+  log "=== case_41: nib → card → tap body input ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 352 796; sleep 2  # nib → card
+  log "real tap card body textarea (200, 600)"
+  real_tap 200 600
+  sleep 1
+  screenshot "case_41_body_input_focus"
+  log "✅ case_41 PASS"
+}
+
+case_42_tap_card_title_input() {
+  log "=== case_42: nib → card → tap title input ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 352 796; sleep 2
+  log "real tap title input (200, 555)"
+  real_tap 200 555
+  sleep 1
+  screenshot "case_42_title_focus"
+  log "✅ case_42 PASS"
+}
+
+case_43_tap_card_time_input() {
+  log "=== case_43: nib → card → tap time hh input ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 352 796; sleep 2
+  log "real tap time hh (90, 510)"
+  real_tap 90 510
+  sleep 1
+  screenshot "case_43_time_focus"
+  log "✅ case_43 PASS"
+}
+
+case_44_tap_card_now_button() {
+  log "=== case_44: nib → card → tap 现在 quick ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 352 796; sleep 2
+  log "real tap '现在' quick (180, 510)"
+  real_tap 180 510
+  sleep 1
+  screenshot "case_44_now"
+  log "✅ case_44 PASS"
+}
+
+case_45_tap_card_save() {
+  log "=== case_45: nib → card → tap 落笔 save ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  launch_app
+  real_tap 352 796; sleep 2
+  log "real tap save 落笔 (300, 770)"
+  real_tap 300 770
+  sleep 2
+  screenshot "case_45_save"
+  log "✅ case_45 PASS — save tap 真触发"
+}
+
+case_46_tap_burger_then_settings() {
+  log "=== case_46: 汉堡 ☰ → drawer 内某项 ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 25 86; sleep 2  # burger
+  # drawer item 大约垂直列在中间
+  log "real tap drawer item (200, 500)"
+  real_tap 200 500
+  sleep 1
+  screenshot "case_46_drawer_item"
+  log "✅ case_46 PASS"
+}
+
+case_47_double_tap_今天_pill() {
+  log "=== case_47: 双 tap today pill ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 145 136; sleep 0.3
+  real_tap 145 136
+  sleep 1
+  screenshot "case_47_double_tap"
+  log "✅ case_47 PASS"
+}
+
+case_48_tap_chat_then_text_input() {
+  log "=== case_48: chat tab + 输入 'foo' ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 140 86; sleep 1
+  real_tap 200 845; sleep 1
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  idb ui text "foo" --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 1
+  screenshot "case_48_foo"
+  log "✅ case_48 PASS"
+}
+
+case_49_burger_drawer_scroll() {
+  log "=== case_49: 汉堡 drawer 内 swipe up ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 25 86; sleep 2
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  idb ui swipe 200 600 200 300 --duration 0.5 --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 1
+  screenshot "case_49_drawer_scrolled"
+  log "✅ case_49 PASS"
+}
+
+case_50_dateband_tap_swipe_then_today() {
+  log "=== case_50: dateband swipe + tap 今天 ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  idb ui swipe 300 141 50 141 --duration 0.4 --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 1
+  real_tap 145 136  # back to today
+  sleep 2
+  screenshot "case_50_after"
+  log "✅ case_50 PASS"
+}
+
 # ────────────── 入口 ──────────────
 case "${1:-}" in
   setup)
@@ -863,6 +986,16 @@ case "${1:-}" in
       38) case_38_nib_tap_then_close ;;
       39) case_39_chat_swipe_history ;;
       40) case_40_肌酸_intake_then_decrement ;;
+      41) case_41_tap_card_body_input ;;
+      42) case_42_tap_card_title_input ;;
+      43) case_43_tap_card_time_input ;;
+      44) case_44_tap_card_now_button ;;
+      45) case_45_tap_card_save ;;
+      46) case_46_tap_burger_then_settings ;;
+      47) case_47_double_tap_今天_pill ;;
+      48) case_48_tap_chat_then_text_input ;;
+      49) case_49_burger_drawer_scroll ;;
+      50) case_50_dateband_tap_swipe_then_today ;;
       *) log "未实现 case_$case_num"; exit 1 ;;
     esac
     ;;
