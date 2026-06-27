@@ -7,6 +7,11 @@
 | Case | 类别 | 5 道断言 | 状态 | 截图 |
 |---|---|---|---|---|
 | `daily_tasks__check_backfill_yesterday_closed` | ★Cannot-break | ① care-block.readonly + task[0] RO ② md 字节零变化(33B) ③ screenshot 真截 ④ POST status=400 ⑤ 真 SyntheticTap 触发 UI handler 链 | ✅ PASS(21:42) | [case_1_yesterday_readonly.png](parity/interaction/screenshots/case_1_yesterday_readonly.png) |
+| `daily_tasks__check_rejects_future` | ★Cannot-break | ① dateband 不含 tomorrow pill(MVP UI 锁未来)② POST check tomorrow=400 | ✅ PASS(22:15) | [case_4_all_writable_pass.png](parity/interaction/screenshots/case_4_all_writable_pass.png) |
+| `daily_tasks__catalog_writable_yesterday` | ★Cannot-break | GET catalog?date=yesterday 返 is_writable=false(now.hour=22 ≥ 12) | ✅ PASS(22:15) | 同上 |
+| `daily_tasks__catalog_writable_tomorrow` | ★Cannot-break | GET catalog?date=tomorrow 返 is_writable=false(未来必锁) | ✅ PASS(22:15) | 同上 |
+
+**4/4 ★Cannot-break PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 4/4 PASS`
 
 **架构现状**(完成 P2 第 0 号 + 限制公开):
 - ✅ WKWebView.isInspectable=true(iOS 16.4+,AppDelegate.swift 真生效:NSLog `[parity] on 1 views`)

@@ -110,11 +110,79 @@
     return { name: name, pass: pass, careIsReadonly: careIsReadonly, taskReadonly: taskReadonly, mdUnchanged: mdUnchanged, endpoint400: endpoint400 };
   }
 
+  // ─── case_2: daily_tasks__check_rejects_future ★Cannot-break ─────────────
+  // 期望:dateband 不渲染 tomorrow pill(MVP 设计 UI 锁未来)+ POST check tomorrow→400
+  async function case_2() {
+    var name = "daily_tasks__check_rejects_future";
+    log("=== " + name + " ★Cannot-break ===");
+    var today = new Date();
+    var tomorrow = new Date(today.getTime() + 86400000);
+    var tomI = iso(tomorrow);
+    log("tomorrow: " + tomI);
+
+    // 等 dateband(已经从 case_1 mount 完)
+    var allDays = T.querySelectorAllInfo(".gw-day");
+    log("dateband pills: " + allDays.length);
+    var hasTomorrow = allDays.some(function (d) { return d.dataset && d.dataset.dayKey === tomI.slice(5); });
+    log("dateband 含 tomorrow: " + hasTomorrow + "(应 false = MVP UI 锁未来)");
+    var uiLockedFuture = !hasTomorrow;
+
+    // ── 契约: POST check tomorrow → 400
+    var resp = await T.dispatch("POST", "/api/daily-tasks/check", { task_name: "鱼油", checked: true, date: tomI });
+    log("POST check tomorrow status: " + resp.status + " body: " + JSON.stringify(resp.body).slice(0, 200));
+    var endpoint400 = resp.status === 400;
+
+    var pass = uiLockedFuture && endpoint400;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") +
+        " (uiLockedFuture=" + uiLockedFuture + " endpoint400=" + endpoint400 + ")\n");
+    return { name: name, pass: pass, uiLockedFuture: uiLockedFuture, endpoint400: endpoint400 };
+  }
+
+  // ─── case_3: daily_tasks__catalog_writable_yesterday ★Cannot-break ─────────
+  // 期望:已过次日 12:00,GET catalog?date=yesterday → is_writable=false
+  async function case_3() {
+    var name = "daily_tasks__catalog_writable_yesterday";
+    log("=== " + name + " ★Cannot-break ===");
+    var yesterday = new Date(new Date().getTime() - 86400000);
+    var ytmI = iso(yesterday);
+    var nowHour = new Date().getHours();
+    log("now hour: " + nowHour + "(>=12 → yesterday 不在写窗)");
+
+    var resp = await T.dispatch("GET", "/api/daily-tasks?date=" + ytmI, null);
+    log("GET catalog yesterday status: " + resp.status + " is_writable: " + (resp.body && resp.body.is_writable));
+    var expectWritable = nowHour < 12;  // hour<12 写得了,>=12 不
+    var actual = !!(resp.body && resp.body.is_writable);
+    var pass = resp.status === 200 && actual === expectWritable;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + " (expected=" + expectWritable + " actual=" + actual + ")\n");
+    return { name: name, pass: pass, expected_writable: expectWritable, actual_writable: actual };
+  }
+
+  // ─── case_4: daily_tasks__catalog_writable_tomorrow ★Cannot-break ─────────
+  // 期望:任何小时,GET catalog?date=tomorrow → is_writable=false
+  async function case_4() {
+    var name = "daily_tasks__catalog_writable_tomorrow";
+    log("=== " + name + " ★Cannot-break ===");
+    var tomorrow = new Date(new Date().getTime() + 86400000);
+    var tomI = iso(tomorrow);
+    var resp = await T.dispatch("GET", "/api/daily-tasks?date=" + tomI, null);
+    log("GET catalog tomorrow status: " + resp.status + " is_writable: " + (resp.body && resp.body.is_writable));
+    var actual = !!(resp.body && resp.body.is_writable);
+    var pass = resp.status === 200 && actual === false;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + " (expected=false actual=" + actual + ")\n");
+    return { name: name, pass: pass, actual_writable: actual };
+  }
+
   // ─── runner ─────────────────────────────────────────────────
   (async function () {
     var results = [];
     try { results.push(await case_1()); }
     catch (e) { log("EXCEPTION case_1: " + (e && e.message || e) + "\n" + (e && e.stack || "")); results.push({ name: "case_1", pass: false, err: String(e) }); }
+    try { results.push(await case_2()); }
+    catch (e) { log("EXCEPTION case_2: " + (e && e.message || e)); results.push({ name: "case_2", pass: false, err: String(e) }); }
+    try { results.push(await case_3()); }
+    catch (e) { log("EXCEPTION case_3: " + (e && e.message || e)); results.push({ name: "case_3", pass: false, err: String(e) }); }
+    try { results.push(await case_4()); }
+    catch (e) { log("EXCEPTION case_4: " + (e && e.message || e)); results.push({ name: "case_4", pass: false, err: String(e) }); }
 
     var pass = results.filter(function (r) { return r.pass; }).length;
     var total = results.length;
