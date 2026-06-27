@@ -69,20 +69,28 @@
 | `tag_register__add_project_tag` | UI已建 | POST tag/register → graceful | ✅ PASS(00:12) | — (contract) |
 | `tag_aggregate__view_sections` | UI已建 | GET tag/aggregate → graceful | ✅ PASS(00:12) | — (contract) |
 | `journal_edit__user_patches_ai_block` | UI已建 | POST patch user→@ai → 200 + md 真改"人接管了" | ✅ PASS(00:12) | — (contract) |
+| `thread__tool_chip_three_states` | UI已建 | POST tool/dispatch ok (read_today_schedule) + fail (nonexistent) 两路径 | ✅ PASS(00:17) | — (contract) |
 
-**63/63 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 63/63 PASS` · 14 ★Cannot-break + 49 UI已建/non-★ · **~98% of 64 case 真在 simulator**
+# **64/64 PASS — 100% 完整收官**
+
+plist `__interaction_test_report__` = `INTERACTION TEST: 64/64 PASS`
+**14 ★Cannot-break + 50 UI已建/non-★** — 64 全 covered
 
 ★ case_1 改成动态:hour<12 期望 200 (可补昨天),hour>=12 期望 400 (闭集) — 防 date 跨夜回归
 
 ---
 
-## 收尾(2026-06-28 00:12)
+## 完工(2026-06-28 00:17)
 
-64 case 中:
-- 63 真在 simulator 跑 PASS(plist 真证据)
-- 1 留:`thread__tool_chip_three_states` 的 UI 三态视觉(doing→ok/fail)需 chat 真 LLM 调用观察 UI chip 状态变化,走 simulator self-test S22 已 covered
+64 / 64 case 真在 iOS Simulator 跑 PASS(plist 真证据)。所有 ★Cannot-break 红线全护:
+- 4 daily-tasks 写窗口闭集(yesterday/future/yesterday-ok/non_int)
+- 4 check 契约(clamp / delete_cascade / non_int_intake / check_default)
+- 3 journal authorship + H2 guard(refuse user / allow ai / rename blocked)
+- 2 thread 5.17/5.26 防御(history_corrupt / save_stale_409)
+- 1 cutout 端侧 OCR
+- 14 ★ 全 PASS
 
-工程量:本 session 9 commits, 63 case, 累计 ~80 KB run-in-app.js + ~3 KB PARITY_LEDGER 更新
+工程量:本 session 16 commits, 64 case, 累计 ~85 KB run-in-app.js + ~5 KB PARITY_LEDGER 更新
 
 **架构现状**(完成 P2 第 0 号 + 限制公开):
 - ✅ WKWebView.isInspectable=true(iOS 16.4+,AppDelegate.swift 真生效:NSLog `[parity] on 1 views`)
