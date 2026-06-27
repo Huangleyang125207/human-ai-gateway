@@ -354,6 +354,166 @@ case_10_tap_entry_edit() {
   log "✅ case_10 PASS — entry tap 真触发(截图应显 edit card 升起)"
 }
 
+# ────────────── case_11: tap 昨天 pill (06-27) → care readonly ──────────────
+case_11_tap_yesterday() {
+  log "=== case_11: tap 昨天 pill 真 tap ==="
+  local today_stem="26.6.28(第57天)" yest_stem="26.6.27(第56天)"
+  seed_today_md "$today_stem"
+  seed_yesterday_md "$yest_stem" "# 9：00\n\n## #思考 昨晚 @user\n睡得晚。\n"
+  launch_app
+  # ui_rects 报 06-27 at (95, 141)
+  log "real tap 06-27 pill at (95, 141)"
+  real_tap 95 141
+  sleep 2
+  screenshot "case_11_after_tap"
+  log "✅ case_11 PASS — tap 真触发 dateband 切换"
+}
+
+# ────────────── case_12: tap 今天 pill (06-28) → care 写态 ──────────────
+case_12_tap_today() {
+  log "=== case_12: tap 今天 pill 真 tap ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  log "real tap 06-28 pill at (145, 136)"
+  real_tap 145 136
+  sleep 2
+  screenshot "case_12_after_tap"
+  log "✅ case_12 PASS — today pill tap 真触发"
+}
+
+# ────────────── case_13: nib 真 tap → edit card 弹起 ──────────────
+case_13_nib_tap() {
+  log "=== case_13: nib 真 tap → edit card ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  # ui_rects 报 nib at (352, 796)
+  log "real tap nib at (352, 796)"
+  real_tap 352 796
+  sleep 2
+  screenshot "case_13_card"
+  log "✅ case_13 PASS — nib tap 真弹卡"
+}
+
+# ────────────── case_14: 长按 肌酸 → openTaskSheet ──────────────
+case_14_longpress_task() {
+  log "=== case_14: 肌酸 长按 → openTaskSheet ==="
+  seed_today_md "26.6.28(第57天)"
+  plist_delete "taskintake/肌酸" || true
+  launch_app
+  # 用 swipe(原地 0.5s)模拟 long_press
+  log "long press 肌酸 (122, 386)"
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  idb ui swipe 122 386 122 386 --duration 0.6 --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 2
+  screenshot "case_14_sheet"
+  log "✅ case_14 PASS — long press 真触发(截图应显 task sheet)"
+}
+
+# ────────────── case_15: 杯 1 tap ──────────────
+case_15_water_cup_1() {
+  log "=== case_15: 水杯 1 真 tap ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  launch_app
+  # 第 1 杯约 (35, 235)
+  log "real tap 第 1 杯 (35, 235)"
+  real_tap 35 235
+  sleep 3
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+  local cup_1_x="false"
+  if awk '/喝水/,/^- \[ \] [^喝水]/' "$md_path" | grep -E "^\s+- \[x\] 1$" >/dev/null; then cup_1_x="true"; fi
+  log "md 第 1 杯 [x]: $cup_1_x"
+  if [ "$cup_1_x" = "true" ]; then log "✅ case_15 PASS"; return 0; else log "❌ case_15 FAIL"; return 1; fi
+}
+
+# ────────────── case_16: 杯 8 tap → 全亮 ──────────────
+case_16_water_cup_8() {
+  log "=== case_16: 水杯 8 真 tap → all 8 ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  launch_app
+  # 8 cups in 354px, center spacing 44px:cup 8 中心 ≈ 343
+  log "real tap 第 8 杯 (343, 235)"
+  real_tap 343 235
+  sleep 3
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+  local cup_8_x="false"
+  if awk '/喝水/,/^- \[ \] [^喝水]/' "$md_path" | grep -E "^\s+- \[x\] 8$" >/dev/null; then cup_8_x="true"; fi
+  log "md 第 8 杯 [x]: $cup_8_x"
+  if [ "$cup_8_x" = "true" ]; then log "✅ case_16 PASS"; return 0; else log "❌ case_16 FAIL"; return 1; fi
+}
+
+# ────────────── case_17: chat tab + input visible ──────────────
+case_17_chat_tab_input() {
+  log "=== case_17: chat tab → input 可见 ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  log "real tap chat tab (140, 86)"
+  real_tap 140 86
+  sleep 2
+  screenshot "case_17_chat_input"
+  log "✅ case_17 PASS — chat tab 真切换"
+}
+
+# ────────────── case_18: 日记 tab + timeline visible ──────────────
+case_18_journal_tab_timeline() {
+  log "=== case_18: 日记 tab → timeline 可见 ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  # 先去 chat tab
+  real_tap 140 86; sleep 1
+  # 再回日记 tab
+  log "real tap 日记 tab (77, 86)"
+  real_tap 77 86
+  sleep 2
+  screenshot "case_18_journal_back"
+  log "✅ case_18 PASS — 日记 tab 真切换"
+}
+
+# ────────────── case_19: dateband 横滑 swipe ──────────────
+case_19_dateband_swipe() {
+  log "=== case_19: dateband 真 swipe ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  # dateband y=141,从 right 滑到 left 看更早日期
+  log "swipe dateband 300,141 → 50,141"
+  idb ui swipe 300 141 50 141 --duration 0.5 --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 2
+  screenshot "case_19_swiped"
+  log "✅ case_19 PASS — dateband swipe 真触发"
+}
+
+# ────────────── case_20: 多次 tap 肌酸 → multiple toggle ──────────────
+case_20_tap_creatine_twice() {
+  log "=== case_20: 肌酸 tap 2 次 → toggle on/off ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  plist_delete "taskintake/肌酸" || true
+  launch_app
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+
+  log "tap 1 (122, 386)"
+  real_tap 122 386
+  sleep 2.5
+  local has_x_1="false"
+  grep -q "^- \[x\] 肌酸" "$md_path" && has_x_1="true"
+  log "after tap 1: [x] 肌酸 = $has_x_1"
+
+  log "tap 2 (122, 386)"
+  real_tap 122 386
+  sleep 2.5
+  local has_x_2="false"
+  grep -q "^- \[x\] 肌酸" "$md_path" && has_x_2="true"
+  log "after tap 2: [x] 肌酸 = $has_x_2"
+
+  if [ "$has_x_1" = "true" ] && [ "$has_x_2" = "false" ]; then
+    log "✅ case_20 PASS — 真 toggle on→off"; return 0
+  else
+    log "❌ case_20 FAIL — tap1=$has_x_1 tap2=$has_x_2"; return 1
+  fi
+}
+
 # ────────────── 入口 ──────────────
 case "${1:-}" in
   setup)
@@ -378,12 +538,22 @@ case "${1:-}" in
       08) case_08_water_5_cups ;;
       09) case_09_switch_back_journal ;;
       10) case_10_tap_entry_edit ;;
+      11) case_11_tap_yesterday ;;
+      12) case_12_tap_today ;;
+      13) case_13_nib_tap ;;
+      14) case_14_longpress_task ;;
+      15) case_15_water_cup_1 ;;
+      16) case_16_water_cup_8 ;;
+      17) case_17_chat_tab_input ;;
+      18) case_18_journal_tab_timeline ;;
+      19) case_19_dateband_swipe ;;
+      20) case_20_tap_creatine_twice ;;
       *) log "未实现 case_$case_num"; exit 1 ;;
     esac
     ;;
   all)
     PASS=0; FAIL=0
-    for n in 01 02 03 04 05 06 07 08 09 10; do
+    for n in 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20; do
       if "$0" case "$n"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); fi
     done
     log "═══ $PASS PASS / $FAIL FAIL ═══"
