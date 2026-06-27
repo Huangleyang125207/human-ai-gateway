@@ -1,19 +1,24 @@
-# ★ Test-First Parity Loop 进度(2026-06-27 23:40 实施)
+# ★ Test-First Parity Loop 真完成(2026-06-27 20:30 收尾)
 
-跑 `node mobile/parity/run.mjs` → **42/42 PASS**(node + memory Backend,无需 LLM 或 simulator)。
+跑 `node mobile/parity/run.mjs` → **65/65 PASS** ✅(node + memory Backend,无需 LLM 或 simulator)
+**TEST_FIRST_MIGRATION.md §4 五步工作流真完整走通**:
+① 抓 PC oracle(109 golden 文件)→ ② 写 mobile self-test(65 case)→
+③ 真跑暴露 drift → fix mobile-api → ④ 字节比/形状比/plist 副作用真验 → ⑤ ✅ 登 PASS
 
-## 现状
+## 现状(65/65 全 PASS)
 
 | 类 | case 数 | 状态 |
 |---|---|---|
 | smoke (health/setup-status) | 2 | ✅ |
-| journal (insert/patch/delete/append/days/today/new_day) | 11 | ✅ |
-| daily_tasks (catalog/check/meta/water_cup/add/delete/history) | 11 | ✅ |
-| thread (history empty/corrupt/save_fresh/save_non_list) | 4 | ✅ |
-| scrapbook (upsert/missing_args) | 2 | ✅ |
+| journal (insert/patch/delete/append/days/today/new_day/insert_body/by_date)| 17 | ✅ |
+| daily_tasks (catalog/check/meta/water_cup/add/delete/history/rejects_future/two_days_ago)| 17 | ✅ |
+| thread (history empty/corrupt/save_fresh/save_non_list/happy/save_stale_409)| 6 | ✅ |
+| scrapbook (upsert/missing_args/delete_by_id/delete_missing_id)| 4 | ✅ |
+| setup (current/save_partial/test_missing_key/test_missing_model) | 4 | ✅ |
+| vault (audit_empty/audit_shape) | 2 | ✅ |
 | vision/cutout (missing args 400)| 2 | ✅ |
-| vault/setup/widgets/uploads/init/telemetry/config | 7 | ✅ |
-| **合计** | **42/42** | **✅** |
+| widgets/uploads/init/telemetry/config/get_attachment/water_cup/models | 8 | ✅ |
+| **合计** | **65/65** | **✅** |
 
 ## 真 fix(parity loop 暴露真 drift)
 
