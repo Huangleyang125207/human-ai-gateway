@@ -2311,8 +2311,10 @@
   // 真机/simulator:把结果写到 setting/__self_test__ + console.log,debug 时可用
   //   xcrun simctl get_app_container <UDID> com.humanai.gateway data
   //   再 defaults read <plist>/Preferences/com.humanai.gateway.plist 看真存了什么
-  // ★ App launch 时立即从 plist 恢复"上次测试结果"overlay + scrapbook 浮动
-  //   不等 self-test 跑完(~15min)— user 一打开 app 就见 6/6 PASS 状态 + 浮动照片
+  // ★ App launch 时立即从 plist 恢复"上次测试结果"overlay + vault timeline + scrapbook 真 anchor
+  //   - overlay 顶部固定显示测试结果
+  //   - vault timeline 渲染 # 9:30 / # 15:00 等 H1 + 各 H2 列表(scroll panel)
+  //   - scrapbook sticker 真 anchor 到对应 H1 DOM 旁(根据 anchor_time 找 DOM)
   setTimeout(function () {
     if (typeof document === "undefined") return;
     Store.getSetting("__last_test_overlay__").then(function (html) {
@@ -2322,29 +2324,69 @@
       var node = wrap.firstChild;
       if (node && !document.getElementById("__gw_strict_overlay__")) document.body.appendChild(node);
     }).catch(function () {});
-    // 同时恢复 scrapbook 浮动 sticker(读 plist 真持久数据 reconstruct)
+    // ★ Vault timeline panel:解析 vault md 渲染 H1 + H2 列表 到固定 scroll panel
+    Store.readJournalMd(todayIso()).then(function (md) {
+      if (!md || document.getElementById("__gw_vault_timeline__")) return;
+      var panel = document.createElement("div");
+      panel.id = "__gw_vault_timeline__";
+      panel.style.cssText = "position:fixed;top:350px;left:10px;right:10px;height:380px;background:rgba(255,250,243,0.97);border:2px solid #a86e46;border-radius:12px;padding:10px;font:13px/1.5 -apple-system,sans-serif;color:#3a2418;overflow:auto;z-index:99997;box-shadow:0 6px 20px rgba(168,110,70,0.3);";
+      var title = "<div style='font-weight:700;font-size:14px;margin-bottom:6px;color:#7a5230;border-bottom:1px solid #d4a373;padding-bottom:4px;'>📓 今日时间线(vault md real)</div>";
+      var html = title;
+      var blocks = md.split(/^# /m).slice(1); // 去掉首 # 之前
+      blocks.forEach(function (blk) {
+        var lines = blk.split("\n");
+        var h1 = lines[0].trim();
+        var timeMatch = h1.match(/^(\d+)[：:](\d+)/);
+        if (!timeMatch) return;
+        var timeId = "__gw_h1_" + timeMatch[1] + "_" + timeMatch[2];
+        var h2s = blk.split(/^## /m).slice(1).map(function (b) { return b.split("\n")[0].trim(); });
+        html += "<div id='" + timeId + "' data-time='" + timeMatch[1] + ":" + timeMatch[2] + "' style='margin:8px 0;padding:6px;background:#fbf5ea;border-left:3px solid #a86e46;border-radius:4px;'>";
+        html += "<div style='font-weight:700;color:#7a5230;'># " + h1 + "</div>";
+        h2s.forEach(function (h2) {
+          html += "<div style='font-size:11px;color:#5a4030;margin:2px 0 2px 8px;'>↳ " + h2.slice(0, 40) + "</div>";
+        });
+        html += "</div>";
+      });
+      panel.innerHTML = html;
+      document.body.appendChild(panel);
+    }).catch(function () {});
+    // ★ Scrapbook sticker 真 anchor 到对应 H1 DOM 旁(根据 anchor_time 找 timeline panel 内 H1)
     Store.readScrapbook(todayIso()).then(function (items) {
       if (!items.length) return;
-      items.forEach(function (it, idx) {
-        var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(it.src);
-        if (!m) return;
-        Store.readAttachment(m[1], m[2]).then(function (dataUrl) {
-          if (!dataUrl) return;
-          var img = document.createElement("img");
-          img.src = dataUrl;
-          var topPx = 380 + idx * 30;
-          var rightPct = 100 - (it.x_pct || 75);
-          img.style.cssText = "position:fixed;top:" + topPx + "px;right:" + rightPct + "%;width:120px;height:120px;transform:rotate(" + (it.rotation || 0) + "deg);z-index:99998;border:4px solid #fff;border-radius:8px;box-shadow:0 8px 24px rgba(168,110,70,0.4);background:#fff;";
-          img.alt = "scrapbook anchor=" + it.anchor_time;
-          img.id = "__gw_scrapbook_persist_" + idx;
-          if (!document.getElementById(img.id)) document.body.appendChild(img);
-          var label = document.createElement("div");
-          label.style.cssText = "position:fixed;top:" + (topPx + 125) + "px;right:" + rightPct + "%;background:#a86e46;color:#fff;font:11px/1 -apple-system,sans-serif;padding:3px 6px;border-radius:3px;z-index:99998;";
-          label.textContent = "↳ anchor: # " + it.anchor_time;
-          label.id = "__gw_scrapbook_label_persist_" + idx;
-          if (!document.getElementById(label.id)) document.body.appendChild(label);
+      // 等 timeline panel 渲染完再 anchor sticker
+      setTimeout(function () {
+        items.forEach(function (it, idx) {
+          var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(it.src);
+          if (!m) return;
+          Store.readAttachment(m[1], m[2]).then(function (dataUrl) {
+            if (!dataUrl) return;
+            var hh_mm = it.anchor_time.replace(":", "_");
+            var anchorEl = document.getElementById("__gw_h1_" + hh_mm);
+            var topPx, leftPx;
+            if (anchorEl) {
+              // 真 anchor:位于 timeline panel 内对应 H1 DOM 右侧
+              var rect = anchorEl.getBoundingClientRect();
+              topPx = rect.top + window.scrollY - 10;
+              leftPx = Math.min(window.innerWidth - 130, rect.right + 8);
+            } else {
+              // fallback:浮在屏中(timeline 没找到 anchor_time)
+              topPx = 400 + idx * 30;
+              leftPx = window.innerWidth - 140;
+            }
+            var img = document.createElement("img");
+            img.src = dataUrl;
+            img.style.cssText = "position:fixed;top:" + topPx + "px;left:" + leftPx + "px;width:100px;height:100px;transform:rotate(" + (it.rotation || -2) + "deg);z-index:99998;border:3px solid #fff;border-radius:6px;box-shadow:0 6px 20px rgba(168,110,70,0.5);background:#fff;";
+            img.alt = "scrapbook anchor=" + it.anchor_time + (anchorEl ? " (DOM真锚)" : " (fallback)");
+            img.id = "__gw_scrapbook_anchor_" + idx;
+            if (!document.getElementById(img.id)) document.body.appendChild(img);
+            var label = document.createElement("div");
+            label.style.cssText = "position:fixed;top:" + (topPx + 105) + "px;left:" + leftPx + "px;background:#a86e46;color:#fff;font:10px/1 -apple-system,sans-serif;padding:2px 5px;border-radius:3px;z-index:99998;";
+            label.textContent = (anchorEl ? "✓ " : "○ ") + "anchor # " + it.anchor_time;
+            label.id = "__gw_scrapbook_label_anchor_" + idx;
+            if (!document.getElementById(label.id)) document.body.appendChild(label);
+          });
         });
-      });
+      }, 100);
     }).catch(function () {});
   }, 200);  // app launch 200ms 立即恢复
 
@@ -2859,13 +2901,13 @@
                     }).then(function (r) { return r.text(); });
                   }).then(function (sse) {
                     // 用 chatRetry 模式 — 3 次尝试 直到 AI 调 place_scrapbook_image
-                    return window.__chatRetry("立即 call place_scrapbook_image:attachment_url='/attachments/2026-06-27/s6-breakfast.png',date='2026-06-27',anchor_time='9:30',x_pct=70。直接 tool call,不要解释。", "place_scrapbook_image", 5);
+                    return window.__chatRetry("立即 call place_scrapbook_image:attachment_url='/attachments/2026-06-27/s6-breakfast.png',date='2026-06-27',anchor_time='15:00',x_pct=70。直接 tool call,不要解释。", "place_scrapbook_image", 5);
                   }).then(function (rr) {
                     var didCall = rr.hit;
                     return Store.readScrapbook("2026-06-27").then(function (items) {
-                      var anchored = items.some(function (it) { return it.anchor_time === "9:30" && it.src.indexOf("s6-breakfast") >= 0; });
+                      var anchored = items.some(function (it) { return it.anchor_time === "15:00" && it.src.indexOf("s6-breakfast") >= 0; });
                       var pass = didCall && anchored;
-                      srPush("S6", "照片 chat → place_scrapbook_image(anchor 9:30)", pass, "tool=" + didCall + " items=" + items.length + " anchored9:30=" + anchored);
+                      srPush("S6", "照片 chat → place_scrapbook_image(anchor 15:00)", pass, "tool=" + didCall + " items=" + items.length + " anchored15:00=" + anchored);
                     });
                   });
               }).then(function () {
