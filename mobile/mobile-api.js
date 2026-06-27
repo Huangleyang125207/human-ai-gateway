@@ -2435,8 +2435,14 @@
       });
       var nib = document.querySelector('.gw-nib');
       var nibRect = nib ? nib.getBoundingClientRect() : null;
+      var cups = [];
+      document.querySelectorAll('.gw-cup').forEach(function(el, i) {
+        var r = el.getBoundingClientRect();
+        cups.push({i: i + 1, x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2)});
+      });
       var data = {
         chips: rects,
+        cups: cups,
         navTabs: navTabs,
         dayPills: dayPills,
         nib: nibRect ? {x: Math.round(nibRect.left + nibRect.width/2), y: Math.round(nibRect.top + nibRect.height/2)} : null,
@@ -2447,7 +2453,7 @@
       }
       console.log('[ui-rects]', JSON.stringify(data));
     } catch (e) { console.warn('[ui-rects] dump failed', e); }
-  }, 2500);
+  }, 4500);  // 等 cups + chips 渲染完(原 2.5s 不够)
 
   // ★ Self-test 必须 gate — T2 故意写假 key `sk-onboard-XXXXXX` 覆盖 user 真 key,
   //   每次 app launch 都跑 = 用户真 key 一直被擦,chat 永远报"还没填 DeepSeek key"。

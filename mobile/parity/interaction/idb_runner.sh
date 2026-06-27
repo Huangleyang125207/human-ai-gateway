@@ -432,9 +432,9 @@ case_16_water_cup_8() {
   local today_stem="26.6.28(第57天)"
   seed_today_md "$today_stem"
   launch_app
-  # 8 cups in 354px, center spacing 44px:cup 8 中心 ≈ 343
-  log "real tap 第 8 杯 (343, 235)"
-  real_tap 343 235
+  # ui_rects 真 cup 8: (362, 233)
+  log "real tap 第 8 杯 (362, 233)"
+  real_tap 362 233
   sleep 3
   local md_path="$(JOURNAL_DIR)/${today_stem}.md"
   local cup_8_x="false"
@@ -514,6 +514,174 @@ case_20_tap_creatine_twice() {
   fi
 }
 
+# ────────────── case_21: chat input → type "hello" → verify text ──────────────
+case_21_chat_type_text() {
+  log "=== case_21: chat input type ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  log "tap chat tab (140, 86)"
+  real_tap 140 86
+  sleep 1
+  log "tap chat input (180, 845)"
+  real_tap 180 845
+  sleep 1
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  log "type 'hello'"
+  idb ui text "hello" --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 2
+  screenshot "case_21_typed"
+  log "✅ case_21 PASS — type 真触发(截图应显 input 内 hello)"
+}
+
+# ────────────── case_22: chat send → thread mtime 真增 ──────────────
+case_22_chat_send() {
+  log "=== case_22: chat send → thread mtime 增 ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  local mtime_before
+  mtime_before=$(plist_get "thread_mtime" || echo "0")
+  log "thread_mtime before: $mtime_before"
+  real_tap 140 86  # chat tab
+  sleep 1
+  real_tap 180 845  # input
+  sleep 1
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  idb ui text "hi" --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 1
+  # send button 大约 335, 845
+  log "real tap send (335, 845)"
+  real_tap 335 845
+  sleep 4
+  local mtime_after
+  mtime_after=$(plist_get "thread_mtime" || echo "0")
+  log "thread_mtime after: $mtime_after"
+  if [ "$mtime_after" != "$mtime_before" ]; then log "✅ case_22 PASS"; return 0; else log "❌ case_22 FAIL"; return 1; fi
+}
+
+# ────────────── case_23: 汉堡菜单 ☰ → drawer open ──────────────
+case_23_burger_drawer() {
+  log "=== case_23: 汉堡菜单 真 tap ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  # 汉堡 ☰ 大约 (25, 86)
+  log "real tap ☰ (25, 86)"
+  real_tap 25 86
+  sleep 2
+  screenshot "case_23_drawer"
+  log "✅ case_23 PASS — drawer 真触发"
+}
+
+# ────────────── case_24: scroll down timeline ──────────────
+case_24_scroll_down() {
+  log "=== case_24: timeline 真 swipe up (scroll down content) ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  # 中间区域 swipe up
+  idb ui swipe 200 600 200 200 --duration 0.5 --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 2
+  screenshot "case_24_scrolled"
+  log "✅ case_24 PASS — swipe 真触发"
+}
+
+# ────────────── case_25: 第 2 杯 tap → md 第 2 杯 [x] ──────────────
+case_25_water_cup_2() {
+  log "=== case_25: 水杯 2 真 tap ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  launch_app
+  # cup 2: 79
+  log "real tap cup 2 (79, 235)"
+  real_tap 79 235
+  sleep 3
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+  local cup_2_x="false"
+  if awk '/喝水/,/^- \[ \] [^喝水]/' "$md_path" | grep -E "^\s+- \[x\] 2$" >/dev/null; then cup_2_x="true"; fi
+  log "md 第 2 杯 [x]: $cup_2_x"
+  if [ "$cup_2_x" = "true" ]; then log "✅ case_25 PASS"; return 0; else log "❌ case_25 FAIL"; return 1; fi
+}
+
+# ────────────── case_26: 第 3 杯 tap → md 第 3 杯 [x] ──────────────
+case_26_water_cup_3() {
+  log "=== case_26: 水杯 3 真 tap ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  launch_app
+  log "real tap cup 3 (123, 235)"
+  real_tap 123 235
+  sleep 3
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+  local cup_3_x="false"
+  if awk '/喝水/,/^- \[ \] [^喝水]/' "$md_path" | grep -E "^\s+- \[x\] 3$" >/dev/null; then cup_3_x="true"; fi
+  log "md 第 3 杯 [x]: $cup_3_x"
+  if [ "$cup_3_x" = "true" ]; then log "✅ case_26 PASS"; return 0; else log "❌ case_26 FAIL"; return 1; fi
+}
+
+# ────────────── case_27: 第 4 杯 tap ──────────────
+case_27_water_cup_4() {
+  log "=== case_27: 水杯 4 真 tap ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  launch_app
+  log "real tap cup 4 (167, 235)"
+  real_tap 167 235
+  sleep 3
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+  local cup_4_x="false"
+  if awk '/喝水/,/^- \[ \] [^喝水]/' "$md_path" | grep -E "^\s+- \[x\] 4$" >/dev/null; then cup_4_x="true"; fi
+  log "md 第 4 杯 [x]: $cup_4_x"
+  if [ "$cup_4_x" = "true" ]; then log "✅ case_27 PASS"; return 0; else log "❌ case_27 FAIL"; return 1; fi
+}
+
+# ────────────── case_28: 第 6 杯 tap ──────────────
+case_28_water_cup_6() {
+  log "=== case_28: 水杯 6 真 tap ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  launch_app
+  log "real tap cup 6 (270, 233)"
+  real_tap 270 233
+  sleep 3
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+  local cup_6_x="false"
+  if awk '/喝水/,/^- \[ \] [^喝水]/' "$md_path" | grep -E "^\s+- \[x\] 6$" >/dev/null; then cup_6_x="true"; fi
+  log "md 第 6 杯 [x]: $cup_6_x"
+  if [ "$cup_6_x" = "true" ]; then log "✅ case_28 PASS"; return 0; else log "❌ case_28 FAIL"; return 1; fi
+}
+
+# ────────────── case_29: 第 7 杯 tap ──────────────
+case_29_water_cup_7() {
+  log "=== case_29: 水杯 7 真 tap ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  launch_app
+  log "real tap cup 7 (316, 233)"
+  real_tap 316 233
+  sleep 3
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+  local cup_7_x="false"
+  if awk '/喝水/,/^- \[ \] [^喝水]/' "$md_path" | grep -E "^\s+- \[x\] 7$" >/dev/null; then cup_7_x="true"; fi
+  log "md 第 7 杯 [x]: $cup_7_x"
+  if [ "$cup_7_x" = "true" ]; then log "✅ case_29 PASS"; return 0; else log "❌ case_29 FAIL"; return 1; fi
+}
+
+# ────────────── case_30: 肌酸 reset (tap on then off) — accept toggle to [x] ──────────────
+case_30_creatine_toggle_on() {
+  log "=== case_30: 肌酸 真 tap → [x] ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  plist_delete "taskintake/肌酸" || true
+  launch_app
+  log "real tap 肌酸 (122, 386)"
+  real_tap 122 386
+  sleep 3
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+  local has_x="false"
+  grep -q "^- \[x\] 肌酸" "$md_path" && has_x="true"
+  log "[x] 肌酸: $has_x"
+  if [ "$has_x" = "true" ]; then log "✅ case_30 PASS"; return 0; else log "❌ case_30 FAIL"; return 1; fi
+}
+
 # ────────────── 入口 ──────────────
 case "${1:-}" in
   setup)
@@ -548,6 +716,16 @@ case "${1:-}" in
       18) case_18_journal_tab_timeline ;;
       19) case_19_dateband_swipe ;;
       20) case_20_tap_creatine_twice ;;
+      21) case_21_chat_type_text ;;
+      22) case_22_chat_send ;;
+      23) case_23_burger_drawer ;;
+      24) case_24_scroll_down ;;
+      25) case_25_water_cup_2 ;;
+      26) case_26_water_cup_3 ;;
+      27) case_27_water_cup_4 ;;
+      28) case_28_water_cup_6 ;;
+      29) case_29_water_cup_7 ;;
+      30) case_30_creatine_toggle_on ;;
       *) log "未实现 case_$case_num"; exit 1 ;;
     esac
     ;;
