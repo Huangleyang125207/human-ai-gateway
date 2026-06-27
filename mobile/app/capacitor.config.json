@@ -33,9 +33,6 @@
     "Filesystem": {
       "_comment": "iCloud Backup 排除 attachments 目录(critic 标的 5GB 撑满 trap),真机阶段配合 Swift bridge 写 NSURLIsExcludedFromBackupKey",
       "iosDatabaseLocation": "Library/NoCloud"
-    },
-    "Preferences": {
-      "group": "NSUserDefaults"
     }
   }
 }
