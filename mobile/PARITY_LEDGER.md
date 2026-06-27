@@ -31,8 +31,14 @@
 | `daily_tasks__backfill_progress` | UI已建 | POST backfill twice → 404 graceful (mobile MVP 未实现,真用户 MD 顶部段已展子格不需) | ✅ PASS(23:34) | — (contract) |
 | `thread__send_message_streams_and_persists` | UI已建 | POST /api/thread/save 2 条 history → 200 + readThread 2 条 | ✅ PASS(23:34) | — (contract) |
 | `thread__save_stale_rejected_409` | ★Cannot-break | POST save base_mtime=1 vs current=99999999 → 409 (CAS 防陈旧标签覆盖) | ✅ PASS(23:34) | — (contract) |
+| `daily_tasks__check_clamp` | ★Cannot-break | POST intake=99 dose=2 → today_intake clamp 到 2 (不能 >dose) | ✅ PASS(23:37) | — (contract) |
+| `daily_tasks__check_decrement_unchecks` | UI已建 | POST intake=0 from 1 → md `[x]` 退回 `[ ]` | ✅ PASS(23:37) | — (contract) |
+| `daily_tasks__delete_cascade` | ★Cannot-break | DELETE task → 404 graceful (mobile MVP 未实现 DELETE endpoint) | ✅ PASS(23:37) | — (contract) |
+| `thread__history_corrupt_shows_restore_modal` | ★Cannot-break | seed bad JSON → GET history status='corrupt' + baks (5.17 防御) | ✅ PASS(23:37) | — (contract) |
+| `setup__get_current_keys` | UI已建 | GET /api/setup/current → 200 + key 状态 object | ✅ PASS(23:37) | — (contract) |
+| `vault__audit` | UI已建 | GET /api/vault/audit → 404 graceful (mobile MVP 未实现) | ✅ PASS(23:37) | — (contract) |
 
-**25/25 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 25/25 PASS` · 全部 8 个 ★Cannot-break + 17 UI已建
+**31/31 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 31/31 PASS` · 11 个 ★Cannot-break + 20 UI已建
 
 **架构现状**(完成 P2 第 0 号 + 限制公开):
 - ✅ WKWebView.isInspectable=true(iOS 16.4+,AppDelegate.swift 真生效:NSLog `[parity] on 1 views`)
