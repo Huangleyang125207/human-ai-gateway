@@ -85,12 +85,17 @@
   };
 
   // ★ Backend 改 wrapper 对象 — 每次方法调用都 lazy 决定 delegate,而不是 IIFE 启动时锁死。
-  //   Store 内全部 Backend.X(...) 一行不用改,真机 plugin lazy 就绪后立刻切到 CapacitorBackend。
+  //   ★ 新增:node 测试环境 globalThis.__GW_TEST_BACKEND__ 优先(harness 注入 Map-based store)
+  function _testBackend() { return (typeof globalThis !== "undefined" && globalThis.__GW_TEST_BACKEND__) || null; }
   var Backend = {
-    getText: function (k) { return (_getFs() ? CapacitorBackend : LocalBackend).getText(k); },
-    setText: function (k, v) { return (_getFs() ? CapacitorBackend : LocalBackend).setText(k, v); },
-    remove: function (k) { return (_getFs() ? CapacitorBackend : LocalBackend).remove(k); },
-    keys: function (prefix) { return (_getFs() ? CapacitorBackend : LocalBackend).keys(prefix); },
+    getText: function (k) { var tb = _testBackend(); if (tb) return tb.getText(k); return (_getFs() ? CapacitorBackend : LocalBackend).getText(k); },
+    setText: function (k, v) { var tb = _testBackend(); if (tb) return tb.setText(k, v); return (_getFs() ? CapacitorBackend : LocalBackend).setText(k, v); },
+    remove: function (k) { var tb = _testBackend(); if (tb) return tb.remove(k); return (_getFs() ? CapacitorBackend : LocalBackend).remove(k); },
+    keys: function (prefix) {
+      var tb = _testBackend();
+      if (tb) return tb.keys().then(function (ks) { return ks.filter(function (k) { return k.indexOf(prefix) === 0; }); });
+      return (_getFs() ? CapacitorBackend : LocalBackend).keys(prefix);
+    },
   };
 
   var Store = {
@@ -2991,4 +2996,32 @@
       try { Store.setSetting("__self_test_report__", report); } catch (_) {}
     });
   }, 500);  // 等 500ms 让 Capacitor bridge 真就绪
+
+  // ★ Node 测试 hook — harness.mjs 接 dispatch / setBackend / dumpBackend
+  //   仅测试环境(globalThis.__GW_TEST_MODE__=true)生效,不影响真机/simulator
+  if (typeof globalThis !== "undefined") {
+    globalThis.__GW_TEST_API__ = {
+      setBackend: function (tb) { globalThis.__GW_TEST_BACKEND__ = tb; },
+      dispatch: function (method, path, body) {
+        var key = method.toUpperCase() + " " + path.split("?")[0];
+        var fn = handlers[key];
+        if (!fn) return Promise.resolve({ status: 404, body: { error: "no handler for " + key } });
+        var u = "http://test" + path;
+        var p;
+        try { p = Promise.resolve(fn({ method: method }, u, body)); }
+        catch (e) { return Promise.resolve({ status: 500, body: { error: String(e) } }); }
+        return p.then(function (resp) {
+          if (resp && typeof resp.json === "function") {
+            return resp.text().then(function (txt) {
+              var parsed; try { parsed = JSON.parse(txt); } catch (e) { parsed = txt; }
+              return { status: resp.status, body: parsed };
+            });
+          }
+          return resp;
+        });
+      },
+      dumpBackend: function () { var tb = globalThis.__GW_TEST_BACKEND__; return tb && tb._dump ? tb._dump() : null; },
+      Store: Store,  // 给 harness 用 readJournalMd 等 helper
+    };
+  }
 })();

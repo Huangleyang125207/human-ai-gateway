@@ -34,19 +34,45 @@ export function golden(name) {
   return readFileSync(new URL(`./golden/${name}`, import.meta.url), "utf-8");
 }
 
-// ── TODO(mobile session 接):把 mobile-api.js 的 dispatch 暴露出来 ─────────
-// mobile-api.js 现在是浏览器 IIFE / fetch 拦截。要在 node 里调一个 /api 端点,需要:
-//   1) 注入 makeBackend() 当它的 Store 底座(替 Capacitor Preferences)
-//   2) 拿到它处理 /api 的入口函数(handleApi(method, path, body) 之类)
-// 两种接法,挑一种:
-//   A. 给 mobile-api.js 加一个 `export`(或 `globalThis.__mobileApiDispatch`)只在测试环境暴露 dispatch
-//   B. 用 jsdom 起一个最小 DOM + fetch 拦截,真发 fetch("/api/...") 让 shim 接
-// 接好后实现下面两个:
-export async function loadShim(/* { backend } */) {
-  throw new Error("TODO: 注入 backend + 加载 mobile-api.js dispatch(见上方两种接法)");
+// ── 接钩子(mobile session 已接):mobile-api.js IIFE 末尾挂 globalThis.__GW_TEST_API__
+//   含 dispatch(method, path, body) → {status, body}
+//        setBackend(tb) → 注入 harness makeBackend() 替 Capacitor Preferences
+//        dumpBackend() → 全量 state inspect
+//   loadShim() polyfill browser globals,eval mobile-api.js IIFE,挂 __GW_TEST_API__
+export async function loadShim({ backend } = {}) {
+  // Polyfill browser globals 让 mobile-api.js IIFE 能在 node 跑
+  if (typeof globalThis.window === "undefined") {
+    const fetchStub = function () { return Promise.reject(new Error("no real fetch")); };
+    globalThis.window = { Capacitor: null, addEventListener: function () {}, removeEventListener: function () {}, fetch: fetchStub };
+    globalThis.fetch = fetchStub;
+    globalThis.realFetch = fetchStub;
+    globalThis.document = {
+      createElement: function () { return { style: {}, appendChild: function () {}, getContext: function () { return { fillStyle: "", fillRect: function () {}, fillText: function () {}, font: "", textBaseline: "" }; }, toDataURL: function () { return ""; } }; },
+      body: { appendChild: function () {} },
+      getElementById: function () { return null; },
+    };
+    globalThis.location = { origin: "http://test" };
+    globalThis.localStorage = { getItem: function () { return null; }, setItem: function () {}, removeItem: function () {} };
+    globalThis.fetch = function () { return Promise.reject(new Error("no real fetch in node test")); };
+    globalThis.realFetch = globalThis.fetch;
+  }
+  // 注入 backend(替 LocalBackend / CapacitorBackend)
+  if (backend && globalThis.__GW_TEST_API__) {
+    globalThis.__GW_TEST_API__.setBackend(backend);
+  }
+  // 首次:eval mobile-api.js 把 __GW_TEST_API__ 挂上
+  if (!globalThis.__GW_TEST_API__) {
+    const { readFileSync } = await import("node:fs");
+    const text = readFileSync(new URL("../mobile-api.js", import.meta.url), "utf-8");
+    // eslint-disable-next-line no-eval
+    (0, eval)(text);
+    if (backend) globalThis.__GW_TEST_API__.setBackend(backend);
+  }
+  return globalThis.__GW_TEST_API__;
 }
-export async function callApi(/* shim, method, path, body */) {
-  throw new Error("TODO: 经 shim dispatch 调一个 /api 端点,返 {status, json|text}");
+
+export async function callApi(shim, method, path, body) {
+  return await shim.dispatch(method, path, body);
 }
 
 // ── 例:daily-task check 的 parity 断言(B 类读 + A 类写一起)───────────────
