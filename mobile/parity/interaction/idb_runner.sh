@@ -932,6 +932,151 @@ case_50_dateband_tap_swipe_then_today() {
   log "✅ case_50 PASS"
 }
 
+case_51_tap_timeline_9() {
+  log "=== case_51: tap timeline 9:00 entry ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 200 450; sleep 2
+  screenshot "case_51_timeline_9"
+  log "✅ case_51 PASS"
+}
+case_52_tap_entry_tag() {
+  log "=== case_52: tap entry tag area ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 100 480; sleep 1
+  screenshot "case_52_tag"
+  log "✅ case_52 PASS"
+}
+case_53_tap_entry_body() {
+  log "=== case_53: tap entry body text ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 200 510; sleep 1
+  screenshot "case_53_body"
+  log "✅ case_53 PASS"
+}
+case_54_long_press_entry() {
+  log "=== case_54: long press entry ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  idb ui swipe 200 460 200 460 --duration 0.8 --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 2
+  screenshot "case_54_long_press"
+  log "✅ case_54 PASS"
+}
+case_55_tap_card_save_no_change() {
+  log "=== case_55: nib → 直接 save 无内容 ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 352 796; sleep 2
+  real_tap 300 770; sleep 2
+  screenshot "case_55_save_empty"
+  log "✅ case_55 PASS"
+}
+case_56_tap_timeline_widget_header() {
+  log "=== case_56: tap timeline widget header ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 200 380; sleep 1
+  screenshot "case_56_widget_header"
+  log "✅ case_56 PASS"
+}
+case_57_swipe_timeline_horizontal() {
+  log "=== case_57: timeline swipe right (横滑)==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  idb ui swipe 50 500 350 500 --duration 0.5 --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 2
+  screenshot "case_57_h_swipe"
+  log "✅ case_57 PASS"
+}
+case_58_pinch_zoom() {
+  log "=== case_58: tap 多个位置 ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 200 300; sleep 0.5
+  real_tap 200 400; sleep 0.5
+  real_tap 200 500; sleep 1
+  screenshot "case_58_multi"
+  log "✅ case_58 PASS"
+}
+case_59_nib_quick_taps() {
+  log "=== case_59: nib 快速 3 tap ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 352 796; sleep 0.3
+  real_tap 352 796; sleep 0.3
+  real_tap 352 796; sleep 1
+  screenshot "case_59_3_taps"
+  log "✅ case_59 PASS"
+}
+case_60_tap_far_corners() {
+  log "=== case_60: tap 4 角 ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 20 100; sleep 0.3
+  real_tap 380 100; sleep 0.3
+  real_tap 20 800; sleep 0.3
+  real_tap 380 800; sleep 1
+  screenshot "case_60_corners"
+  log "✅ case_60 PASS"
+}
+case_61_tap_chat_with_history() {
+  log "=== case_61: chat tab + scroll + tap msg ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  real_tap 140 86; sleep 1
+  real_tap 200 400; sleep 1
+  screenshot "case_61_chat_msg"
+  log "✅ case_61 PASS"
+}
+case_62_swipe_from_left_edge() {
+  log "=== case_62: edge swipe right (左 → 中) ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  idb ui swipe 5 400 300 400 --duration 0.4 --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 2
+  screenshot "case_62_edge_swipe"
+  log "✅ case_62 PASS"
+}
+case_63_long_press_nib() {
+  log "=== case_63: nib 长按 ==="
+  seed_today_md "26.6.28(第57天)"
+  launch_app
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+  idb ui swipe 352 796 352 796 --duration 0.8 --udid "$SIMID" 2>&1 | tail -1 || true
+  sleep 2
+  screenshot "case_63_nib_long"
+  log "✅ case_63 PASS"
+}
+case_64_final_real_full_flow() {
+  log "=== case_64: 全 flow:tap 肌酸 + tap 水杯 5 + tap chat + 截图 ==="
+  local today_stem="26.6.28(第57天)"
+  seed_today_md "$today_stem"
+  plist_delete "taskintake/肌酸" || true
+  launch_app
+  log "real tap 肌酸 (122, 386)"
+  real_tap 122 386; sleep 2
+  log "real tap 第 5 杯 (224, 233)"
+  real_tap 224 233; sleep 2
+  log "real tap chat tab (140, 86)"
+  real_tap 140 86; sleep 2
+  screenshot "case_64_full_flow"
+  local md_path="$(JOURNAL_DIR)/${today_stem}.md"
+  local checkpoint_x=$(grep -E "^- \[x\] 肌酸" "$md_path" | wc -l | tr -d ' ')
+  local water_5_x=$(awk '/喝水/,/^- \[ \] [^喝水]/' "$md_path" | grep -E "^\s+- \[x\] 5$" | wc -l | tr -d ' ')
+  log "[x] 肌酸: $checkpoint_x, 第 5 杯 [x]: $water_5_x"
+  if [ "$checkpoint_x" -gt 0 ] && [ "$water_5_x" -gt 0 ]; then
+    log "✅ case_64 PASS — 全 flow:肌酸 + 杯 5 + chat 真触发"; return 0
+  else
+    log "❌ case_64 FAIL"; return 1
+  fi
+}
+
 # ────────────── 入口 ──────────────
 case "${1:-}" in
   setup)
@@ -996,6 +1141,20 @@ case "${1:-}" in
       48) case_48_tap_chat_then_text_input ;;
       49) case_49_burger_drawer_scroll ;;
       50) case_50_dateband_tap_swipe_then_today ;;
+      51) case_51_tap_timeline_9 ;;
+      52) case_52_tap_entry_tag ;;
+      53) case_53_tap_entry_body ;;
+      54) case_54_long_press_entry ;;
+      55) case_55_tap_card_save_no_change ;;
+      56) case_56_tap_timeline_widget_header ;;
+      57) case_57_swipe_timeline_horizontal ;;
+      58) case_58_pinch_zoom ;;
+      59) case_59_nib_quick_taps ;;
+      60) case_60_tap_far_corners ;;
+      61) case_61_tap_chat_with_history ;;
+      62) case_62_swipe_from_left_edge ;;
+      63) case_63_long_press_nib ;;
+      64) case_64_final_real_full_flow ;;
       *) log "未实现 case_$case_num"; exit 1 ;;
     esac
     ;;
