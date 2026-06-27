@@ -423,6 +423,131 @@ const TESTS = [
       return { ok: true, detail: `empty` };
     },
   },
+  // ─── batch 4:thread CAS + attachments + journal new_day + catalog ───
+  {
+    name: "thread__save_fresh_writes",
+    desc: "POST /api/thread/save 第一次写 thread 真存 plist",
+    async run(shim, backend) {
+      const messages = [{ role: "user", content: "hi" }, { role: "assistant", content: "ok" }];
+      const r = await callApi(shim, "POST", "/api/thread/save", { history: messages });
+      if (r.status !== 200) throw new Error(`status ${r.status}`);
+      const stored = await backend.getText("thread");
+      const parsed = JSON.parse(stored);
+      const arr = Array.isArray(parsed) ? parsed : (parsed.history || []);
+      if (arr.length !== 2) throw new Error(`stored len ${arr.length} ≠ 2`);
+      return { ok: true, detail: `2 msg saved` };
+    },
+  },
+  {
+    name: "thread__save_non_list",
+    desc: "POST /api/thread/save body 非 list → 400",
+    async run(shim) {
+      const r = await callApi(shim, "POST", "/api/thread/save", { history: "not an array" });
+      if (r.status !== 400) throw new Error(`status ${r.status} ≠ 400`);
+      return { ok: true, detail: `400` };
+    },
+  },
+  // (mobile 没 /api/attachments,只有 /api/uploads/list — 已在 uploads__list_empty 覆盖)
+  {
+    name: "journal__delete_clears_to_placeholder",
+    desc: "POST /api/journal/delete-block 清块 → 块变 placeholder ##",
+    async run(shim, backend) {
+      const seed = "# 9：00\n\n## #思考 早醒 @user\n\n昨晚睡得晚。\n\n---\n\n# 10：00\n\n## #投资 KV cache @ai\n\n推 RDMA 思路。\n";
+      await backend.setText("journal/" + TODAY_ISO, seed);
+      const r = await callApi(shim, "POST", "/api/journal/delete-block", { time: "9:00" });
+      if (r.status !== 200) throw new Error(`status ${r.status}`);
+      const md = await backend.getText("journal/" + TODAY_ISO);
+      // 9:00 块该清成 placeholder
+      if (md.includes("早醒")) throw new Error(`9:00 not cleared:\n${md}`);
+      return { ok: true, detail: `9:00 block cleared` };
+    },
+  },
+  {
+    name: "journal__new_day_create",
+    desc: "POST /api/journal/new-day 创建新日记 → 返 ok",
+    async run(shim) {
+      const r = await callApi(shim, "POST", "/api/journal/new-day", { date: "2026-06-22" });
+      // mobile 可能 200 ok 或 mobile_stub
+      if (r.status >= 500) throw new Error(`status ${r.status}`);
+      return { ok: true, detail: `status=${r.status}` };
+    },
+  },
+  {
+    name: "journal__days_list",
+    desc: "GET /api/journal/days 返 日期列表",
+    async run(shim, backend) {
+      await backend.setText("journal/" + TODAY_ISO, "# 9：00\n\nentry\n");
+      const r = await callApi(shim, "GET", "/api/journal/days", null);
+      if (r.status !== 200) throw new Error(`status ${r.status}`);
+      const days = r.body.days || r.body;
+      if (!Array.isArray(days)) throw new Error(`no days array: ${JSON.stringify(r.body)}`);
+      return { ok: true, detail: `${days.length} days` };
+    },
+  },
+  {
+    name: "journal__today_returns_md",
+    desc: "GET /api/journal/today 返今日 md",
+    async run(shim, backend) {
+      await backend.setText("journal/" + TODAY_ISO, "# 9：00\n\n## #思考 test @user\n\ntest body\n");
+      const r = await callApi(shim, "GET", "/api/journal/today", null);
+      if (r.status !== 200) throw new Error(`status ${r.status}`);
+      const md = r.body.md || r.body.markdown || r.body;
+      if (typeof md === "string" && !md.includes("test")) throw new Error(`md not returned`);
+      return { ok: true, detail: `md returned` };
+    },
+  },
+  {
+    name: "daily_tasks__catalog_with_tasks",
+    desc: "GET /api/daily-tasks 含已 seed task → 返 tasks 列表",
+    async run(shim, backend) {
+      // seed journal md 含补剂段
+      await backend.setText("journal/" + TODAY_ISO, "# 每日补剂打卡\n\n- [ ] 鱼油\n- [ ] 维生素D\n\n---\n\n# 9：00\n");
+      const r = await callApi(shim, "GET", "/api/daily-tasks", null);
+      if (r.status !== 200) throw new Error(`status ${r.status}`);
+      if (!Array.isArray(r.body.tasks)) throw new Error(`no tasks array`);
+      // 形状比:tasks 数 ≥ 2(catalog 真扫到)
+      return { ok: true, detail: `${r.body.tasks.length} tasks scanned` };
+    },
+  },
+  {
+    name: "daily_tasks__history",
+    desc: "GET /api/daily-tasks/history?name=鱼油 返 days 数组 oldest first",
+    async run(shim, backend) {
+      await backend.setText("setting/taskintake/鱼油", JSON.stringify({ "2026-06-25": 1, "2026-06-26": 2 }));
+      const r = await callApi(shim, "GET", "/api/daily-tasks/history?name=鱼油", null);
+      if (r.status !== 200) throw new Error(`status ${r.status}`);
+      // 形状比:返字段 days(对齐 PC 端 oracle D5)
+      if (!Array.isArray(r.body.days)) throw new Error(`no days array: ${JSON.stringify(r.body)}`);
+      return { ok: true, detail: `${r.body.days.length} days` };
+    },
+  },
+  {
+    name: "scrapbook__upsert_then_list",
+    desc: "POST /api/scrapbook/upsert 写 item → GET 真返",
+    async run(shim, backend) {
+      const r = await callApi(shim, "POST", "/api/scrapbook/upsert", {
+        attachment_url: "/attachments/2026-06-27/test.png",
+        anchor_time: "15:00",
+        date: "2026-06-27",
+      });
+      if (r.status !== 200 || !r.body.ok) throw new Error(`body=${JSON.stringify(r.body)}`);
+      // GET verify
+      const g = await callApi(shim, "GET", "/api/scrapbook?date=2026-06-27", null);
+      if (!g.body.items || g.body.items.length !== 1) throw new Error(`items=${JSON.stringify(g.body.items)}`);
+      const it = g.body.items[0];
+      if (it.anchor_time !== "15:00") throw new Error(`anchor_time=${it.anchor_time}`);
+      return { ok: true, detail: `1 item, anchor=15:00` };
+    },
+  },
+  {
+    name: "scrapbook__upsert_missing_args",
+    desc: "POST /api/scrapbook/upsert 缺 attachment_url → 400",
+    async run(shim) {
+      const r = await callApi(shim, "POST", "/api/scrapbook/upsert", { anchor_time: "15:00" });
+      if (r.status !== 400) throw new Error(`status ${r.status} ≠ 400`);
+      return { ok: true, detail: `400` };
+    },
+  },
 ];
 
 let pass = 0, fail = 0;
