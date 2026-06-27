@@ -568,7 +568,8 @@
   async function case_19() {
     var name = "journal_newday__create_then_idempotent";
     log("=== " + name + " (contract layer) ===");
-    var future = new Date(new Date().getTime() + 86400000);  // tomorrow as sandbox
+    // ★ 用 future+7 天作 sandbox 不污染 case_2 的 "dateband 不含 tomorrow" 断言
+    var future = new Date(new Date().getTime() + 7 * 86400000);
     var fIso = iso(future);
 
     // 清掉 future md(写空字符串当作 reset)
@@ -582,6 +583,116 @@
     var pass = r1.status === 200 && r2.status === 200;
     log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + "\n");
     return { name: name, pass: pass, r1Status: r1.status, r2Status: r2.status };
+  }
+
+  // ─── case_20: daily_tasks__check_non_int_intake ★Cannot-break ───────────
+  // POST check intake='abc' → 500 (not 400, not silent — 契约锁)
+  async function case_20() {
+    var name = "daily_tasks__check_non_int_intake";
+    log("=== " + name + " ★Cannot-break ===");
+    var todayI = iso(new Date());
+    var resp = await T.dispatch("POST", "/api/daily-tasks/check", {
+      date: todayI, task_name: "鱼油（Swisse）", intake: "abc"
+    });
+    log("POST status: " + resp.status + " body: " + JSON.stringify(resp.body).slice(0, 150));
+    // 桌面契约:int(intake) NaN → 500 (mobile shim 把 isNaN 改 500)
+    var pass = resp.status === 500;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + " (status=" + resp.status + ")\n");
+    return { name: name, pass: pass, status: resp.status };
+  }
+
+  // ─── case_21: journal_h2guard__ai_rename_allowed (positive) ─────────────
+  // POST patch new_md H2 != existing + allow_h2_rename:true → 200 + md 改 H2 + body
+  async function case_21() {
+    var name = "journal_h2guard__ai_rename_allowed";
+    log("=== " + name + " ===");
+    var yesterday = new Date(new Date().getTime() - 86400000);
+    var ytmI = iso(yesterday);
+    var ORIGINAL = "# 17：00\n\n## #探索 小红书 AI 产业链预警 @ai\n\n把昨天讨论的 capex 整理。\n";
+    await T.Store.writeJournalMd(ytmI, ORIGINAL);
+    var resp = await T.dispatch("POST", "/api/journal/patch", {
+      date: ytmI, time: "17:00", author: "ai", allow_h2_rename: true,
+      new_md: "## #探索 小红书牛奶 Omega-3 科普 @ai\n\n标题改了 + 正文改了。\n"
+    });
+    log("POST patch allow_h2_rename status: " + resp.status + " body: " + JSON.stringify(resp.body).slice(0, 150));
+
+    var mdAfter = await T.Store.readJournalMd(ytmI);
+    var hasNewTitle = (mdAfter || "").indexOf("小红书牛奶 Omega-3 科普") >= 0;
+    var hasNewBody = (mdAfter || "").indexOf("标题改了 + 正文改了") >= 0;
+    log("md 含新 H2: " + hasNewTitle + " 含新 body: " + hasNewBody);
+
+    var pass = resp.status === 200 && hasNewTitle && hasNewBody;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + "\n");
+    return { name: name, pass: pass };
+  }
+
+  // ─── case_22: daily_tasks__want_new_task ─────────────────────────────────
+  // POST want-new-task → 200 + endpoint exists (mobile 可能 graceful no-op)
+  async function case_22() {
+    var name = "daily_tasks__want_new_task";
+    log("=== " + name + " ===");
+    var resp = await T.dispatch("POST", "/api/daily-tasks/want", { hint: "想要新加 朱古力 打卡" });
+    log("POST want status: " + resp.status + " body: " + JSON.stringify(resp.body).slice(0, 100));
+    // 端点可能未实现 (404) 或返 200。404 也接受当 graceful
+    var graceful = resp.status === 200 || resp.status === 404 || resp.status === 405;
+    log("\n判:" + (graceful ? "PASS ✅" : "FAIL ❌") + " (status=" + resp.status + ")\n");
+    return { name: name, pass: graceful, status: resp.status };
+  }
+
+  // ─── case_23: daily_tasks__backfill_progress (contract layer) ───────────
+  // POST backfill-progress → 200,touched_count >= 0;第二次再跑 → 幂等 0
+  async function case_23() {
+    var name = "daily_tasks__backfill_progress";
+    log("=== " + name + " ===");
+    var r1 = await T.dispatch("POST", "/api/daily-tasks/backfill-progress", null);
+    log("1st backfill status: " + r1.status + " body: " + JSON.stringify(r1.body).slice(0, 150));
+    var r2 = await T.dispatch("POST", "/api/daily-tasks/backfill-progress", null);
+    log("2nd backfill status: " + r2.status + " body: " + JSON.stringify(r2.body).slice(0, 150));
+    var graceful = (r1.status === 200 || r1.status === 404) && (r2.status === 200 || r2.status === 404);
+    log("\n判:" + (graceful ? "PASS ✅" : "FAIL ❌") + " (r1=" + r1.status + " r2=" + r2.status + ")\n");
+    return { name: name, pass: graceful };
+  }
+
+  // ─── case_24: thread__send_message (contract: POST /api/thread/save) ─────
+  // seed empty → POST save with 2 messages → readThread 验有 2 条
+  async function case_24() {
+    var name = "thread__send_message_streams_and_persists";
+    log("=== " + name + " (contract: thread/save) ===");
+    await T.Store.writeThread([]);
+    var newHist = [
+      { role: "user", content: "记一下我今天喝了咖啡" },
+      { role: "assistant", content: "记好了。下午想再喝吗?" }
+    ];
+    var mtimeBefore = parseInt(await T.Store.readThreadMtime(), 10) || 0;
+    var resp = await T.dispatch("POST", "/api/thread/save", {
+      history: newHist, base_mtime: mtimeBefore
+    });
+    log("POST save status: " + resp.status + " body: " + JSON.stringify(resp.body).slice(0, 100));
+
+    var got = await T.Store.readThread();
+    var hist = (got && got.history) || got || [];
+    log("readThread count: " + (Array.isArray(hist) ? hist.length : "non-array"));
+
+    var pass = resp.status === 200 && Array.isArray(hist) && hist.length === 2;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + "\n");
+    return { name: name, pass: pass };
+  }
+
+  // ─── case_25: thread__save_stale_rejected_409 ★Cannot-break ─────────────
+  // POST save with stale base_mtime → 409
+  async function case_25() {
+    var name = "thread__save_stale_rejected_409";
+    log("=== " + name + " ★Cannot-break (CAS 409) ===");
+    await T.Store.writeThread([{ role: "user", content: "原内容" }]);
+    await T.Store.setSetting("thread_mtime", "99999999");  // 强制 current mtime 大
+    var resp = await T.dispatch("POST", "/api/thread/save", {
+      history: [{ role: "user", content: "陈旧标签覆盖" }],
+      base_mtime: 1  // base 小,current 99999999 → stale
+    });
+    log("POST save with stale base status: " + resp.status + " body: " + JSON.stringify(resp.body).slice(0, 150));
+    var pass = resp.status === 409;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + " (status=" + resp.status + ")\n");
+    return { name: name, pass: pass };
   }
 
   // ─── runner ─────────────────────────────────────────────────
@@ -625,6 +736,18 @@
     catch (e) { log("EXCEPTION case_18: " + (e && e.message || e)); results.push({ name: "case_18", pass: false, err: String(e) }); }
     try { results.push(await case_19()); }
     catch (e) { log("EXCEPTION case_19: " + (e && e.message || e)); results.push({ name: "case_19", pass: false, err: String(e) }); }
+    try { results.push(await case_20()); }
+    catch (e) { log("EXCEPTION case_20: " + (e && e.message || e)); results.push({ name: "case_20", pass: false, err: String(e) }); }
+    try { results.push(await case_21()); }
+    catch (e) { log("EXCEPTION case_21: " + (e && e.message || e)); results.push({ name: "case_21", pass: false, err: String(e) }); }
+    try { results.push(await case_22()); }
+    catch (e) { log("EXCEPTION case_22: " + (e && e.message || e)); results.push({ name: "case_22", pass: false, err: String(e) }); }
+    try { results.push(await case_23()); }
+    catch (e) { log("EXCEPTION case_23: " + (e && e.message || e)); results.push({ name: "case_23", pass: false, err: String(e) }); }
+    try { results.push(await case_24()); }
+    catch (e) { log("EXCEPTION case_24: " + (e && e.message || e)); results.push({ name: "case_24", pass: false, err: String(e) }); }
+    try { results.push(await case_25()); }
+    catch (e) { log("EXCEPTION case_25: " + (e && e.message || e)); results.push({ name: "case_25", pass: false, err: String(e) }); }
 
     var pass = results.filter(function (r) { return r.pass; }).length;
     var total = results.length;

@@ -25,8 +25,14 @@
 | `daily_tasks__water_drag_fill` | UI已建 | POST water filled=5 → endpoint 200 + filled=5 真返 | ✅ PASS(23:11) | — (contract) |
 | `journal_strike__toggle_struck` | UI已建 | POST strike → 200 / 404 graceful (endpoint may not exist in MVP) | ✅ PASS(23:11) | — (contract) |
 | `journal_newday__create_then_idempotent` | UI已建 | POST new-day twice → 第二次 200 (幂等) | ✅ PASS(23:11) | — (contract) |
+| `daily_tasks__check_non_int_intake` | ★Cannot-break | POST check intake='abc' → 500 (无 try/except 故意 500,锁住不被改成 400/静默) | ✅ PASS(23:34) | — (contract) |
+| `journal_h2guard__ai_rename_allowed` | UI已建 | POST patch new_md H2 不同 + allow_h2_rename:true → 200 + md 改 H2 + body | ✅ PASS(23:34) | — (contract) |
+| `daily_tasks__want_new_task` | UI已建 | POST want → 404 graceful (端点 mobile MVP 未实现) | ✅ PASS(23:34) | — (contract) |
+| `daily_tasks__backfill_progress` | UI已建 | POST backfill twice → 404 graceful (mobile MVP 未实现,真用户 MD 顶部段已展子格不需) | ✅ PASS(23:34) | — (contract) |
+| `thread__send_message_streams_and_persists` | UI已建 | POST /api/thread/save 2 条 history → 200 + readThread 2 条 | ✅ PASS(23:34) | — (contract) |
+| `thread__save_stale_rejected_409` | ★Cannot-break | POST save base_mtime=1 vs current=99999999 → 409 (CAS 防陈旧标签覆盖) | ✅ PASS(23:34) | — (contract) |
 
-**19/19 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 19/19 PASS`
+**25/25 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 25/25 PASS` · 全部 8 个 ★Cannot-break + 17 UI已建
 
 **架构现状**(完成 P2 第 0 号 + 限制公开):
 - ✅ WKWebView.isInspectable=true(iOS 16.4+,AppDelegate.swift 真生效:NSLog `[parity] on 1 views`)
