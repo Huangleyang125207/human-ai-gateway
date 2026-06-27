@@ -3028,6 +3028,82 @@
       },
       dumpBackend: function () { var tb = globalThis.__GW_TEST_BACKEND__; return tb && tb._dump ? tb._dump() : null; },
       Store: Store,  // 给 harness 用 readJournalMd 等 helper
+      // ★ 交互层 SyntheticTap — fire pointerdown→pointerup → 走真 UI handler 链
+      //   (Capacitor WKWebView 不暴露 selector click 给 opensafari,降级 webview 内部 JS tap)
+      //   接近"真 click" 80%:真触发 button.addEventListener('pointerdown') 整条链
+      syntheticTap: function (selector, opts) {
+        opts = opts || {};
+        if (typeof document === "undefined") return Promise.resolve({ ok: false, err: "no document" });
+        var el = document.querySelector(selector);
+        if (!el) return Promise.resolve({ ok: false, err: "selector not found: " + selector });
+        var r = el.getBoundingClientRect();
+        var x = r.left + r.width / 2;
+        var y = r.top + r.height / 2;
+        function fireEvent(type) {
+          var ev;
+          try {
+            ev = new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerType: "touch" });
+          } catch (e) {
+            ev = new MouseEvent(type === "pointerdown" ? "mousedown" : type === "pointerup" ? "mouseup" : "click",
+                                { bubbles: true, cancelable: true, clientX: x, clientY: y });
+          }
+          el.dispatchEvent(ev);
+        }
+        fireEvent("pointerdown");
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            fireEvent("pointerup");
+            try { el.click(); } catch (_) {}
+            resolve({ ok: true, x: x, y: y, tag: el.tagName, cls: el.className });
+          }, opts.holdMs || 50);
+        });
+      },
+      // 拿 DOM 元素属性/文本(case 断言①屏幕用)
+      querySelectorInfo: function (selector) {
+        if (typeof document === "undefined") return null;
+        var el = document.querySelector(selector);
+        if (!el) return null;
+        return {
+          tag: el.tagName,
+          cls: el.className,
+          ariaLabel: el.getAttribute("aria-label"),
+          dataset: Object.assign({}, el.dataset),
+          textContent: (el.textContent || "").slice(0, 200),
+          visible: !!(el.offsetWidth || el.offsetHeight),
+        };
+      },
+      // 拿所有匹配 selector 的元素(case 断言①列表)
+      querySelectorAllInfo: function (selector) {
+        if (typeof document === "undefined") return [];
+        var list = [];
+        document.querySelectorAll(selector).forEach(function (el) {
+          list.push({
+            tag: el.tagName,
+            cls: el.className,
+            ariaLabel: el.getAttribute("aria-label"),
+            dataset: Object.assign({}, el.dataset),
+            textContent: (el.textContent || "").slice(0, 80),
+          });
+        });
+        return list;
+      },
+      // 等 selector 出现(seeded UI 异步渲染等)
+      waitForSelector: function (selector, timeoutMs) {
+        timeoutMs = timeoutMs || 2000;
+        var startedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
+        return new Promise(function (resolve) {
+          function check() {
+            if (typeof document === "undefined") return resolve({ ok: false, err: "no document" });
+            var el = document.querySelector(selector);
+            if (el) return resolve({ ok: true, took: ((typeof performance !== "undefined" && performance.now) ? performance.now() : 0) - startedAt });
+            if (((typeof performance !== "undefined" && performance.now) ? performance.now() : 0) - startedAt > timeoutMs) {
+              return resolve({ ok: false, err: "timeout " + timeoutMs + "ms" });
+            }
+            setTimeout(check, 50);
+          }
+          check();
+        });
+      },
     };
   }
 })();

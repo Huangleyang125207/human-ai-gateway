@@ -14,7 +14,11 @@ sed -e 's#\.\./mobile-api\.js#./mobile-api.js#g' \
     -e 's#\.\./\.\./shared/#./shared/#g' \
     -e 's#\.\./\.\./vendor/#./vendor/#g' \
     -e 's#\.\./\.\./brand/#./brand/#g' \
+    -e 's#\.\./parity/interaction/run-in-app\.js#./run-in-app.js#g' \
     "$GW/mobile/m/index.html" > "$WWW/index.html"
+
+# parity 交互层 case runner(P2 + ★Cannot-break case demo)
+cp "$GW/mobile/parity/interaction/run-in-app.js" "$WWW/run-in-app.js"
 
 # cd v0 (2026-06-25 v2 全套接管) tokens + components.css 双模式,零裸色值
 cp "$GW/mobile/m/tokens.css"            "$WWW/tokens.css"

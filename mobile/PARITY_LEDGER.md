@@ -1,6 +1,23 @@
-# ★ Test-First Parity Loop 真完成(2026-06-27 20:30 收尾)
+# ★ Test-First Parity Loop 真完成(2026-06-27 20:30 收尾;21:42 接交互层 1/64 PASS)
 
 跑 `node mobile/parity/run.mjs` → **78/78 PASS** ✅ · 跨 17 endpoint 簇 · 84 golden case 93% cover · (node + memory Backend,无需 LLM 或 simulator)
+
+## ★ 交互层(本 session 21:00 接通 — run-cases.md 协议真在 simulator 跑)
+
+| Case | 类别 | 5 道断言 | 状态 | 截图 |
+|---|---|---|---|---|
+| `daily_tasks__check_backfill_yesterday_closed` | ★Cannot-break | ① care-block.readonly + task[0] RO ② md 字节零变化(33B) ③ screenshot 真截 ④ POST status=400 ⑤ 真 SyntheticTap 触发 UI handler 链 | ✅ PASS(21:42) | [case_1_yesterday_readonly.png](parity/interaction/screenshots/case_1_yesterday_readonly.png) |
+
+**架构现状**(完成 P2 第 0 号 + 限制公开):
+- ✅ WKWebView.isInspectable=true(iOS 16.4+,AppDelegate.swift 真生效:NSLog `[parity] on 1 views`)
+- ✅ `.gw-day` / `.gw-task` 补 aria-label + role + dataset(snapshot_ui 可定位用,未来 Mac Safari Develop attach 可 selector click)
+- ⚠ **opensafari MCP 不 attach Capacitor WKWebView**(only Safari.app),iwdp 9344 device list 空 → 降级走 webview 内 SyntheticTap(`globalThis.__GW_TEST_API__.syntheticTap(selector)`):真 fire pointerdown→pointerup → 真触发 button.addEventListener('pointerdown') → 真 fetch /api/* → endpoint dispatch
+- 真 OS-level selector click 需 Mac Safari Develop menu(GUI 手动 attach)或 puppeteer+WebKit Inspector Protocol 客户端(大工程)
+
+**case 1 全凭 plist 真证据 + 真截图**(`__interaction_test_report__` 落 `INTERACTION TEST: 1/1 PASS`)。
+
+---
+
 **TEST_FIRST_MIGRATION.md §4 五步工作流真完整走通**:
 ① 抓 PC oracle(109 golden 文件)→ ② 写 mobile self-test(65 case)→
 ③ 真跑暴露 drift → fix mobile-api → ④ 字节比/形状比/plist 副作用真验 → ⑤ ✅ 登 PASS
