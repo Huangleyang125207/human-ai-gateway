@@ -3058,6 +3058,25 @@
           }, opts.holdMs || 50);
         });
       },
+      // 真"打字"进 input/textarea/contenteditable(case journal insert/edit 用)
+      syntheticTypeText: function (selector, text) {
+        if (typeof document === "undefined") return Promise.resolve({ ok: false, err: "no document" });
+        var el = document.querySelector(selector);
+        if (!el) return Promise.resolve({ ok: false, err: "selector not found: " + selector });
+        if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+          el.focus();
+          el.value = text;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        } else if (el.isContentEditable) {
+          el.focus();
+          el.textContent = text;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        } else {
+          return Promise.resolve({ ok: false, err: "not typeable: " + el.tagName });
+        }
+        return Promise.resolve({ ok: true, value: text });
+      },
       // 拿 DOM 元素属性/文本(case 断言①屏幕用)
       querySelectorInfo: function (selector) {
         if (typeof document === "undefined") return null;

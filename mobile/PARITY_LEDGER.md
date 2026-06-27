@@ -15,8 +15,12 @@
 | `journal_authorship__ai_refuses_user_block` | ★Cannot-break | POST patch author=ai 改 @user 块 → 403 + md 字节零变化 (authorship 8 层防御红线) | ✅ PASS(22:59) | — (contract) |
 | `journal_authorship__ai_allows_ai_block` | ★Cannot-break | POST patch author=ai 改 @ai 块 → 200 + md 真改新正文 (authorship 不误伤 AI 自身) | ✅ PASS(22:59) | — (contract) |
 | `journal_h2guard__ai_rename_blocked` | ★Cannot-break | POST patch new_md H2 != existing + 缺 allow_h2_rename → 409 + md 字节零变化 (5.29 事故反向防御) | ✅ PASS(22:59) | — (contract) |
+| `journal_today__read_timeline` | UI已建 | GET /api/journal/today → status 200 + date + blocks≥1 | ✅ PASS(23:08) | — (contract) |
+| `journal_days__date_band` | UI已建 | GET /api/journal/days?n=10 → status 200 + days≥2 (today + seeded yesterday) | ✅ PASS(23:08) | — (contract) |
+| `journal_insert__nib_new_entry` | UI已建 | POST insert-block → 200 + md 含 `11：00` + `新条目` + `正文` (默认 stamp @user) | ✅ PASS(23:08) | — (contract) |
+| `journal_delete__swipe_clear_block` | UI已建 | POST delete-block 10:00 → 200 + 9:00 body 保留 + 10:00 body 清空 (PC 留 H1 stub) | ✅ PASS(23:08) | — (contract) |
 
-**9/9 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 9/9 PASS`
+**13/13 PASS** · plist `__interaction_test_report__` = `INTERACTION TEST: 13/13 PASS`
 
 **架构现状**(完成 P2 第 0 号 + 限制公开):
 - ✅ WKWebView.isInspectable=true(iOS 16.4+,AppDelegate.swift 真生效:NSLog `[parity] on 1 views`)

@@ -361,6 +361,93 @@
     return { name: name, pass: pass, status: resp.status, mdUnchanged: mdUnchanged };
   }
 
+  // ─── case_10: journal_today__read_timeline ──────────────────────────────
+  // GET /api/journal/today → 返 blocks 至少 1 个,含 file/date 字段
+  async function case_10() {
+    var name = "journal_today__read_timeline";
+    log("=== " + name + " ===");
+    var todayI = iso(new Date());
+    var resp = await T.dispatch("GET", "/api/journal/today?date=" + todayI, null);
+    log("status: " + resp.status + " blocks: " + ((resp.body && resp.body.blocks || []).length));
+    var pass = resp.status === 200
+      && resp.body && resp.body.date === todayI
+      && Array.isArray(resp.body.blocks) && resp.body.blocks.length >= 1;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + "\n");
+    return { name: name, pass: pass, blocksCount: ((resp.body && resp.body.blocks || []).length) };
+  }
+
+  // ─── case_11: journal_days__date_band ────────────────────────────────────
+  // GET /api/journal/days → 返 days[] 至少 2 个(today + yesterday seeded)
+  async function case_11() {
+    var name = "journal_days__date_band";
+    log("=== " + name + " ===");
+    var resp = await T.dispatch("GET", "/api/journal/days?n=10", null);
+    log("status: " + resp.status + " days: " + ((resp.body && resp.body.days || []).length));
+    var pass = resp.status === 200 && Array.isArray(resp.body && resp.body.days) && resp.body.days.length >= 2;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + "\n");
+    return { name: name, pass: pass, daysCount: ((resp.body && resp.body.days || []).length) };
+  }
+
+  // ─── case_12: journal_insert__nib_new_entry (contract) ───────────────────
+  // POST /api/journal/insert-block → md 新增 H1+H2 块字节,默认 stamp @user marker
+  async function case_12() {
+    var name = "journal_insert__nib_new_entry";
+    log("=== " + name + " (contract layer) ===");
+    var yesterday = new Date(new Date().getTime() - 86400000);
+    var ytmI = iso(yesterday);  // 用 yesterday md 做 sandbox 不污染 today
+
+    // seed 简洁 yesterday md
+    var SEED = "# 9：00\n\n## #思考 早醒 @user\n昨晚睡得晚。\n";
+    await T.Store.writeJournalMd(ytmI, SEED);
+    var mdBefore = await T.Store.readJournalMd(ytmI);
+    log("seed yesterday: " + mdBefore.length + "B");
+
+    var resp = await T.dispatch("POST", "/api/journal/insert-block", {
+      date: ytmI, time: "11:00", tag: "#工作", title: "新条目", body: "正文"
+    });
+    log("POST insert-block status: " + resp.status + " body: " + JSON.stringify(resp.body).slice(0, 200));
+
+    var mdAfter = await T.Store.readJournalMd(ytmI);
+    var hasNewBlock = (mdAfter || "").indexOf("11：00") >= 0
+                  && (mdAfter || "").indexOf("新条目") >= 0
+                  && (mdAfter || "").indexOf("正文") >= 0;
+    log("md 后含新 11:00 块: " + hasNewBlock + " (md " + (mdAfter ? mdAfter.length : 0) + "B)");
+    log("md preview: " + (mdAfter || "").slice(0, 300));
+
+    var pass = resp.status === 200 && hasNewBlock;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + "\n");
+    return { name: name, pass: pass, status: resp.status, hasNewBlock: hasNewBlock };
+  }
+
+  // ─── case_13: journal_delete__swipe_clear_block (contract) ───────────────
+  // POST /api/journal/delete-block → md 真把整块删掉,前后块都在
+  async function case_13() {
+    var name = "journal_delete__swipe_clear_block";
+    log("=== " + name + " (contract layer) ===");
+    var yesterday = new Date(new Date().getTime() - 86400000);
+    var ytmI = iso(yesterday);
+
+    // seed 含 9:00 + 10:00 两块
+    var SEED = "# 9：00\n\n## #思考 早醒 @user\n昨晚睡得晚。\n\n---\n\n# 10：00\n\n## #投资 KV cache @ai\n推 RDMA 思路。\n";
+    await T.Store.writeJournalMd(ytmI, SEED);
+    log("seed yesterday 2 块: " + SEED.length + "B");
+
+    var resp = await T.dispatch("POST", "/api/journal/delete-block", { date: ytmI, time: "10:00" });
+    log("POST delete-block 10:00 status: " + resp.status + " body: " + JSON.stringify(resp.body).slice(0, 200));
+
+    var mdAfter = await T.Store.readJournalMd(ytmI);
+    // PC delete-block 实现保留 H1 "# 10：00" 但清空 H2 内容(reset 成 "##")
+    // 验法:9:00 块完整 + 10:00 body 真被清(无 "推 RDMA 思路")
+    var has9Body = (mdAfter || "").indexOf("早醒") >= 0 && (mdAfter || "").indexOf("昨晚睡得晚") >= 0;
+    var removed10Body = (mdAfter || "").indexOf("推 RDMA 思路") < 0;
+    log("md 9:00 body 在: " + has9Body + " 10:00 body 清: " + removed10Body);
+    log("md preview: " + (mdAfter || "").slice(0, 300));
+
+    var pass = resp.status === 200 && has9Body && removed10Body;
+    log("\n判:" + (pass ? "PASS ✅" : "FAIL ❌") + " (9:00 body=" + has9Body + " 10:00 cleared=" + removed10Body + ")\n");
+    return { name: name, pass: pass, has9Body: has9Body, removed10Body: removed10Body };
+  }
+
   // ─── runner ─────────────────────────────────────────────────
   (async function () {
     var results = [];
@@ -382,6 +469,14 @@
     catch (e) { log("EXCEPTION case_8: " + (e && e.message || e)); results.push({ name: "case_8", pass: false, err: String(e) }); }
     try { results.push(await case_9()); }
     catch (e) { log("EXCEPTION case_9: " + (e && e.message || e)); results.push({ name: "case_9", pass: false, err: String(e) }); }
+    try { results.push(await case_10()); }
+    catch (e) { log("EXCEPTION case_10: " + (e && e.message || e)); results.push({ name: "case_10", pass: false, err: String(e) }); }
+    try { results.push(await case_11()); }
+    catch (e) { log("EXCEPTION case_11: " + (e && e.message || e)); results.push({ name: "case_11", pass: false, err: String(e) }); }
+    try { results.push(await case_12()); }
+    catch (e) { log("EXCEPTION case_12: " + (e && e.message || e)); results.push({ name: "case_12", pass: false, err: String(e) }); }
+    try { results.push(await case_13()); }
+    catch (e) { log("EXCEPTION case_13: " + (e && e.message || e)); results.push({ name: "case_13", pass: false, err: String(e) }); }
 
     var pass = results.filter(function (r) { return r.pass; }).length;
     var total = results.length;
