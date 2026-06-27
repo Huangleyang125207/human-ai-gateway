@@ -15,36 +15,120 @@ const VERBOSE = argv.includes("-v");
 const filterArg = argv.find(a => a.startsWith("--filter="));
 const filter = filterArg ? filterArg.slice("--filter=".length) : null;
 
-// ── 已实现 self-test cases(从最简到复杂逐个加,先验 harness 通)─────────
+// PC 端 TODAY_CANON(capture-golden.py L341)
+const TODAY_CANON = "# 9：00\n\n## #思考 早醒 @user\n昨晚睡得晚。\n\n# 10：00\n\n## #投资 KV cache @ai\n推 RDMA 思路。\n";
+const TODAY_ISO = new Date().toISOString().slice(0, 10);  // 用真实 today(mobile 走 todayIso())
+
+// 检查 PC golden 响应 status / inserted key
+function expectJson(name) { return JSON.parse(golden(name)); }
+function expectMd(name) { return golden(name); }
+
+// ── self-test cases(从已实现端点开始,逐个对齐 PC golden)─────────
 const TESTS = [
   {
     name: "smoke__test_api_health",
-    desc: "harness 通否:GET /api/health 返 ok:true",
+    desc: "GET /api/health 返 ok:true",
     async run(shim) {
       const r = await callApi(shim, "GET", "/api/health", null);
-      if (r.status !== 200) throw new Error(`status ${r.status}`);
-      if (!r.body || !r.body.ok) throw new Error(`body=${JSON.stringify(r.body)}`);
+      if (r.status !== 200 || !r.body.ok) throw new Error(`status=${r.status} body=${JSON.stringify(r.body)}`);
       return { ok: true, detail: "health=ok" };
     },
   },
   {
     name: "smoke__test_api_setup_status",
-    desc: "shim 路由通否:GET /api/setup-status 返 configured:true",
+    desc: "GET /api/setup-status 返 configured:true",
     async run(shim) {
       const r = await callApi(shim, "GET", "/api/setup-status", null);
-      if (r.status !== 200) throw new Error(`status ${r.status}`);
-      if (!r.body.configured) throw new Error(`not configured: ${JSON.stringify(r.body)}`);
+      if (r.status !== 200 || !r.body.configured) throw new Error(`body=${JSON.stringify(r.body)}`);
       return { ok: true, detail: `profile_count=${r.body.profile_count}` };
     },
   },
   {
     name: "journal__insert_missing_time",
-    desc: "POST /api/journal/insert-block 缺 time → 400(PC: insert_missing_time.response.json)",
+    desc: "POST /api/journal/insert-block 缺 time → 400",
     async run(shim) {
-      const r = await callApi(shim, "POST", "/api/journal/insert-block", { date: "2026-06-25" });
-      const expected = JSON.parse(golden("journal__insert_missing_time.response.json"));
-      if (r.status !== (expected.status || 400)) throw new Error(`status ${r.status} ≠ ${expected.status || 400}`);
-      return { ok: true, detail: `400 reached: ${JSON.stringify(r.body).slice(0, 60)}` };
+      const r = await callApi(shim, "POST", "/api/journal/insert-block", { title: "x" });
+      const exp = expectJson("journal__insert_missing_time.response.json");
+      if (r.status !== exp.status) throw new Error(`status ${r.status} ≠ PC ${exp.status}`);
+      return { ok: true, detail: `400 OK, body=${JSON.stringify(r.body).slice(0, 50)}` };
+    },
+  },
+  {
+    name: "journal__insert_no_journal",
+    desc: "POST /api/journal/insert-block 无 journal(无 seed)→ 404",
+    async run(shim, backend) {
+      const r = await callApi(shim, "POST", "/api/journal/insert-block", { time: "11:00", title: "x" });
+      const exp = expectJson("journal__insert_no_journal.response.json");
+      if (r.status !== exp.status) throw new Error(`status ${r.status} ≠ PC ${exp.status}`);
+      return { ok: true, detail: `404 OK` };
+    },
+  },
+  {
+    name: "journal__insert_stamps_user",
+    desc: "POST /api/journal/insert-block — seed canonical + insert,vault md 字节比对 PC golden",
+    async run(shim, backend) {
+      // seed canonical md(跟 PC 一致)
+      await backend.setText("journal/" + TODAY_ISO, TODAY_CANON);
+      // insert
+      const r = await callApi(shim, "POST", "/api/journal/insert-block", {
+        time: "11:00", tag: "工作", title: "新条目", body: "正文",
+      });
+      const exp = expectJson("journal__insert_stamps_user.response.json");
+      if (r.status !== exp.status) throw new Error(`status ${r.status} ≠ PC ${exp.status}`);
+      if (r.body.inserted !== exp.inserted) throw new Error(`inserted "${r.body.inserted}" ≠ PC "${exp.inserted}"`);
+      // 字节比:vault md 写后 vs PC golden md
+      const actualMd = await backend.getText("journal/" + TODAY_ISO);
+      const expectedMd = expectMd("journal__insert_stamps_user.md");
+      const diff = byteDiff(actualMd, expectedMd);
+      if (diff) throw new Error(diff);
+      return { ok: true, detail: `inserted=${r.body.inserted}, md bytes match` };
+    },
+  },
+  {
+    name: "thread__history_empty_no_file",
+    desc: "GET /api/thread/history 无文件 → empty",
+    async run(shim) {
+      const r = await callApi(shim, "GET", "/api/thread/history", null);
+      if (r.status !== 200) throw new Error(`status ${r.status}`);
+      const exp = expectJson("thread__history_empty_no_file.response.json");
+      // 形状比:history 字段存在 + 类型一致
+      if (!("history" in r.body)) throw new Error(`no history key in ${JSON.stringify(r.body)}`);
+      if (!Array.isArray(r.body.history)) throw new Error(`history not array`);
+      if (r.body.history.length !== (exp.history || []).length) throw new Error(`length ${r.body.history.length} ≠ PC ${exp.history.length}`);
+      return { ok: true, detail: `empty=true` };
+    },
+  },
+  {
+    name: "daily_tasks__catalog_fresh",
+    desc: "GET /api/daily-tasks fresh catalog 形状",
+    async run(shim) {
+      const r = await callApi(shim, "GET", "/api/daily-tasks", null);
+      if (r.status !== 200) throw new Error(`status ${r.status}`);
+      const exp = expectJson("daily_tasks__catalog_fresh.response.json");
+      // 形状比:tasks 字段存在 + 都是 obj
+      if (!Array.isArray(r.body.tasks)) throw new Error(`no tasks array`);
+      return { ok: true, detail: `${r.body.tasks.length} tasks (PC ${(exp.tasks || []).length})` };
+    },
+  },
+  {
+    name: "vision__classify_missing_url",
+    desc: "POST /api/vision/classify 缺 attachment_url → 400",
+    async run(shim) {
+      const r = await callApi(shim, "POST", "/api/vision/classify", {});
+      // PC golden 只存 body(没 status field)— 验 400 + body 含 error
+      if (r.status !== 400) throw new Error(`status ${r.status} ≠ 400`);
+      if (!r.body || !r.body.error) throw new Error(`no error: ${JSON.stringify(r.body)}`);
+      return { ok: true, detail: `400 + error="${r.body.error.slice(0, 20)}"` };
+    },
+  },
+  {
+    name: "cutout__missing_args",
+    desc: "POST /api/cutout 缺 task_name/url → 400",
+    async run(shim) {
+      const r = await callApi(shim, "POST", "/api/cutout", {});
+      if (r.status !== 400) throw new Error(`status ${r.status} ≠ 400`);
+      if (!r.body || !r.body.error) throw new Error(`no error: ${JSON.stringify(r.body)}`);
+      return { ok: true, detail: `400 + error="${r.body.error.slice(0, 20)}"` };
     },
   },
 ];
@@ -59,7 +143,7 @@ for (const t of TESTS) {
   if (globalThis.__GW_TEST_API__) globalThis.__GW_TEST_API__.setBackend(backend);
   const shim = await loadShim({ backend });
   try {
-    const r = await t.run(shim);
+    const r = await t.run(shim, backend);
     pass++;
     console.log(`  ✓ ${t.name}  ${r.detail || ""}`);
   } catch (e) {

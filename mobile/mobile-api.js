@@ -1790,7 +1790,7 @@
         var author = (body && body.author) || "user";
         var titlePart = (body.tag ? "#" + body.tag + " " : "") + (body.title || "");
         var h2 = "## " + titlePart + " @" + author;
-        var newH2Block = h2 + "\n" + (body.body || "") + "\n";
+        var newH2Block = h2 + "\n\n" + (body.body || "") + "\n";  // H2 跟 body 间空行(对齐 PC golden 字节)
         // ★ dedup:找现有 # h:mm H1,若存在 append H2 到块内(在 --- 前)而不是新建
         // 对齐 PC server.py _insert_block:Searches for existing H1 by time → append H2
         var h1Pattern = new RegExp("(^# " + h + "[：:]" + mm + "\\s*\\n)([\\s\\S]*?)(\\n---\\s*\\n|\\n# |$)", "m");
@@ -1802,9 +1802,12 @@
           var appended = headLine + blockBody.replace(/\s*$/, "") + "\n\n" + newH2Block + tail;
           nextMd = md.replace(existing[0], appended);
         } else {
-          // 新 H1 块,append 到 md 末尾
-          var blockMd = "# " + h + "：" + mm + "\n\n" + newH2Block + "\n---\n";
-          nextMd = (md ? md.replace(/\s*$/, "\n\n") : "") + blockMd;
+          // 新 H1 块,append 到 md 末尾 — 对齐 PC golden 字节(insert_stamps_user.md)
+          // 上块跟新块之间用 \n\n---\n\n 分隔(若 md 已 end with ---,只加 \n\n)
+          var trimmed = md ? md.replace(/\s*$/, "") : "";
+          var sep = !trimmed ? "" : (trimmed.endsWith("---") ? "\n\n" : "\n\n---\n\n");
+          var blockMd = "# " + h + "：" + mm + "\n\n" + newH2Block;
+          nextMd = trimmed + sep + blockMd;
         }
         return Store.writeJournalMd(date, nextMd).then(function () {
           return jsonResp({ ok: true, inserted: "# " + h + "：" + mm, file: isoToStem(date) + ".md", appended_to_existing: !!existing });
