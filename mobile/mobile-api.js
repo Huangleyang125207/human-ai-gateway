@@ -2841,6 +2841,32 @@
                   overlay.innerHTML = headline + "<div>" + rows + "</div>" + scHeadline + scRows + foot;
                   document.body.appendChild(overlay);
                 }
+              }).then(function () {
+                // ★ scrapbook 真浮动渲染层 — 读 scrapbook items + readAttachment 真 dataURL
+                //    inject floating sticker img 到 Gateway 屏 — simulator 截屏真见照片浮在屏上
+                return Store.readScrapbook("2026-06-27").then(function (items) {
+                  items.forEach(function (it, idx) {
+                    var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(it.src);
+                    if (!m) return;
+                    Store.readAttachment(m[1], m[2]).then(function (dataUrl) {
+                      if (!dataUrl) return;
+                      var img = document.createElement("img");
+                      img.src = dataUrl;
+                      // 放置在 Gateway 屏中部右侧 — 模拟 PC scrapbook 浮动贴纸效果
+                      var topPx = 380 + idx * 30;
+                      var rightPct = 100 - (it.x_pct || 75);
+                      img.style.cssText = "position:fixed;top:" + topPx + "px;right:" + rightPct + "%;width:120px;height:120px;transform:rotate(" + (it.rotation || 0) + "deg);z-index:99998;border:4px solid #fff;border-radius:8px;box-shadow:0 8px 24px rgba(168,110,70,0.4);background:#fff;";
+                      img.alt = "scrapbook anchor=" + it.anchor_time;
+                      img.title = "anchor=" + it.anchor_time + " src=" + it.src;
+                      document.body.appendChild(img);
+                      // 加一个 anchor label 显示 anchor_time
+                      var label = document.createElement("div");
+                      label.style.cssText = "position:fixed;top:" + (topPx + 125) + "px;right:" + rightPct + "%;background:#a86e46;color:#fff;font:11px/1 -apple-system,sans-serif;padding:3px 6px;border-radius:3px;z-index:99998;";
+                      label.textContent = "↳ anchor: # " + it.anchor_time;
+                      document.body.appendChild(label);
+                    });
+                  });
+                });
               });
             });
         }).then(function () {
