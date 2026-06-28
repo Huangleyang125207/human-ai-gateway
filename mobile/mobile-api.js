@@ -98,9 +98,45 @@
     },
   };
 
+  // 对照 PC server.py:4284 _parse_tag_aggregate — walk lines → [{tag,description,columns,rows}]
+  function _parseTagAggregate(text) {
+    var sections = [], cur = null;
+    var LINK_RE = /\[([^\]]+)\]\(([^)]+)\)/;
+    var DATE_RE = /(\d{2})\.(\d{1,2})\.(\d{1,2})/;  // 26.5.7 → 2026-05-07
+    (text || "").split(/\r?\n/).forEach(function (raw) {
+      var line = raw.replace(/\s+$/, "");
+      var hm = line.match(/^##\s+#(\S+)\s*$/);
+      if (hm) { if (cur) sections.push(cur); cur = { tag: hm[1], description: "", columns: [], rows: [] }; return; }
+      if (!cur) return;
+      if (line.indexOf("|") === 0) {
+        var cells = line.replace(/^\|/, "").replace(/\|\s*$/, "").split("|").map(function (c) { return c.trim(); });
+        if (cells.length && (cells[0] === "日期" || cells[0] === "Date")) { cur.columns = cells; return; }
+        if (cells.every(function (c) { return !c || /^[-:\s]+$/.test(c); })) return;  // 分隔行
+        if (cells.length >= 4) {
+          var linkText = cells[2], linkTarget = "";
+          var lm = LINK_RE.exec(cells[2]);
+          if (lm) { linkText = lm[1]; linkTarget = lm[2]; }
+          var isoDate = null, dm = DATE_RE.exec(linkTarget || cells[0]);
+          if (dm) isoDate = "20" + dm[1] + "-" + ("0" + dm[2]).slice(-2) + "-" + ("0" + dm[3]).slice(-2);
+          var subTag = cells.length >= 5 ? cells[4] : null;
+          cur.rows.push({ date_short: cells[0], iso_date: isoDate, time: cells[1],
+            link_text: linkText, link_target: linkTarget, content: cells[3],
+            sub_tag: (subTag && subTag !== "—") ? subTag : null });
+        }
+        return;
+      }
+      if (line.trim() && !cur.description && line.indexOf(">") !== 0) cur.description = line.trim();
+    });
+    if (cur) sections.push(cur);
+    return sections;
+  }
+
   var Store = {
     readJournalMd: function (date) { return Backend.getText("journal/" + date); },
     writeJournalMd: function (date, md) { return Backend.setText("journal/" + date, md); },
+    // 标签聚合.md — 单文件横切索引(对照 PC TAG_AGGREGATE_PATH),存 Filesystem(ASCII key)
+    readTagAggregate: function () { return Backend.getText("tag_aggregate"); },
+    writeTagAggregate: function (md) { return Backend.setText("tag_aggregate", md); },
     listJournalDates: function () {
       return Backend.keys("journal/").then(function (ks) {
         return ks.map(function (k) { return k.slice("journal/".length); }).sort();
@@ -1429,6 +1465,13 @@
           sorted.sort(function (a, b) { return b.count - a.count; });
           return jsonResp({ tags: sorted.slice(0, limit) });
         });
+      });
+    },
+    // ── 标签聚合(对照 PC GET /api/tag-aggregate + _parse_tag_aggregate)──
+    "GET /api/tag-aggregate": function () {
+      return Store.readTagAggregate().then(function (text) {
+        if (text === null || text === undefined) return jsonResp({ sections: [], warning: "标签聚合.md 不存在" });
+        return jsonResp({ sections: _parseTagAggregate(text) });
       });
     },
     // 移动端无 vault 文件漂移概念;返 0 漂移,vault-audit.js 据此不弹横幅
