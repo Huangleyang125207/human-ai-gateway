@@ -23,6 +23,9 @@
   /* ════ 八杯水 ════ */
   function renderCups(host, st, scope) {
     const N = 8;
+    // ★对照 PC ritual.js:有上传水杯图 → 渲真图(满=彩色/空=灰度);emoji 值不当 <img>
+    const rawCup = (typeof GW !== 'undefined' && GW.cupImageUrl) || null;
+    const cupImg = (rawCup && /^(data:|https?:|\/)/.test(rawCup)) ? rawCup : null;
     const block = el('div', 'gw-care-block' + (st.readonly ? ' readonly' : ''));
     block.innerHTML =
       `<div class="gw-care-label">八杯水 <span class="whisper">${st.readonly ? '历史日只读' : '睡前一抹点亮'}</span></div>
@@ -34,8 +37,9 @@
     function paint() {
       row.innerHTML = '';
       for (let i = 0; i < N; i++) {
-        const cup = el('div', 'gw-cup' + (i === focusIdx ? ' focus' : (Math.abs(i - focusIdx) === 1 && focusIdx >= 0 ? ' near' : '')) + (i === justIdx ? ' just' : ''));
-        cup.innerHTML = cupSVG(i < st.water, i, scope);
+        const cupFilled = i < st.water;
+        const cup = el('div', 'gw-cup' + (i === focusIdx ? ' focus' : (Math.abs(i - focusIdx) === 1 && focusIdx >= 0 ? ' near' : '')) + (i === justIdx ? ' just' : '') + (cupImg ? ' with-image' : '') + (cupFilled ? ' filled' : ''));
+        cup.innerHTML = cupImg ? `<img src="${cupImg}" alt="">` : cupSVG(cupFilled, i, scope);
         row.appendChild(cup);
       }
       foot.querySelector('b').textContent = st.water;

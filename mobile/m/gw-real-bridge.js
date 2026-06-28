@@ -106,6 +106,8 @@
           image_url: t.image_url || null
         };
       });
+      // 八杯水图标(用户上传的水杯抠图)— 对齐 PC ritual.js _cupImageUrl
+      try { var wc = await safeJson('/api/water-cup'); GW.cupImageUrl = (wc && wc.image_url) || null; } catch (e) { GW.cupImageUrl = null; }
     } catch (e) { console.warn('[bridge] /api/daily-tasks 失败,沿用 mock', e); }
 
     // 3c. today 日记 entries — mobile-api 真返 schema:
