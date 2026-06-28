@@ -1187,6 +1187,13 @@
       var sys = "你是用户的日记协作 AI,语气温和、像深夜台灯下说话。\n\n" +
         "这是今天的日记:\n\n" + (todayMd || "(今天还没写)") +
         "\n\n你有以下工具可用 — 改日记/打卡/换图标时调对应 tool;只聊天回应不调 tool。";
+      // ★ 对话框贴图:用户这条消息带了图(refs)→ 给 AI attachment_url + place 指引(对照 PC vision-pre-router)
+      var _refs = (body && body.refs) || [];
+      if (_refs.length) {
+        sys += "\n\n【本轮用户发了 " + _refs.length + " 张图】attachment_url:" +
+          _refs.map(function (r) { return r.url || r; }).join("、") +
+          "。若用户想把图贴到日记(贴/放/钉到某条或某时间块),调 place_scrapbook_image(attachment_url, anchor_time='HH:MM') 落贴纸(JSON 旁路、不动 MD);anchor_time 取用户指定的时间,没指定就取今天最近一条 entry。";
+      }
       var messages = [{ role: "system", content: sys }].concat(histToMsgs(body), [{ role: "user", content: (body && body.message) || "" }]);
       var events = [];
       var maxRounds = 5;

@@ -283,7 +283,7 @@
 
   // ──────────── 5. sendChat 真 SSE 流式 ────────────
   // 替 cd gw-chat.js 内 streamAI(setTimeout 模拟)→ 真 fetch /api/chat 流
-  GW.sendChat = function (container, st, text, imgs) {
+  GW.sendChat = async function (container, st, text, imgs) {
     if (!text && (!imgs || !imgs.length)) return;
 
     // user message 立刻进 thread
@@ -318,10 +318,21 @@
     // histToMsgs 已 cd 4 kind:msg/ref/note/tool — 我传整条 thread(去掉本轮 user)就行
     var historyForApi = st.thread.slice(0, -1);  // 去掉刚 push 的 user msg(它进 body.message)
 
+    // ★ 对话框贴图:上传图 → attachment_url(短路径),塞进 body.refs 供 AI place_scrapbook_image 引用
+    var refs = [];
+    if (imgs && imgs.length) {
+      for (var ri = 0; ri < imgs.length; ri++) {
+        try {
+          var up = await fetch('/api/chat/upload-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: imgs[ri] }) }).then(function (r) { return r.json(); });
+          if (up && up.url) refs.push({ url: up.url });
+        } catch (e) {}
+      }
+    }
+
     fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ history: historyForApi, message: text || '' })
+      body: JSON.stringify({ history: historyForApi, message: text || '', refs: refs })
     }).then(function (resp) {
       if (!resp.ok) throw new Error('chat ' + resp.status);
       var reader = resp.body.getReader();
