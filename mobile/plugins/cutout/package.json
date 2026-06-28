@@ -8,12 +8,10 @@
   "files": [
     "src/",
     "ios/",
-    "android/",
     "CapacitorCutout.podspec"
   ],
   "capacitor": {
-    "ios": { "src": "ios" },
-    "android": { "src": "android" }
+    "ios": { "src": "ios" }
   },
   "peerDependencies": {
     "@capacitor/core": "^6.0.0"
