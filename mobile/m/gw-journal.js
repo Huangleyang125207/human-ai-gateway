@@ -226,7 +226,7 @@
     const sheet = document.createElement('div'); sheet.className = 'gw-sheet'; const I = GW.ICON;
     sheet.innerHTML = `<div class="gw-grip"></div>
       <div class="gw-sheet-head">${GW.esc(task.name)}<span class="sub">${task.daily_dose >= 2 ? '每天 ' + task.daily_dose + ' 粒' : ''}${task.days_left != null ? ' · 还能吃 ' + task.days_left + ' 天' : ''}</span></div>
-      <button class="gw-sheet-item"><span class="glyph">${I.sticker}</span>换图标</button>
+      <button class="gw-sheet-item" data-act="icon"><span class="glyph">${I.sticker}</span>换图标</button>
       <button class="gw-sheet-item"><span class="glyph">${I.settings}</span>改每天几粒 / 一瓶几粒</button>
       <button class="gw-sheet-item"><span class="glyph">${I.layers}</span>看本周完成率</button>
       <button class="gw-sheet-item danger"><span class="glyph">${I.trash_no}</span>删除这项</button>
@@ -236,7 +236,37 @@
       const soft = e.target.closest('.gw-sheet-soft');
       const item = e.target.closest('.gw-sheet-item');
       if (soft) { m.close(); setTimeout(() => GW.bus.emit('wantNewTask'), 320); }
-      else if (item) { m.close(); setTimeout(() => GW.whisper('（demo）这一项接 daily-task API', false), 320); }
+      else if (item && item.dataset.act === 'icon') { m.close(); setTimeout(() => GW.setTaskIcon(task), 320); }
+      else if (item) { m.close(); setTimeout(() => GW.whisper('（demo）改剂量 / 完成率 / 删除 待接(Phase 3)', false), 320); }
     });
+  };
+
+  /* ★招牌:换图标 — 取图 → 端侧抠图(iOS 17+ Vision)→ /api/cutout(顺带 OCR 颗数 + 写图标)→ 重画 chip */
+  GW.setTaskIcon = async function (task) {
+    const dataUrl = await GW.pickPhoto();
+    if (!dataUrl) return;                       // 用户取消
+    GW.whisper('磨墨抠图中…', true);            // 等待禁 spinner,用文字
+    let icon = dataUrl;
+    try {
+      const C = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Cutout;
+      if (C && C.cutout) { const r = await C.cutout({ image: dataUrl }); if (r && r.png) icon = r.png; }
+    } catch (e) { /* 抠图失败(非 iOS17 / 无主体)→ 原图兜底 */ }
+    let ok = false, pill = null;
+    try {
+      const resp = await fetch('/api/cutout', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_name: task.name, image: icon }),
+      });
+      const j = await resp.json().catch(() => ({}));
+      ok = resp.ok && j && j.ok !== false;
+      pill = j && j.ocr_pill_count;
+    } catch (e) { /* 网络/解析失败 → ok 留 false */ }
+    if (ok) {
+      task.image_url = icon;                    // 乐观更新 → 立即重画
+      GW.bus.emit('reloadCare');
+      GW.whisper(pill ? `图标贴好了 · 顺手认出 ${pill} 粒` : '图标贴好了 · ' + task.name, false);
+    } else {
+      GW.whisper('设图标没成,稍后再试', false);
+    }
   };
 })();

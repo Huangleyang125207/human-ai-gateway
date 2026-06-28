@@ -32,6 +32,32 @@
     } catch (e) { /* 永不 throw */ }
   };
 
+  /* 取一张照片(WKWebView 原生相册/相机,无新依赖)→ 返 dataURL;取消返 null */
+  GW.pickPhoto = function (opts) {
+    opts = opts || {};
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file'; input.accept = 'image/*';
+      if (opts.camera) input.capture = 'environment';
+      input.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;opacity:0';
+      document.body.appendChild(input);
+      let settled = false;
+      const finish = (v) => { if (settled) return; settled = true; try { document.body.removeChild(input); } catch (e) {} resolve(v); };
+      input.addEventListener('change', () => {
+        const f = input.files && input.files[0];
+        if (!f) return finish(null);
+        const r = new FileReader();
+        r.onload = () => finish(r.result);
+        r.onerror = () => finish(null);
+        r.readAsDataURL(f);
+      });
+      // 用户取消(无 change)→ 窗口重获焦点后兜底 resolve(null)
+      const onFocus = () => { window.removeEventListener('focus', onFocus); setTimeout(() => finish(null), 1200); };
+      window.addEventListener('focus', onFocus);
+      input.click();
+    });
+  };
+
   const MENU = [
     { id: 'settings', glyph: 'settings', label: '设置', desc: '钥匙 · 模型 · 皮肤' },
     { id: 'aggregate', glyph: 'layers', label: '聚合页', desc: '按 #标签 横切' },
@@ -335,6 +361,7 @@
 
     /* bus 连线 */
     GW.bus.on('reloadDay', () => { if (st.tab === 'journal' && !st.subPage) { const tl = gw.querySelector('.gw-timeline'); const care = gw.querySelector('.gw-care'); if (tl) GW.renderTimeline(tl, st); if (care) GW.renderCare(care, st); } });
+    GW.bus.on('reloadCare', () => { if (st.tab === 'journal' && !st.subPage) { const care = gw.querySelector('.gw-care'); if (care) GW.renderCare(care, st); } });
     GW.bus.on('pulse', () => { const care = gw.querySelector('.gw-care'); if (care) GW.renderPulseInPlace(care, st); });
     GW.bus.on('point', (entry) => { st.thread.push({ kind: 'ref', who: 'me', refKind: '日记 · ' + entry.time, refText: entry.title || (entry.body || '').slice(0, 22) }); st.tab = 'chat'; render(); GW.whisper('已拉进对话 ✦ 指给 AI 看', true); });
     GW.bus.on('wantNewTask', () => { st.tab = 'chat'; render(); setTimeout(() => { const ta = gw.querySelector('.gw-chat-input'); if (ta) { ta.value = '我想要新打卡项：'; ta.focus(); ta.dispatchEvent(new Event('input')); } }, 60); });

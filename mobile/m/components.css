@@ -110,15 +110,19 @@
 .gw-day.born { animation: gw-day-born 1.2s var(--ease); border-radius: 10px; }
 
 /* ═══ 3 · 关怀区(竖向小报栏目,不卡片化)═══ */
-.gw-care { position: relative; z-index: 3; flex: none; padding: 12px var(--gut) 6px; }
-.gw-care-block + .gw-care-block { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line-soft); }
+.gw-care { position: relative; z-index: 3; flex: none; padding: 12px var(--gut) 80px; }
+/* ★ 真 bug 修:padding-bottom 80(原 6)给 chip 区留空间,防 .gw-timeline 视觉占 chip 下半 */
+.gw-care-block + .gw-care-block { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line-soft); min-height: 140px; }
+/* ★ 真 bug 修:第 2 个起的 .gw-care-block(今日打卡 + dyn widgets)强制 min-height 140
+   (label 22 + chips 90 + padding 18 + buffer 10),防 chips overflow → timeline overlay → iOS hit-test 走 timeline */
 .gw-care-label { font: 600 10.5px/1 var(--font-sans); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 12px; display: flex; align-items: baseline; gap: 8px; }
 .gw-care-label .whisper { font: 400 11px var(--font-kai); letter-spacing: 0; text-transform: none; color: var(--ink-faint); }
 .gw-care-block.readonly { opacity: 0.78; }
 
 /* 3.1 八杯水:横排单行 8 杯,滑动点亮,触点放大 */
 .gw-cups { display: flex; gap: 9px; align-items: flex-end; touch-action: pan-y; }
-.gw-cup { position: relative; width: 100%; height: 38px; transform-origin: bottom center; transition: transform var(--t-fast) var(--ease); }
+.gw-cup { position: relative; z-index: 10; width: 100%; height: 38px; transform-origin: bottom center; transition: transform var(--t-fast) var(--ease); }
+/* ★ z-index:10 同 chip — 保证 cup 1-8 真接 tap */
 .gw-cup svg { width: 100%; height: 100%; display: block; overflow: visible; }
 .gw-cup.focus { transform: scale(1.55); z-index: 4; }
 .gw-cup.near { transform: scale(1.22); z-index: 2; }
@@ -130,16 +134,19 @@
 .gw-cups-foot .hint { color: var(--ink-faint); }
 
 /* 3.2 今日打卡:横滑 chip,点 toggle,长按 sheet */
-.gw-tasks { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
-/* ★ mask-image 之前在 .gw-tasks 上让 chip 1/3 边缘 pointer events 被 WKWebView 跳过 — 删掉 */
+.gw-tasks { display: flex; gap: 16px; padding-bottom: 2px; min-height: 90px; align-items: flex-start; touch-action: manipulation; }
+/* ★ 真 bug 修:删 overflow-x:auto(iOS 把第一个 touch 当 scroll 拦截 → chip 不接 tap)
+   ★ min-height:90 让 .gw-tasks 真占垂直空间,不被 .gw-timeline 视觉 overlay */
 .gw-tasks::-webkit-scrollbar { display: none; }
-.gw-task { flex: 0 0 auto; width: 56px; display: flex; flex-direction: column; align-items: center; gap: 7px; background: none; border: 0; cursor: pointer; padding: 4px 0; transition: transform var(--t-fast) var(--ease); touch-action: manipulation; }
+.gw-task { position: relative; z-index: 10; flex: 0 0 auto; width: 56px; height: 90px; display: flex; flex-direction: column; align-items: center; gap: 7px; background: none; border: 0; cursor: pointer; padding: 4px 0; transition: transform var(--t-fast) var(--ease); touch-action: manipulation; }
+/* ★ position:relative + z-index:10 强保证 chip 自身在 stacking 最顶,iOS hit-test 必走 chip */
 /* ★ touch-action: manipulation 让 chip 1/3 边缘 tap 真接 pointer event (绕 iOS 横滑误判) */
 .gw-task:active { transform: scale(0.95); }
 .gw-task-disc { position: relative; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; }
 .gw-task-disc .ring { position: absolute; inset: 0; }
 .gw-task-glyph { font: 500 16px var(--font-serif); color: var(--ink-soft); }
 .gw-task.done .gw-task-glyph { color: var(--ink-strong); }
+.gw-task-img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; display: block; }
 .gw-task-name { font: 12px/1.2 var(--font-sans); color: var(--ink-soft); text-align: center; white-space: nowrap; }
 .gw-task.done .gw-task-name { color: var(--ink-medium); }
 .gw-task-dose { font: 9.5px var(--font-sans); color: var(--ink-faint); letter-spacing: 0.04em; min-height: 12px; }

@@ -84,7 +84,11 @@
       const check = done ? `<svg class="gw-task-check" width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3.5 9.5 Q6 12 7.5 14 Q10 8 15 4" stroke="var(--vermilion)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>` : '';
       const badge = (t.days_left != null && t.days_left <= 3) ? `<span class="gw-task-badge">${t.days_left}d</span>` : '';
       const dose = t.daily_dose >= 2 ? `${t.today_intake}/${t.daily_dose}` : (done ? '✓' : '\u00a0');
-      btn.innerHTML = `<span class="gw-task-disc">${ring}${check}${badge}<span class="gw-task-glyph">${t.glyph}</span></span>
+      // ★招牌出口:有 image_url(打卡图标已设)→ 渲抠好的图;否则渲首字 glyph
+      const face = t.image_url
+        ? `<img class="gw-task-img" src="${t.image_url}" alt="">`
+        : `<span class="gw-task-glyph">${t.glyph}</span>`;
+      btn.innerHTML = `<span class="gw-task-disc">${ring}${check}${badge}${face}</span>
         <span class="gw-task-name">${GW.esc(t.name)}</span><span class="gw-task-dose">${dose}</span>`;
       // tap = 打卡(clamp 0..dose)
       let lpTimer = null, moved = false, downXY = null;
@@ -93,6 +97,7 @@
       btn.addEventListener('pointerup', () => {
         if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; if (!moved && !st.readonly) toggle(); }
       });
+      btn._toggle = toggle;
       function toggle() {
         if (t.today_intake >= t.daily_dose) t.today_intake = 0; else t.today_intake += 1;
         const nowDone = t.today_intake >= t.daily_dose;
@@ -110,6 +115,26 @@
       }
       row.appendChild(btn);
     });
+    // ★ parent row delegation handler — 真 hit-test 落到 row 上时(timeline 覆盖 chip 时),
+    //   按 clientX 找最近 chip 触发 toggle. cup 同款 pattern.
+    if (!st.readonly) {
+      row.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('.gw-task')) return;  // 真 hit 到具体 chip → 让 chip 自己 handler
+        // 落到 row 但不在 chip → 找最近 chip
+        const chips = row.querySelectorAll('.gw-task');
+        let best = -1, bd = 1e9;
+        chips.forEach((c, i) => {
+          const r = c.getBoundingClientRect();
+          const cx = r.left + r.width / 2;
+          const d = Math.abs(e.clientX - cx);
+          if (d < bd) { bd = d; best = i; }
+        });
+        if (best >= 0 && bd < 50) {
+          const btn = chips[best];
+          if (btn._toggle) btn._toggle();
+        }
+      });
+    }
     host.appendChild(block);
   }
 

@@ -1528,7 +1528,8 @@
 
         return ocrP.then(function (r) {
           var pillCount = extractPillCount(r.text);
-          var p = [Store.setSetting("taskimg/" + name, url || "inline")];
+          // 洞D 修:inline dataURL 时存真图(可渲染),不再存没用的字面量 "inline"
+          var p = [Store.setSetting("taskimg/" + name, inlineImage || url || "inline")];
           if (pillCount > 0) {
             p.push(Store.getSetting("taskmeta/" + name).then(function (raw) {
               var meta = {}; try { meta = raw ? JSON.parse(raw) : {}; } catch (e) {}
