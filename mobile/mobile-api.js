@@ -1466,10 +1466,20 @@
     "POST /api/scrapbook/upsert": function (req, u, body) {
       body = body || {};
       var date = body.date || todayIso();
-      if (!body.attachment_url) return jsonResp({ ok: false, error: "缺 attachment_url" }, 400);
-      if (!body.anchor_time) return jsonResp({ ok: false, error: "缺 anchor_time" }, 400);
       return Store.readScrapbook(date).then(function (items) {
         var id = body.id || ("sk-" + Math.random().toString(36).slice(2, 10));
+        var existingIdx0 = items.findIndex(function (it) { return it.id === id; });
+        // ★ 已存在 + 没带 attachment_url = 部分更新(Phase3 拖拽/缩放/旋转,对照 PC whitelist update,不重建 item)
+        if (existingIdx0 >= 0 && !body.attachment_url) {
+          var ex = items[existingIdx0];
+          ["x_pct", "y_px", "size_pct", "rotation", "anchor_time", "w", "h", "z"].forEach(function (k) {
+            if (typeof body[k] !== "undefined" && body[k] !== null) ex[k] = body[k];
+          });
+          if (typeof body.y_px === "number") ex.auto_y = false;
+          return Store.writeScrapbook(date, items).then(function () { return jsonResp({ ok: true, item: ex }); });
+        }
+        if (!body.attachment_url) return jsonResp({ ok: false, error: "缺 attachment_url" }, 400);
+        if (!body.anchor_time) return jsonResp({ ok: false, error: "缺 anchor_time" }, 400);
         var item = {
           id: id,
           src: body.attachment_url,

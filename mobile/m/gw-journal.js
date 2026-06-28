@@ -72,6 +72,7 @@
         fig.innerHTML = `<img src="${GW.esc(s.src)}" alt="">`;  // esc:防 src 属性注入(防御纵深)
         if (body) body.insertBefore(fig, body.firstChild);
         setTimeout(() => fig.classList.remove('landing'), 760);
+        GW.bindStickerEdit(fig, s);  // Phase3:长按→拖拽/缩放/删除
       });
     }
     wrap.appendChild(del); wrap.appendChild(row);
@@ -282,6 +283,112 @@
       GW.whisper(pill ? `图标贴好了 · 顺手认出 ${pill} 粒` : '图标贴好了 · ' + task.name, false);
     } else {
       GW.whisper('设图标没成,稍后再试', false);
+    }
+  };
+
+  /* ════ Phase3 scrapbook 贴纸编辑态:长按→拖拽/缩放/删除(对照 PC sb-wrap pointer 交互)════
+     触屏红线:长按先进编辑态(把拖拽跟滚动消歧),再拖;pointer 事件 touch 通用。           */
+  function persistSticker(s, patch) {
+    const b = Object.assign({ id: s.id }, patch);
+    if (GW.scrapbookDate) b.date = GW.scrapbookDate;
+    window.fetch('/api/scrapbook/upsert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).catch(() => {});
+  }
+  function deleteSticker(fig, s) {
+    fig.classList.add('removing');                 // CSS:淡出 + 缩小
+    let undone = false;
+    const bar = document.createElement('div'); bar.className = 'gw-sk-undo';
+    bar.innerHTML = '<span>贴纸已撕下</span><button type="button">撤回</button>';
+    GW.root.appendChild(bar); void bar.offsetHeight; bar.classList.add('on');
+    const cleanup = () => { bar.classList.remove('on'); setTimeout(() => bar.remove(), 300); };
+    bar.querySelector('button').addEventListener('click', () => { undone = true; fig.classList.remove('removing'); cleanup(); });
+    setTimeout(() => {
+      if (undone) return;
+      cleanup(); fig.remove();
+      GW.scrapbook = (GW.scrapbook || []).filter((x) => x.id !== s.id);
+      const b = { id: s.id }; if (GW.scrapbookDate) b.date = GW.scrapbookDate;
+      window.fetch('/api/scrapbook/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).catch(() => {});
+    }, 3000);
+  }
+  GW.bindStickerEdit = function (fig, s) {
+    let lpTimer = null, editing = false;
+    const cancelLP = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
+    // stopPropagation:贴纸自己消化长按手势,不让 entry 的长按(action sheet)也触发
+    fig.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (!editing) lpTimer = setTimeout(enterEdit, LP_MS); });
+    fig.addEventListener('pointerup', cancelLP);
+    fig.addEventListener('pointercancel', cancelLP);
+    fig.addEventListener('pointermove', cancelLP);  // 拖动中(滚动/误触)取消长按
+
+    function enterEdit() {
+      if (editing) return; editing = true;
+      const body = fig.parentElement;
+      body.style.position = 'relative';
+      const bRect = body.getBoundingClientRect(), fRect = fig.getBoundingClientRect();
+      fig.style.cssFloat = 'none';
+      fig.style.position = 'absolute';
+      fig.style.left = Math.max(0, fRect.left - bRect.left) + 'px';
+      fig.style.top = Math.max(0, fRect.top - bRect.top) + 'px';
+      fig.classList.add('editing');
+      const del = document.createElement('button'); del.className = 'gw-sk-del'; del.type = 'button'; del.textContent = '×'; del.setAttribute('aria-label', '删除贴纸');
+      const scl = document.createElement('button'); scl.className = 'gw-sk-scale'; scl.type = 'button'; scl.textContent = '⤡'; scl.setAttribute('aria-label', '缩放贴纸');
+      fig.appendChild(del); fig.appendChild(scl);
+      if (GW.whisper) GW.whisper('编辑贴纸 · 拖动移位 · 角缩放 · ×撕下', false);
+      bindDrag(); bindScale(scl);
+      del.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); exitEdit(); deleteSticker(fig, s); });
+      const exit = (e) => { if (!fig.contains(e.target)) { exitEdit(); document.removeEventListener('pointerdown', exit, true); } };
+      setTimeout(() => document.addEventListener('pointerdown', exit, true), 60);
+    }
+    function exitEdit() {
+      if (!editing) return; editing = false;
+      fig.classList.remove('editing');
+      fig.querySelectorAll('.gw-sk-del,.gw-sk-scale').forEach((h) => h.remove());
+    }
+    function bindDrag() {
+      let dragging = false, sx, sy, sl, st;
+      fig.addEventListener('pointerdown', (e) => {
+        if (!editing || e.target.classList.contains('gw-sk-del') || e.target.classList.contains('gw-sk-scale')) return;
+        e.preventDefault();
+        dragging = true; sx = e.clientX; sy = e.clientY;
+        sl = parseFloat(fig.style.left) || 0; st = parseFloat(fig.style.top) || 0;
+        try { fig.setPointerCapture(e.pointerId); } catch (err) {}
+        fig.classList.add('dragging');
+      });
+      fig.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        fig.style.left = (sl + e.clientX - sx) + 'px';
+        fig.style.top = Math.max(0, st + e.clientY - sy) + 'px';
+      });
+      fig.addEventListener('pointerup', (e) => {
+        if (!dragging) return; dragging = false;
+        try { fig.releasePointerCapture(e.pointerId); } catch (err) {}
+        fig.classList.remove('dragging');
+        const bw = (fig.parentElement.getBoundingClientRect().width) || 1;
+        s.x_pct = Math.round(Math.max(0, Math.min(85, (parseFloat(fig.style.left) / bw) * 100)) * 10) / 10;
+        s.y_px = Math.round(Math.max(0, parseFloat(fig.style.top) || 0));
+        s.auto_y = false;
+        persistSticker(s, { x_pct: s.x_pct, y_px: s.y_px });
+      });
+    }
+    function bindScale(handle) {
+      let scaling = false, sx, sw;
+      handle.addEventListener('pointerdown', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        scaling = true; sx = e.clientX; sw = fig.getBoundingClientRect().width;
+        try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+      });
+      handle.addEventListener('pointermove', (e) => {
+        if (!scaling) return; e.preventDefault();
+        const bw = (fig.parentElement.getBoundingClientRect().width) || 1;
+        const newW = Math.max(40, Math.min(bw * 0.9, sw + (e.clientX - sx)));
+        fig.style.width = Math.max(15, Math.min(90, (newW / bw) * 100)) + '%';
+      });
+      handle.addEventListener('pointerup', (e) => {
+        if (!scaling) return; scaling = false;
+        try { handle.releasePointerCapture(e.pointerId); } catch (err) {}
+        const bw = (fig.parentElement.getBoundingClientRect().width) || 1;
+        const widthPct = Math.max(15, Math.min(90, (fig.getBoundingClientRect().width / bw) * 100));
+        s.size_pct = Math.round((widthPct / 1.6) * 10) / 10;  // 逆 Phase1 render 映射(width%=size_pct*1.6)
+        persistSticker(s, { size_pct: s.size_pct });
+      });
     }
   };
 })();

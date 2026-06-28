@@ -171,8 +171,11 @@
 .gw-cup.with-image.filled img { filter: grayscale(0) opacity(1); }
 /* ★对照 PC scrapbook:贴纸 float:right 浮在 entry 旁,drop-shadow 三态模拟"浮高" + 一次性落纸动画 */
 .gw-sticker { float: right; width: 30%; margin: 2px 0 8px 14px; transform: rotate(var(--rot, 1.5deg));
-  filter: drop-shadow(0 4px 12px rgba(58, 42, 24, 0.26)); transition: filter 0.2s var(--ease), transform 0.2s var(--ease); }
-.gw-sticker img { width: 100%; height: auto; display: block; border-radius: 4px; background: var(--paper-base); }
+  filter: drop-shadow(0 4px 12px rgba(58, 42, 24, 0.26)); transition: filter 0.2s var(--ease), transform 0.2s var(--ease);
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+/* img pointer-events:none → 长按/拖拽落到 figure(我的 handler),不触发 WKWebView 原生图片菜单 */
+.gw-sticker img { width: 100%; height: auto; display: block; border-radius: 4px; background: var(--paper-base);
+  pointer-events: none; -webkit-user-drag: none; -webkit-touch-callout: none; }
 .gw-sticker:active { filter: drop-shadow(0 13px 28px rgba(58, 42, 24, 0.42)); transform: rotate(var(--rot, 1.5deg)) scale(1.03); }
 @keyframes gw-sticker-land { 0% { transform: rotate(0deg) scale(1.06) translateY(-6px); } 100% { transform: rotate(var(--rot, 1.5deg)) scale(1) translateY(0); } }
 .gw-sticker.landing { animation: gw-sticker-land 0.7s var(--ease); }
@@ -517,3 +520,37 @@ html[data-still] .gw-undo, html[data-still] .gw-whisper, html[data-still] .gw-mo
   font-family: var(--font-sans); font-size: 12px; padding: 6px 14px; cursor: pointer;
 }
 .gw-agg-reg-x { border: none; background: transparent; color: var(--ink-faint); font-size: 18px; cursor: pointer; padding: 0 4px; }
+
+/* ── Phase3 scrapbook 贴纸编辑态(长按→拖拽/缩放/删除)── */
+.gw-sticker.editing {
+  touch-action: none; z-index: 20; cursor: grab;
+  outline: 2px dashed var(--vermilion); outline-offset: 3px;
+  box-shadow: 0 8px 24px rgba(58, 42, 24, 0.32);
+}
+.gw-sticker.dragging { cursor: grabbing; opacity: 0.92; }
+.gw-sticker.removing {
+  opacity: 0; transform: scale(0.8); pointer-events: none;
+  transition: opacity 0.3s var(--ease), transform 0.3s var(--ease);
+}
+.gw-sk-del, .gw-sk-scale {
+  position: absolute; width: 36px; height: 36px; border-radius: 50%;
+  border: none; line-height: 1; cursor: pointer; z-index: 21; touch-action: none;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.3);
+}
+/* 贴纸常 float:right 贴屏幕右沿 → handle 放角内侧(不出界,可点) */
+.gw-sk-del { top: 5px; left: 5px; background: var(--vermilion); color: var(--paper-bright); font-size: 16px; }
+.gw-sk-scale { bottom: 5px; right: 5px; background: var(--paper-bright); color: var(--umber); border: 1px solid var(--line-medium); cursor: nwse-resize; font-size: 13px; }
+.gw-sk-undo {
+  position: fixed; left: 50%; bottom: 92px; transform: translate(-50%, 16px);
+  display: flex; gap: 14px; align-items: center; padding: 10px 16px; z-index: 60;
+  background: var(--ink-strong); color: var(--paper-bright); border-radius: 22px;
+  font-family: var(--font-sans); font-size: 13px; opacity: 0;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  transition: opacity 0.3s var(--ease), transform 0.3s var(--ease);
+}
+.gw-sk-undo.on { opacity: 1; transform: translate(-50%, 0); }
+.gw-sk-undo button { border: none; background: transparent; color: var(--vermilion); font-size: 13px; font-weight: 600; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) {
+  .gw-sticker.removing, .gw-sk-undo { transition-duration: 0.001ms; }
+}

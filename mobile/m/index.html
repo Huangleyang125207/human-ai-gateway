@@ -22,10 +22,10 @@
 </style>
 
 <script>window.__GATEWAY_MOBILE__ = true;</script>
-<script src="../mobile-api.js?v=d38"></script>
-<link rel="stylesheet" href="./tokens.css?v=d38">
-<link rel="stylesheet" href="./components.css?v=d38">
-<link rel="stylesheet" href="./copy-allow.css?v=d38">
+<script src="../mobile-api.js?v=d52"></script>
+<link rel="stylesheet" href="./tokens.css?v=d52">
+<link rel="stylesheet" href="./components.css?v=d52">
+<link rel="stylesheet" href="./copy-allow.css?v=d52">
 </head>
 <body>
 
@@ -37,14 +37,14 @@
 <script src="../../shared/md.js"></script>
 
 <!-- cd v0 5 件套(顺序固定:mock → widgets → journal → chat → app)-->
-<script src="./gw-mock.js?v=d38"></script>
-<script src="./gw-widgets.js?v=d38"></script>
-<script src="./gw-journal.js?v=d38"></script>
-<script src="./gw-chat.js?v=d38"></script>
-<script src="./gw-app.js?v=d38"></script>
+<script src="./gw-mock.js?v=d52"></script>
+<script src="./gw-widgets.js?v=d52"></script>
+<script src="./gw-journal.js?v=d52"></script>
+<script src="./gw-chat.js?v=d52"></script>
+<script src="./gw-app.js?v=d52"></script>
 
 <!-- bridge:patch GW.gatewayMd/scanIntent/sendChat + 监听 bus pulse/reloadDay → POST -->
-<script src="./gw-real-bridge.js?v=d38"></script>
+<script src="./gw-real-bridge.js?v=d52"></script>
 
 <!-- async prefetch 真后端数据进 GW.tasks/water/journal/thread/days → 再 GW.mount -->
 <script>
@@ -59,6 +59,10 @@
 
     // ★ 交互层 case demo runner DISABLED — SyntheticTap fake-green 被 fb-idb 真 OS tap 取代
     // 走 mobile/parity/interaction/idb_runner.sh 跑真 case (run-in-app.js 历史保留)
+
+    // FIX B — 21:30 纸条 lazy-check:endpoint 是 POST(GET 走 dispatcher stub 不真触发),
+    // mount 后非阻塞 fire-and-forget(no-key 时 endpoint skip)
+    fetch('/api/note/check-lazy', { method: 'POST' }).catch(function () {});
   })();
 </script>
 

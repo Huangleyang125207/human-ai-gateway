@@ -148,6 +148,7 @@
 
     // ★ scrapbook 贴纸 —— 读 /api/scrapbook 进 GW.scrapbook(buildEntry 按 anchor_time 浮进对应块)
     try { var sb = await safeJson('/api/scrapbook?date=' + iso); GW.scrapbook = (sb && sb.items) || []; } catch (e) { GW.scrapbook = []; }
+    GW.scrapbookDate = iso;  // Phase3 贴纸编辑(拖拽/缩放/删除)持久化到这天
 
     // 3d. thread history
     // mobile-api 直接 JSON.stringify 存读 thread array,save 啥 read 啥。
