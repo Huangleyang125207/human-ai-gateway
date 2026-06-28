@@ -497,3 +497,23 @@ html[data-still] .gw-undo, html[data-still] .gw-whisper, html[data-still] .gw-mo
   display: inline-block; margin-left: 6px; font-style: normal; font-size: 11px;
   color: var(--vermilion); border: 1px solid var(--vermilion); border-radius: 9px; padding: 0 6px;
 }
+.gw-agg-acts { display: flex; gap: 10px; padding: 14px 20px 2px; }
+.gw-agg-act {
+  border: 1px solid var(--line-medium); background: transparent; border-radius: 14px;
+  font-family: var(--font-sans); font-size: 12px; color: var(--umber);
+  padding: 5px 12px; cursor: pointer; transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.gw-agg-act:active { background: var(--paper-sunken); color: var(--ink-strong); }
+.gw-agg-reg {
+  display: flex; gap: 8px; padding: 12px 20px; align-items: center;
+  border-bottom: 1px solid var(--line-medium);
+}
+.gw-agg-reg-in {
+  flex: 1; border: none; border-bottom: 1px solid var(--vermilion); background: transparent;
+  font-family: var(--font-serif); font-size: 14px; color: var(--ink-strong); padding: 4px 2px; outline: none;
+}
+.gw-agg-reg-ok {
+  border: none; background: var(--vermilion); color: var(--paper-bright); border-radius: 12px;
+  font-family: var(--font-sans); font-size: 12px; padding: 6px 14px; cursor: pointer;
+}
+.gw-agg-reg-x { border: none; background: transparent; color: var(--ink-faint); font-size: 18px; cursor: pointer; padding: 0 4px; }

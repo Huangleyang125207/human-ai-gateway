@@ -241,10 +241,11 @@
       else { const e = document.createElement('div'); e.className = 'gw-empty'; e.innerHTML = `<b>${meta.label}</b>${meta.desc || ''}。<br>桌面已有，移动端按路线图往上加。`; scroll.appendChild(e); }
     }
 
-    // 聚合页(对照 PC shared/aggregate.js)— GET /api/tag-aggregate → tab/行 + tap-跳历史日
+    // 聚合页(对照 PC shared/aggregate.js)— GET /api/tag-aggregate → tab/行 + tap-跳 + 注册/刷新
     function aggregate() {
       const wrap = document.createElement('div'); wrap.className = 'gw-agg';
-      wrap.innerHTML = `<div class="gw-agg-tabs"></div><div class="gw-agg-body"><div class="gw-empty">读取中…</div></div>`;
+      wrap.innerHTML = `<div class="gw-agg-acts"><button class="gw-agg-act" data-act="register">＋ 注册标签</button><button class="gw-agg-act" data-act="refresh">⟳ 刷新</button></div>
+        <div class="gw-agg-tabs"></div><div class="gw-agg-body"><div class="gw-empty">读取中…</div></div>`;
       const tabsEl = wrap.querySelector('.gw-agg-tabs');
       const bodyEl = wrap.querySelector('.gw-agg-body');
       let sections = [], active = 0;
@@ -258,6 +259,11 @@
       function renderActive() {
         const sec = sections[active];
         if (!sec) { bodyEl.innerHTML = '<div class="gw-empty">还没有聚合标签</div>'; return; }
+        if (!sec.rows.length) {
+          bodyEl.innerHTML = (sec.description ? `<div class="gw-agg-desc">${sec.description}</div>` : '') +
+            `<div class="gw-empty">这个标签还没有条目。点「⟳ 刷新」扫日记收进来，或写日记时给条目带 #${sec.tag}。</div>`;
+          return;
+        }
         const rows = sec.rows.slice().reverse();  // 新在上(对照 PC iso_date DESC)
         bodyEl.innerHTML = (sec.description ? `<div class="gw-agg-desc">${sec.description}</div>` : '') +
           rows.map((r) => `<button class="gw-agg-row${r.iso_date ? '' : ' no-jump'}" data-iso="${r.iso_date || ''}">
@@ -272,11 +278,44 @@
         tabsEl.innerHTML = sections.map((s, i) => `<button class="gw-agg-tab${i === active ? ' on' : ''}" data-i="${i}">#${s.tag}<i>${s.rows.length}</i></button>`).join('');
         tabsEl.querySelectorAll('.gw-agg-tab').forEach((b) => b.addEventListener('click', () => { active = +b.dataset.i; renderTabs(); renderActive(); }));
       }
-      window.fetch('/api/tag-aggregate').then((r) => r.json()).then((d) => {
-        sections = (d && d.sections) || [];
-        if (!sections.length) { bodyEl.innerHTML = '<div class="gw-empty">还没有聚合标签。跟 AI 说「把 #X 收进聚合页」即可开一个。</div>'; return; }
-        renderTabs(); renderActive();
-      }).catch(() => { bodyEl.innerHTML = '<div class="gw-empty">聚合页读取失败</div>'; });
+      function reload(focusTag) {
+        return window.fetch('/api/tag-aggregate').then((r) => r.json()).then((d) => {
+          sections = (d && d.sections) || [];
+          if (!sections.length) { tabsEl.innerHTML = ''; bodyEl.innerHTML = '<div class="gw-empty">还没有聚合标签。点「注册标签」或跟 AI 说「把 #X 收进聚合页」。</div>'; return; }
+          if (focusTag) { const idx = sections.findIndex((s) => s.tag === focusTag); if (idx >= 0) active = idx; }
+          if (active >= sections.length) active = 0;
+          renderTabs(); renderActive();
+        }).catch(() => { bodyEl.innerHTML = '<div class="gw-empty">聚合页读取失败</div>'; });
+      }
+      // ⟳ 刷新:扫日记 → 补缺失行(tap-driven 更新)
+      wrap.querySelector('[data-act="refresh"]').addEventListener('click', () => {
+        GW.whisper('扫描日记中…', false);
+        window.fetch('/api/tag-aggregate/refresh', { method: 'POST' }).then((r) => r.json()).then((d) => {
+          GW.whisper(d && d.ok ? (d.added ? '补了 ' + d.added + ' 行' : '没有新条目') : ((d && d.error) || '刷新失败'), false);
+          if (d && d.ok && d.added) reload();
+        });
+      });
+      // ＋ 注册标签:WKWebView 安全的内联 input(不用 window.prompt)
+      wrap.querySelector('[data-act="register"]').addEventListener('click', () => {
+        if (bodyEl.querySelector('.gw-agg-reg')) return;
+        const form = document.createElement('div'); form.className = 'gw-agg-reg';
+        form.innerHTML = `<input class="gw-agg-reg-in" placeholder="标签名(不带 #),如 yanpai" maxlength="40"><button class="gw-agg-reg-ok">注册</button><button class="gw-agg-reg-x">×</button>`;
+        bodyEl.prepend(form);
+        const inp = form.querySelector('.gw-agg-reg-in'); setTimeout(() => inp.focus(), 50);
+        form.querySelector('.gw-agg-reg-x').addEventListener('click', () => form.remove());
+        const submit = () => {
+          const tag = inp.value.trim().replace(/^#/, '');
+          if (!tag) return;
+          window.fetch('/api/tag-aggregate/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tag: tag }) })
+            .then((r) => r.json()).then((d) => {
+              if (d && d.ok) { GW.whisper('已注册 #' + d.tag, false); form.remove(); reload(d.tag); }
+              else GW.whisper((d && d.error) || '注册失败', false);
+            });
+        };
+        form.querySelector('.gw-agg-reg-ok').addEventListener('click', submit);
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+      });
+      reload();
       return wrap;
     }
 

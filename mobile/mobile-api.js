@@ -125,10 +125,72 @@
         }
         return;
       }
-      if (line.trim() && !cur.description && line.indexOf(">") !== 0) cur.description = line.trim();
+      if (line.trim() && line.trim() !== "---" && !cur.description && line.indexOf(">") !== 0) cur.description = line.trim();
     });
     if (cur) sections.push(cur);
     return sections;
+  }
+
+  // 对照 PC server.py:4573 _format_row — 单行 md table 行(链接锚点全角冒号)
+  function _formatAggRow(row, withSub) {
+    var link = "[26." + row.date_short + "#" + row.time + "](" + row.link_target + ")";
+    var base = "| " + row.date_short + " | " + row.time + " | " + link + " | " + row.content + " |";
+    if (withSub) base += " " + (row.sub_tag || "—") + " |";
+    return base;
+  }
+  // 对照 PC server.py:4454 _scan_schedule_for_project_tags — 扫 journal md 抽 project-tag H2 entry
+  //   mds: [{iso, md}];projectTags: [tag, ...] → {tag: [{iso_date,date_short,time,sub_tag,content,link_target}]}
+  function _scanJournalForTags(projectTags, mds) {
+    var out = {}; projectTags.forEach(function (t) { out[t] = []; });
+    mds.forEach(function (e) {
+      if (!e.md) return;
+      var parts = e.iso.split("-"), mo = parseInt(parts[1], 10), dd = parseInt(parts[2], 10);
+      var dateShort = mo + "." + dd, curTime = null;
+      e.md.split(/\r?\n/).forEach(function (line) {
+        var m1 = line.match(/^#\s+(\d{1,2})[：:](\d{2})\s*$/);
+        if (m1) { curTime = m1[1] + "：" + m1[2]; return; }
+        var m2 = line.match(/^##\s+(.+)$/);
+        if (!m2 || !curTime) return;
+        var h2 = m2[1].trim();
+        var tags = h2.match(/#([A-Za-z0-9_\-/一-鿿]+)/g);
+        if (!tags) return;
+        var title = h2.replace(/#([A-Za-z0-9_\-/一-鿿]+)/g, "").trim();
+        if (!title) return;
+        tags.forEach(function (tagFull) {
+          tagFull = tagFull.replace(/^#/, "");
+          var parent, sub;
+          if (tagFull.indexOf("/") >= 0) { var sp = tagFull.split("/"); parent = sp[0]; sub = "/" + sp.slice(1).join("/"); }
+          else { parent = tagFull; sub = null; }
+          if (projectTags.indexOf(parent) < 0) return;
+          out[parent].push({ iso_date: e.iso, date_short: dateShort, time: curTime, sub_tag: sub,
+            content: title, link_target: "半小时复盘/26." + dateShort + ".md#" + curTime });
+        });
+      });
+    });
+    return out;
+  }
+  // 对照 PC server.py:4582 _append_rows_to_aggregate — 每 tag 段尾 table 后按 iso 升序插新行,只 append
+  function _appendRowsToAgg(text, newRows) {
+    var lines = text.split(/\r?\n/), out = [], curTag = null, pending = [], tableLastIdx = -1;
+    function flush() {
+      if (pending.length && tableLastIdx >= 0) {
+        var withSub = pending.some(function (r) { return r.sub_tag; });
+        if ((out[tableLastIdx].split("|").length - 1) >= 6) withSub = true;
+        var sorted = pending.slice().sort(function (a, b) { return (a.iso_date + a.time).localeCompare(b.iso_date + b.time); });
+        sorted.forEach(function (r, o) { out.splice(tableLastIdx + 1 + o, 0, _formatAggRow(r, withSub)); });
+      }
+      pending = []; tableLastIdx = -1;
+    }
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var m = line.match(/^##\s+#(\S+)\s*$/);
+      if (m) { flush(); curTag = m[1]; pending = (newRows[curTag] || []).slice(); out.push(line); continue; }
+      if (line.trim() === "---") { flush(); curTag = null; out.push(line); continue; }
+      if (line.indexOf("|") === 0 && curTag) { out.push(line); tableLastIdx = out.length - 1; continue; }
+      out.push(line);
+    }
+    flush();
+    return out.join("\n");
   }
 
   var Store = {
@@ -953,6 +1015,13 @@
         query: { type: "string", description: "搜索关键词" },
         days: { type: "integer", description: "回看多少天,默认 30,最大 365" },
       }, required: ["query"] }}},
+    { type: "function", function: { name: "register_aggregate_tag", description: "把一个项目 #标签 注册进聚合页(横切索引),之后该标签的日记条目聚在一起看。只注册顶层 tag(不带 /子标签)",
+      parameters: { type: "object", properties: {
+        tag: { type: "string", description: "标签名,不带 #,如 yanpai / 配置系统" },
+        description: { type: "string", description: "这个项目一句话说明(可选)" },
+      }, required: ["tag"] }}},
+    { type: "function", function: { name: "refresh_aggregate", description: "扫描所有日记,把带已注册 #标签 的条目补进聚合页(只增不删)",
+      parameters: { type: "object", properties: {} } }},
     // ⑥ B widget 体系 — Group W
     { type: "function", function: { name: "list_widgets", description: "列当前 mobile 端注册的 widget(返 id/title/slot/enabled)",
       parameters: { type: "object", properties: {} }}},
@@ -1063,6 +1132,8 @@
       case "search_journal":
         return fch("/api/journal/search?query=" + encodeURIComponent(args.query || "") + "&days=" + (args.days || 30))
           .then(function (r) { return r.json(); });
+      case "register_aggregate_tag": return fch("/api/tag-aggregate/register", H).then(function (r) { return r.json(); });
+      case "refresh_aggregate": return fch("/api/tag-aggregate/refresh", H).then(function (r) { return r.json(); });
       // widget runtime tool — Store 持久 + window.gwWidgets in-memory 双源
       case "list_widgets":
         // 改 Store fallback:add_widget 已存 setting/widgets/,持久才是真源
@@ -1472,6 +1543,63 @@
       return Store.readTagAggregate().then(function (text) {
         if (text === null || text === undefined) return jsonResp({ sections: [], warning: "标签聚合.md 不存在" });
         return jsonResp({ sections: _parseTagAggregate(text) });
+      });
+    },
+    // POST /api/tag-aggregate/register(对照 PC journal_routes.py:193)— 追加 ## #tag + 空表头
+    "POST /api/tag-aggregate/register": function (req, u, body) {
+      var tag = ((body && body.tag) || "").trim().replace(/^#/, "").trim();
+      var description = ((body && body.description) || "").trim();
+      var withSub = !!(body && body.with_sub);
+      if (!tag) return jsonResp({ ok: false, error: "tag 名不能为空" });
+      if (!/^[\w\-一-鿿/]+$/.test(tag)) return jsonResp({ ok: false, error: "tag 只能用字母/数字/下划线/连字符/中文,得到:" + tag });
+      if (tag.indexOf("/") >= 0) return jsonResp({ ok: false, error: "注册 parent tag(不带 /sub);sub-tag 自动 roll-up" });
+      return Store.readTagAggregate().then(function (text) {
+        text = (text === null || text === undefined) ? "# 标签聚合\n" : text;
+        var esc = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        if (new RegExp("^##\\s+#" + esc + "\\s*$", "m").test(text)) return jsonResp({ ok: false, error: "#" + tag + " 已经注册过了" });
+        var parts = ["## #" + tag + "\n"];
+        if (description) parts.push("\n" + description + "\n");
+        parts.push("\n");
+        if (withSub) { parts.push("| 日期 | 时间 | 链接 | 内容 | Sub |\n"); parts.push("|------|------|------|------|-----|\n"); }
+        else { parts.push("| 日期 | 时间 | 链接 | 内容 |\n"); parts.push("|------|------|------|------|\n"); }
+        parts.push("\n---\n");
+        var section = parts.join("");
+        var sep = text.endsWith("\n") ? "" : "\n";
+        if (!text.replace(/\s+$/, "").endsWith("---")) { sep = text.trim() ? sep + "\n---\n\n" : sep; }
+        else { sep += "\n"; }
+        return Store.writeTagAggregate(text + sep + section).then(function () { return jsonResp({ ok: true, tag: tag, with_sub: withSub }); });
+      });
+    },
+    // POST /api/tag-aggregate/refresh(对照 PC journal_routes.py:252 + _refresh_tag_aggregate)— 扫 journal → 只 append 缺失行
+    "POST /api/tag-aggregate/refresh": function () {
+      return Store.readTagAggregate().then(function (text) {
+        if (text === null || text === undefined) return jsonResp({ ok: false, error: "标签聚合.md 不存在", added: 0 });
+        var sections = _parseTagAggregate(text);
+        var projectTags = sections.map(function (s) { return s.tag; });
+        if (!projectTags.length) return jsonResp({ ok: false, error: "没找到任何 project tag section", added: 0 });
+        return Store.listJournalDates().then(function (dates) {
+          return Promise.all((dates || []).map(function (d) { return Store.readJournalMd(d).then(function (md) { return { iso: d, md: md }; }); })).then(function (mds) {
+            var scanned = _scanJournalForTags(projectTags, mds);
+            var existing = {};
+            sections.forEach(function (s) { existing[s.tag] = {}; s.rows.forEach(function (r) { existing[s.tag][(r.iso_date) + "|" + (r.time) + "|" + (r.sub_tag || "")] = true; }); });
+            var newRows = {}; projectTags.forEach(function (t) { newRows[t] = []; });
+            Object.keys(scanned).forEach(function (tag) {
+              var seen = {};
+              scanned[tag].forEach(function (r) {
+                var key = r.iso_date + "|" + r.time + "|" + (r.sub_tag || "");
+                if (existing[tag][key] || seen[key]) return;
+                seen[key] = true; newRows[tag].push(r);
+              });
+            });
+            var totalAdded = projectTags.reduce(function (a, t) { return a + newRows[t].length; }, 0);
+            var scannedTotal = projectTags.reduce(function (a, t) { return a + scanned[t].length; }, 0);
+            if (totalAdded === 0) return jsonResp({ ok: true, added: 0, per_tag: {}, scanned: scannedTotal });
+            return Store.writeTagAggregate(_appendRowsToAgg(text, newRows)).then(function () {
+              var perTag = {}; projectTags.forEach(function (t) { if (newRows[t].length) perTag[t] = newRows[t].length; });
+              return jsonResp({ ok: true, added: totalAdded, per_tag: perTag, scanned: scannedTotal });
+            });
+          });
+        });
       });
     },
     // 移动端无 vault 文件漂移概念;返 0 漂移,vault-audit.js 据此不弹横幅
