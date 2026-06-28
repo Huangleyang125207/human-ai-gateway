@@ -146,7 +146,25 @@
 .gw-task-disc .ring { position: absolute; inset: 0; }
 .gw-task-glyph { font: 500 16px var(--font-serif); color: var(--ink-soft); }
 .gw-task.done .gw-task-glyph { color: var(--ink-strong); }
-.gw-task-img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; display: block; }
+/* ★对照 PC ritual.js:有图 task = 圆角照片瓦,灰度底 + 彩色按 intake/dose 自底填 + 余N + ✓ */
+.gw-task.has-photo .gw-task-disc { width: 54px; height: 54px; border-radius: 14px; }
+.gw-task-photo { position: absolute; inset: 0; border-radius: 14px; overflow: hidden; background: var(--paper-base); }
+.gw-task-photo-base { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: grayscale(1) opacity(0.5); }
+.gw-task-photo-fill { position: absolute; inset: 0; pointer-events: none;
+  clip-path: inset(calc((1 - var(--frac, 0)) * 100%) 0 0 0);
+  -webkit-clip-path: inset(calc((1 - var(--frac, 0)) * 100%) 0 0 0);
+  transition: clip-path .5s cubic-bezier(.2, .7, .2, 1), -webkit-clip-path .5s cubic-bezier(.2, .7, .2, 1); }
+.gw-task-photo-fill img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.gw-task-segs { position: absolute; inset: 0; pointer-events: none; }
+.gw-task-seg { position: absolute; left: 8%; right: 8%; height: 1px; background: rgba(58, 52, 44, 0.3); }
+.gw-task-remaining { position: absolute; top: -5px; right: -7px; z-index: 3; white-space: nowrap;
+  background: var(--ink-strong); color: var(--paper-base); font: 9px/1.4 var(--font-sans); letter-spacing: 0.02em;
+  padding: 1px 5px; border-radius: 8px; border: 1.5px solid var(--paper-base); }
+.gw-task-remaining.urgent { background: var(--vermilion); }
+.gw-task-done-tick { position: absolute; bottom: -4px; right: -4px; z-index: 3; width: 18px; height: 18px;
+  border-radius: 50%; background: var(--vermilion); color: #fff; font: 11px/18px var(--font-sans); text-align: center;
+  border: 2px solid var(--paper-base); opacity: 0; transform: scale(0.4); transition: opacity 0.2s var(--ease), transform 0.2s var(--ease); }
+.gw-task.has-photo.done .gw-task-done-tick { opacity: 1; transform: scale(1); }
 .gw-task-name { font: 12px/1.2 var(--font-sans); color: var(--ink-soft); text-align: center; white-space: nowrap; }
 .gw-task.done .gw-task-name { color: var(--ink-medium); }
 .gw-task-dose { font: 9.5px var(--font-sans); color: var(--ink-faint); letter-spacing: 0.04em; min-height: 12px; }

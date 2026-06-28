@@ -61,25 +61,29 @@
   // entry id 规则:'r' + time(无:) + idx — bridge 与 backend 唯一锚点
   function entryId(e, i) { return 'r' + (e.time || '00:00').replace(':', '') + '_' + i; }
 
-  GW.bridgePrefetch = async function () {
-    var iso = todayIso();
+  GW.bridgePrefetch = async function (targetIso) {
+    // FIX C — 接受 targetIso(补昨天/历史日 chat 后应刷新对应日);默认 today
+    targetIso = targetIso || todayIso();
+    var iso = targetIso;
     var dayKey = isoToKey(iso);
 
     // 3a. days list — 最近 10 天的可读区
+    // FIX C 注:days endpoint 不用 targetIso,'today' state 永远锚在真今天(墙上日历)
     try {
+      var realToday = todayIso();
       var daysData = await safeJson('/api/journal/days?n=10');
       var realDays = (daysData.days || []).map(function (d) {
-        var diso = d.iso || d.date || iso;
+        var diso = d.iso || d.date || realToday;
         return {
           key: isoToKey(diso),
           iso: diso,
           dow: dowOf(diso),
           num: parseInt(diso.split('-')[2], 10),
-          state: diso === iso ? 'today' : 'past'
+          state: diso === realToday ? 'today' : 'past'
         };
       });
-      if (!realDays.find(function (x) { return x.iso === iso; })) {
-        realDays.push({ key: dayKey, iso: iso, dow: dowOf(iso), num: parseInt(iso.split('-')[2], 10), state: 'today' });
+      if (!realDays.find(function (x) { return x.iso === realToday; })) {
+        realDays.push({ key: isoToKey(realToday), iso: realToday, dow: dowOf(realToday), num: parseInt(realToday.split('-')[2], 10), state: 'today' });
       }
       // 排序:从早到晚
       realDays.sort(function (a, b) { return a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0; });
@@ -98,6 +102,7 @@
           today_intake: t.today_intake | 0,
           daily_dose: dose,
           days_left: typeof t.days_left === 'number' ? t.days_left : undefined,
+          remaining: typeof t.remaining === 'number' ? t.remaining : null,
           image_url: t.image_url || null
         };
       });
@@ -129,6 +134,8 @@
         });
       });
       GW.journal[dayKey] = flatEntries;
+      // FIX A(a) — seed snapshot 防 first reloadDay 把 prefetch 来的 entries 当用户新增 POST insert-block(造成服务端 H2 重复)
+      _journalSnap[dayKey] = snapshotEntries(flatEntries);
     } catch (e) { console.warn('[bridge] /api/journal/today 失败,沿用 mock', e); }
 
     // 3d. thread history
@@ -164,6 +171,9 @@
   var _pulseQ = null;
   function bindWriteHooks() {
     if (!GW.bus) return;
+    // FIX G — idempotent guard:bridgePrefetch 可被 done 分支多次调,避免重复注册 listener leak
+    if (GW._hooksBound) return;
+    GW._hooksBound = true;
 
     GW.bus.on('pulse', function () {
       // 防抖 250ms — 滑动八杯水会快速触发,合并成最后一次
@@ -179,7 +189,8 @@
 
   function syncPulseState() {
     var st = GW.state; if (!st) return;
-    var iso = todayIso();
+    var dayObj = (typeof GW.days === 'function' ? GW.days() : []).find(function (x) { return x.key === st.dayKey; });
+    var iso = dayObj ? dayObj.iso : todayIso();
     // water
     postJson('/api/daily-tasks/water', { date: iso, filled: st.water | 0 });
     // tasks — 整批同步当前 intake(check endpoint clamp 后端处理)
@@ -359,6 +370,8 @@
                 tc.result = ev.result;
               }
               GW.renderThread(container, st);
+              // FIX A(b) — 不在 tool_result 重复 reloadDay+bridgePrefetch;done 分支唯一收口
+              // (tool chip 状态已在上方 tc.state/result 更新;syncJournalDiff 跑两遍会把 prefetch 来的 entries 当新增 POST insert-block)
             } else if (ev.type === 'error') {
               // mobile-api emit error(CORS / 超时 / DeepSeek 返空 / 工具上限)
               if (!firstChunkSeen) {
@@ -383,6 +396,29 @@
                 if (grindEl.parentNode) grindEl.remove();
                 st.thread.push({ kind: 'msg', who: 'ai', text: '(无回复)', id: aiId });
                 GW.renderThread(container, st);
+              }
+              // AI 写完 md 后 → 刷新内存 GW.journal[dayKey] + 时间线重渲(spec case 1 ⑥)
+              // FIX C — 用当前 selected day 的 iso(补昨天/历史日时不会错刷今天)
+              // FIX A.c — emit('reloadDay') 在 bridgePrefetch resolve 之后:
+              //   reloadDay handler 读 GW.journal[dayKey] 重渲 timeline;
+              //   prefetch 前 emit 会读到 stale,resolve 后再 emit 才能看到 AI 新写的 entry
+              if (GW.bridgePrefetch) {
+                var curIso = todayIso();
+                try {
+                  var curDayKey = (GW.state && GW.state.dayKey) || null;
+                  if (curDayKey && typeof GW.days === 'function') {
+                    var curDayObj = GW.days().find(function (x) { return x.key === curDayKey; });
+                    if (curDayObj && curDayObj.iso) curIso = curDayObj.iso;
+                  }
+                } catch (e) {}
+                GW.bridgePrefetch(curIso).then(function () {
+                  GW.bus && GW.bus.emit('reloadDay');
+                }).catch(function () {
+                  // prefetch 挂了仍 emit,让 timeline 至少触发 renderTimeline(可能读到 stale 但比不刷强)
+                  GW.bus && GW.bus.emit('reloadDay');
+                });
+              } else {
+                GW.bus && GW.bus.emit('reloadDay');
               }
             }
           });

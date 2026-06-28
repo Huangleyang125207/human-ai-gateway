@@ -1468,6 +1468,12 @@
             try {
               var log = rs[2] ? JSON.parse(rs[2]) : {};
               t.today_intake = log[date] | 0;
+              // 余量 = total_pills - 累计消耗(对齐 PC server _task_meta_state.remaining)
+              if (meta && typeof meta.total_pills === "number") {
+                var consumed = 0;
+                for (var dk in log) consumed += (parseInt(log[dk], 10) || 0);
+                t.remaining = meta.total_pills - consumed;
+              }
             } catch (e) {}
             return t;
           });

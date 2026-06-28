@@ -69,26 +69,38 @@
     const block = el('div', 'gw-care-block' + (st.readonly ? ' readonly' : ''));
     block.innerHTML = `<div class="gw-care-label">今日打卡</div><div class="gw-tasks"></div>`;
     const row = block.querySelector('.gw-tasks');
+    // ★对照 PC ritual.js taskNode:有图 = 灰度底 + 彩色按 intake/dose 自底填 + 余N + 段刻度 + ✓
+    function discHTML(t) {
+      const dz = Math.max(1, t.daily_dose || 1);
+      const ink = Math.max(0, Math.min(dz, t.today_intake || 0));
+      const isDone = ink >= dz;
+      if (t.image_url) {
+        let segs = '';
+        if (dz > 1) for (let k = 1; k < dz; k++) segs += `<span class="gw-task-seg" style="bottom:${(k / dz) * 100}%"></span>`;
+        const rem = (typeof t.remaining === 'number')
+          ? `<span class="gw-task-remaining${t.remaining <= Math.max(3, dz * 3) ? ' urgent' : ''}">余${t.remaining}</span>` : '';
+        return `<span class="gw-task-photo"><img class="gw-task-photo-base" src="${t.image_url}" alt="">`
+          + `<span class="gw-task-photo-fill" style="--frac:${ink / dz}"><img src="${t.image_url}" alt=""></span>`
+          + `<span class="gw-task-segs">${segs}</span></span>${rem}<span class="gw-task-done-tick">✓</span>`;
+      }
+      const ring = isDone
+        ? `<svg class="ring" viewBox="0 0 46 46" fill="none"><circle cx="23" cy="23" r="21.5" stroke="var(--umber)" stroke-width="1.4"/></svg>`
+        : `<svg class="ring" viewBox="0 0 46 46" fill="none"><circle cx="23" cy="23" r="21.5" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="2 3"/></svg>`;
+      const check = isDone ? `<svg class="gw-task-check" width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3.5 9.5 Q6 12 7.5 14 Q10 8 15 4" stroke="var(--vermilion)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>` : '';
+      return `${ring}${check}<span class="gw-task-glyph">${t.glyph}</span>`;
+    }
     st.tasks.forEach((t) => {
       const done = t.today_intake >= t.daily_dose;
-      const btn = el('button', 'gw-task' + (done ? ' done' : ''));
+      const btn = el('button', 'gw-task' + (done ? ' done' : '') + (t.image_url ? ' has-photo' : ''));
       // P2 · snapshot_ui 定位(case daily_tasks__check_* 真 tap 鱼油 等)
       btn.setAttribute('aria-label', `打卡 ${t.name}${done ? ' 已完成' : ` ${t.today_intake || 0}/${t.daily_dose}`}${st.readonly ? ' 只读' : ''}`);
       btn.setAttribute('role', 'button');
       btn.dataset.taskName = t.name;
       btn.dataset.taskDone = done ? '1' : '0';
       btn.dataset.taskReadonly = st.readonly ? '1' : '0';
-      const ring = done
-        ? `<svg class="ring" viewBox="0 0 46 46" fill="none"><circle cx="23" cy="23" r="21.5" stroke="var(--umber)" stroke-width="1.4"/></svg>`
-        : `<svg class="ring" viewBox="0 0 46 46" fill="none"><circle cx="23" cy="23" r="21.5" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="2 3"/></svg>`;
-      const check = done ? `<svg class="gw-task-check" width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3.5 9.5 Q6 12 7.5 14 Q10 8 15 4" stroke="var(--vermilion)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>` : '';
-      const badge = (t.days_left != null && t.days_left <= 3) ? `<span class="gw-task-badge">${t.days_left}d</span>` : '';
+      // ring/check/glyph/余N/填充 全收进 discHTML(t)
       const dose = t.daily_dose >= 2 ? `${t.today_intake}/${t.daily_dose}` : (done ? '✓' : '\u00a0');
-      // ★招牌出口:有 image_url(打卡图标已设)→ 渲抠好的图;否则渲首字 glyph
-      const face = t.image_url
-        ? `<img class="gw-task-img" src="${t.image_url}" alt="">`
-        : `<span class="gw-task-glyph">${t.glyph}</span>`;
-      btn.innerHTML = `<span class="gw-task-disc">${ring}${check}${badge}${face}</span>
+      btn.innerHTML = `<span class="gw-task-disc">${discHTML(t)}</span>
         <span class="gw-task-name">${GW.esc(t.name)}</span><span class="gw-task-dose">${dose}</span>`;
       // tap = 打卡(clamp 0..dose)
       let lpTimer = null, moved = false, downXY = null;
@@ -103,13 +115,18 @@
         const nowDone = t.today_intake >= t.daily_dose;
         btn.classList.toggle('done', nowDone);
         if (nowDone) { btn.classList.add('confirm'); setTimeout(() => btn.classList.remove('confirm'), 520); }
-        // 重画该 chip
         const disc = btn.querySelector('.gw-task-disc');
-        disc.querySelector('.ring').outerHTML = nowDone
-          ? `<svg class="ring" viewBox="0 0 46 46" fill="none"><circle cx="23" cy="23" r="21.5" stroke="var(--umber)" stroke-width="1.4"/></svg>`
-          : `<svg class="ring" viewBox="0 0 46 46" fill="none"><circle cx="23" cy="23" r="21.5" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="2 3"/></svg>`;
-        let chk = btn.querySelector('.gw-task-check'); if (chk) chk.remove();
-        if (nowDone) disc.insertAdjacentHTML('afterbegin', `<svg class="gw-task-check" width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3.5 9.5 Q6 12 7.5 14 Q10 8 15 4" stroke="var(--vermilion)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`);
+        if (t.image_url) {
+          // 彩色填充层按 intake/dose 自底升(CSS clip-path transition = 灌注动画)
+          const fill = disc.querySelector('.gw-task-photo-fill');
+          if (fill) fill.style.setProperty('--frac', Math.max(0, Math.min(1, t.today_intake / Math.max(1, t.daily_dose))));
+        } else {
+          disc.querySelector('.ring').outerHTML = nowDone
+            ? `<svg class="ring" viewBox="0 0 46 46" fill="none"><circle cx="23" cy="23" r="21.5" stroke="var(--umber)" stroke-width="1.4"/></svg>`
+            : `<svg class="ring" viewBox="0 0 46 46" fill="none"><circle cx="23" cy="23" r="21.5" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="2 3"/></svg>`;
+          let chk = disc.querySelector('.gw-task-check'); if (chk) chk.remove();
+          if (nowDone) disc.insertAdjacentHTML('afterbegin', `<svg class="gw-task-check" width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3.5 9.5 Q6 12 7.5 14 Q10 8 15 4" stroke="var(--vermilion)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`);
+        }
         btn.querySelector('.gw-task-dose').textContent = t.daily_dose >= 2 ? `${t.today_intake}/${t.daily_dose}` : (nowDone ? '✓' : '\u00a0');
         GW.bus.emit('pulse');
       }
