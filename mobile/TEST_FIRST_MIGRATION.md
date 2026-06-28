@@ -270,9 +270,9 @@ trade-off 说明：
 - 一个 case 走完 §4 五步 → 在 PARITY_LEDGER 把该 key 标 PASS（附 golden 路径 + self-test 路径 + 最近一次真 simulator 截图引用）。
 - ledger 是"哪些契约已迁、哪些没迁"的单一真相；新增 golden 必须同步登一行。
 
-### 7.2 harness.mjs —— 待接 `loadShim` / `callApi`
+### 7.2 harness.mjs —— `loadShim` / `callApi` 已接通
 
-self-test 跑在 `harness.mjs` 上，当前缺两个钩子，**这是落地本范式的前置工程任务**：
+self-test 跑在 `harness.mjs` 上，靠两个钩子把请求灌进真 shim。**现状：两个钩子已接通 mobile-api.js**（`loadShim()` 读 `mobile/mobile-api.js` 全文、eval 它的 IIFE、挂 `__GW_TEST_API__`；`callApi()` 走 `shim.dispatch()`）。契约层因此可直接跑：`node mobile/parity/run.mjs`（当前 78/78 PASS）。下表是这两个钩子的职责契约：
 
 | 钩子 | 职责 | 契约 |
 |------|------|------|
@@ -285,8 +285,7 @@ self-test 跑在 `harness.mjs` 上，当前缺两个钩子，**这是落地本�
 - `readMobileMd(date)` → 从 plist 取 md 字节，给 `assertBytesEqual`
 - `assertShape(actual, expected)` / `assertBytesEqual(a, b)` / `assertStatus(resp, code)`
 
-harness 钩子接通前，self-test 无法运行——所以 **接 `loadShim`/`callApi` 是第 0 号迁移任务**，先于任何 feature case。
-（注：`loadShim`/`callApi` 是**契约层**的 node 跑法,已接通,`node mobile/parity/run.mjs` 可跑。）
+**历史**：harness 钩子接通前 self-test 无法运行，曾是「第 0 号迁移任务」。**现已完成**——`loadShim`/`callApi` 是**契约层**的 node 跑法，已接通 mobile-api.js，`node mobile/parity/run.mjs` 可直接跑（78/78 PASS）。
 
 ### 7.3 交互层 —— `INTERACTION_TEST_CASES.md` + `parity/interaction/`
 

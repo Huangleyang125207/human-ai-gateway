@@ -21,3 +21,15 @@ silent-failures.jsonl
 silent-failures.cursor
 client-id.txt
 data/
+
+# OS / editor / generated junk
+.DS_Store
+**/.DS_Store
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Claude Code session/config (machine-specific)
+.claude/
+**/.claude/

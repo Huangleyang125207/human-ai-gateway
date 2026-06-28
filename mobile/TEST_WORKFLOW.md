@@ -63,35 +63,40 @@ plutil -p "$NEWDATA/Library/Preferences/com.humanai.gateway.plist"
 - T2-T4:/api/setup/save-partial + /api/setup/current + Store 直读三角验
 - T5:/api/setup/test 用假 key 真打 deepseek(期望 401)
 - T6:/api/chat 用假 key(期望 error)
-- T7-T11:用真 key(`window.__GW_REAL_KEY__`)真打 chat 验 tool loop
+- T7+:用真 key(`window.__GW_REAL_KEY__`)真打 chat 验 tool loop;逐个走上面
+  「22 TOOL_SPECS 全名单」的提示触发每个 tool(已跑到 STRICT 22/22 全 PASS)
 - 完整 report 写到 `setting/__self_test_report__`
 
-## 22 TOOL_SPECS 全名单 + 验收状态
+## 22 TOOL_SPECS 全名单(参考)
 
-| # | tool | 状态 | 验收 chat 提示 |
-|---|---|---|---|
-| 1 | read_today_schedule | ✅ T9 | "把今天 16:30 的一条改成 X(必先 read schedule)" |
-| 2 | patch_journal_block | ✅ T9 | 同上 |
-| 3 | check_daily_task | ✅ T10 | "我吃了一颗鱼油,用 check_daily_task 打卡" |
-| 4 | web_search | ✅ T11 | "用 web_search 搜 X" |
-| 5 | insert_journal_block | ⬜ T12 | "在今天 17:00 插入条新条目" |
-| 6 | append_journal_comment | ⬜ T12 | "在今天 16:30 那块加批注 X" |
-| 7 | search_journal | ⬜ T12 | "搜历史日记里我提过 X 几次" |
-| 8 | list_recent_days | ⬜ T12 | "列最近 7 天日记日期" |
-| 9 | manage_daily_task | ⬜ T13 | "新增日打卡:维生素 C" |
-| 10 | set_daily_task_meta | ⬜ T13 | "鱼油每瓶 60 颗,每天 2 颗" |
-| 11 | set_water_cup_image | ⬜ T13 | "把水杯图标换成蓝色" |
-| 12 | fetch_url | ⬜ T14 | "fetch_url 取这页内容: https://example.com" |
-| 13 | vision_classify | ⬜ T15 | "看一下我刚拖进来的图(需 dummy attachment)" |
-| 14 | ocr_image | ⬜ T15 | "OCR 这张图(需 dummy attachment)" |
-| 15 | list_my_uploads | ⬜ T16 | "列我最近 10 张图" |
-| 16 | search_my_uploads | ⬜ T16 | "搜我图里有 X 的" |
-| 17 | ask_photo_curator | ⬜ T16 | "问 photo curator 我 X 时候拍了啥" |
-| 18 | delete_attachment | ⬜ T16 | "删 X 张图" |
-| 19 | list_widgets | ⬜ T17 | "列我的 widget" |
-| 20 | add_widget | ⬜ T17 | "加个 X widget" |
-| 21 | remove_widget | ⬜ T17 | "删 X widget" |
-| 22 | set_widget_enabled | ⬜ T17 | "关掉 X widget" |
+> **22 tool 验收已完成**(STRICT 22/22 全 PASS,commit `ce4ae29`)。最新状态以
+> [PARITY_LEDGER.md](PARITY_LEDGER.md) 为准,别再读本表的状态。
+> 下表只留工具名 + 示例 chat 提示作参考——下次跑 self-test 时照着这些提示触发对应 tool。
+
+| # | tool | 验收 chat 提示 |
+|---|---|---|
+| 1 | read_today_schedule | "把今天 16:30 的一条改成 X(必先 read schedule)" |
+| 2 | patch_journal_block | 同上 |
+| 3 | check_daily_task | "我吃了一颗鱼油,用 check_daily_task 打卡" |
+| 4 | web_search | "用 web_search 搜 X" |
+| 5 | insert_journal_block | "在今天 17:00 插入条新条目" |
+| 6 | append_journal_comment | "在今天 16:30 那块加批注 X" |
+| 7 | search_journal | "搜历史日记里我提过 X 几次" |
+| 8 | list_recent_days | "列最近 7 天日记日期" |
+| 9 | manage_daily_task | "新增日打卡:维生素 C" |
+| 10 | set_daily_task_meta | "鱼油每瓶 60 颗,每天 2 颗" |
+| 11 | set_water_cup_image | "把水杯图标换成蓝色" |
+| 12 | fetch_url | "fetch_url 取这页内容: https://example.com" |
+| 13 | vision_classify | "看一下我刚拖进来的图(需 dummy attachment)" |
+| 14 | ocr_image | "OCR 这张图(需 dummy attachment)" |
+| 15 | list_my_uploads | "列我最近 10 张图" |
+| 16 | search_my_uploads | "搜我图里有 X 的" |
+| 17 | ask_photo_curator | "问 photo curator 我 X 时候拍了啥" |
+| 18 | delete_attachment | "删 X 张图" |
+| 19 | list_widgets | "列我的 widget" |
+| 20 | add_widget | "加个 X widget" |
+| 21 | remove_widget | "删 X widget" |
+| 22 | set_widget_enabled | "关掉 X widget" |
 
 ## 升级路径(双 MCP 装法)
 

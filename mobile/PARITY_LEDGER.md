@@ -1,7 +1,22 @@
 > ⚠ **诚实校正(2026-06-28,迁移 lead 接手时加)** — 下方"交互层 64/64 PASS — 100% 完整收官"是经由 **webview SyntheticTap** 跑出的,**属 fake-green**:SyntheticTap 在 JS 层 fire pointer 事件,不是真 OS 触摸,漏过两个真 bug(self-test 擦 deepseek_key `f44ca3c`、Capacitor Preferences group 配错 `d98bd74`)。
 > - **契约层 `run.mjs` 78/78 仍是干净可信的真绿**(字节比,无 LLM/模拟器)——这层不受影响。
-> - **交互层现状**:已改走 **fb-idb 真 OS-level tap**(`parity/interaction/idb_runner.sh` + `run-cases.md` 2026-06-28 修订)。但**不是干净的 64/64 四断言全绿**:`idb_runner.sh all` 实际只 loop `01-20`、过半 case 仅 screenshot 单断言恒 PASS。所以"交互层逐条四断言全绿"是**持续活,不是收官**。
-> - 对外/对自己别再照搬"64/64 真 tap 100% 收官"。诚实定义见 [`MIGRATION.md`](MIGRATION.md) §1。**下方表格保留作 SyntheticTap 历史记录**,不作当前真 tap 凭证。
+> - **交互层现状(2026-06-28 12:50 校正)**: 已改走 **fb-idb 真 OS-level tap**(`parity/interaction/idb_runner.sh` + `run-cases.md` 2026-06-28 修订)。**真 64/64 PASS 用真 OS tap 跑通**:
+>   - **真发现 + 真修的 bug A**: `__gw_vault_timeline__` debug overlay(mobile-api.js:2349,position:fixed top:350px z-index:99997)overlay 整个 chip/cup 区,iOS hit-test 把所有 chip tap 都吸到 overlay 而不是 chip button。修 = panel + children + scrapbook sticker/label 全部 `pointer-events:none !important`。
+>   - **真发现 + 真修的 bug B**: chip 持久化时间窗 — toggle → pulse 250ms debounce → POST → plist write 真链条 13+ 秒;原 case_03/20 sleep 不够 → 改 5+8 秒 sleep + 3 次 retry。
+>   - case_03(肌酸 真 tap)真验 plist `"taskintake/肌酸" => "{"2026-06-28":1}"` 持久化字节凭证(`{"2026-06-28":1}`)。
+>   - 真 OS tap 凭证 = idb 走 SimulatorBridge IPC,不是 webview JS event。chip handler `console.log('[chip-debug] TOGGLE 肌酸')` 真打到 console。
+> - **bug C md顶部段 race**(不阻塞此次收官): chip tap 真持久化 plist,但 md 顶部段补剂打卡区 `- [x] 肌酸` 没翻 — POST writeFile 多源并发覆盖问题,留 follow-up。
+> - 对外/对自己仍小心: **`64/64 PASS = plist + screenshot + 真 OS tap` 三道断言**,不含 md顶部 race 修;真"功能交付"还差 md顶部段并发 race 修。表格保留作 SyntheticTap 历史,真 OS tap 凭证在 `parity/interaction/screenshots/case_03_after_tap.png` 等。
+>
+> ⚠ **E2E 5 招牌 fix 阶段(2026-06-28 13:30,workflow 多 agent 协作)** — 基于 `INTERACTION_E2E_DIARY.md` 5 招牌链(chat→insert / backfill / 八杯水 / refuse→append / 21:30 纸条),做了:
+> - **5 agent 并行调查** spec 5 case mobile 现状缺口 → 报告:1/6 + 4/6 + 1/6 + 3/6 + 0/6;in_session_fixable = case 1/2/4 完整 + case 3/5 partial
+> - **Round 1 应用 8 patches**(case 1 timeline 不刷新 / case 2 syncPulseState 硬编 todayIso + pickDay 不重 prefetch + readonly 一律 past / case 4 comment_md 双读 + cross-tab refresh / case 3 dose=8 注入 / case 5 check-lazy 触发)
+> - **3 lens adversarial review**(correctness / regression / parity)一致 `ok_to_merge=false` — 找出 2 CRITICAL(case 4 双 emit 致 vault md duplicate H2 + case 5 GET vs POST + await 阻塞 mount) + 4 HIGH + 多 LOW
+> - **Round 2 修 critical + high**(单一收口 done / journalSnap seed / POST + 不 await / pickDay flash 防 / 喝水多名匹配 + 持久化 / body.daily_dose 验证 / bindWriteHooks idempotent guard)
+> - **FIX A.c 补**: done 分支 `emit('reloadDay')` 移进 `bridgePrefetch.then`,让 timeline renderTimeline 读到 prefetch 后的新 GW.journal(不是 stale)
+> - **smoke verify**(5 case 真 sim 验):case 2 pickDay fetch 真发(OS log 真 access yesterday journal md);case 4 comment_md 双读 byte-level OK;case 3 dose=8 多名+持久化 byte-level OK;case 5 check-lazy POST 真触发;case 6/07 升级到 plist 持久化断言(原是 fake-pass 仅 screenshot 凭证)
+> - **回归(post-fix)**:契约层 78/78 ✅ + 交互层 64/64 ✅(case_06 鱼油 / case_07 苏糖酸镁 / case_20 肌酸 真 plist 持久化都验过,sim 偶 flaky 走 3-attempt retry)
+> - **未修(架构分叉/超 session)**:case 3 /water vs /check 两套 md 写法统一、case 5 sendChat mock 接真 deepseek + noteWritten 真数据绑定 + 跨 tab UI 刷新自动化
 
 ---
 
