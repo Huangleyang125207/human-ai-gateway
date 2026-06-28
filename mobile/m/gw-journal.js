@@ -20,7 +20,9 @@
       scrim.classList.remove('on'); sheetEl.classList.remove('on');
       setTimeout(() => { scrim.remove(); sheetEl.remove(); opts.onClose && opts.onClose(); }, 460);
     }
-    scrim.addEventListener('pointerdown', close);
+    // ★ Android System WebView:开模态那下 tap 会 bleed 一个 pointerdown 到刚渲染的 scrim → 秒关
+    //   (iOS WKWebView 无此问题)。延迟挂监听,忽略开场 ~450ms 内的杂散事件(对真用户点空白关无害)。
+    setTimeout(function () { scrim.addEventListener('pointerdown', close); }, 450);
     // 下滑关(sheet 顶部抓手区)
     const grip = sheetEl.querySelector('.gw-grip');
     if (grip) {
