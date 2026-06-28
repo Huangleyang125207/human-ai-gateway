@@ -2156,8 +2156,27 @@
           });
         })).then(function (rs) {
           var hits = rs.filter(Boolean);
-          var total = hits.reduce(function (a, h) { return a + h.matches.length; }, 0);
-          return jsonResp({ ok: true, query: q, days: days, total: total, hits: hits.slice(0, 30) });
+          // ★ 也扫 标签聚合.md(横切索引)— sub-test 2:AI 通过标签读历史。
+          //   query 命中某 section 的 #tag → 返该 section 全部行(整段历史);
+          //   或单行文本含 query → 返该行。(对照 PC search_journal 扫 vault 全部 md)
+          return Store.readTagAggregate().then(function (aggMd) {
+            if (aggMd) {
+              var aggLines = aggMd.split(/\r?\n/), curTag = null, tagHit = false, am = [];
+              aggLines.forEach(function (line) {
+                var hm = line.match(/^##\s+#(\S+)/);
+                if (hm) { curTag = hm[1]; tagHit = curTag.toLowerCase().indexOf(qLc) >= 0; return; }
+                if (line.indexOf("|") !== 0) return;
+                var cells = line.replace(/^\|/, "").replace(/\|\s*$/, "").split("|").map(function (c) { return c.trim(); });
+                if (cells.length < 4 || cells[0] === "日期" || cells.every(function (c) { return !c || /^[-:\s]+$/.test(c); })) return;
+                if (tagHit || line.toLowerCase().indexOf(qLc) >= 0) {
+                  am.push({ time: "#" + curTag + " " + cells[0] + " " + cells[1], snippet: cells[3].slice(0, 200) });
+                }
+              });
+              if (am.length) hits.push({ date: "标签聚合", matches: am.slice(0, 40) });
+            }
+            var total = hits.reduce(function (a, h) { return a + h.matches.length; }, 0);
+            return jsonResp({ ok: true, query: q, days: days, total: total, hits: hits.slice(0, 30) });
+          });
         });
       });
     },
