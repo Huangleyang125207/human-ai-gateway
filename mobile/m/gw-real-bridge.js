@@ -110,6 +110,10 @@
       try { var wc = await safeJson('/api/water-cup'); GW.cupImageUrl = (wc && wc.image_url) || null; } catch (e) { GW.cupImageUrl = null; }
     } catch (e) { console.warn('[bridge] /api/daily-tasks 失败,沿用 mock', e); }
 
+    // ★ 招牌:21:30 lazy 纸条 —— app 打开若当天 21:30 是占位 ##,AI 据 past_boards(过去7晚自己的纸条)
+    //   写一段;放在 journal prefetch 之前,这样下面拉 journal 自然带上写好的纸条
+    try { await window.fetch('/api/note/check-lazy', { method: 'POST' }).then(function (r) { return r.json(); }); } catch (e) {}
+
     // 3c. today 日记 entries — mobile-api 真返 schema:
     //  { file, date, blocks: [{ time, h1_raw, h2: [{tags, title, body, commits}] }] }
     // 一个 H1 时间块可含多个 H2 entry,flatten 成 cd entry list
@@ -136,6 +140,8 @@
         });
       });
       GW.journal[dayKey] = flatEntries;
+      // ★ 招牌:21:30 纸条状态 —— 21:30 块有真 body 即"已写"(喂 gw-app st.noteWritten + 总览状态行)
+      GW.noteWritten = flatEntries.some(function (e) { return /21\s*[:：]\s*30/.test(e.time) && (e.body || '').trim(); });
       // FIX A(a) — seed snapshot 防 first reloadDay 把 prefetch 来的 entries 当用户新增 POST insert-block(造成服务端 H2 重复)
       _journalSnap[dayKey] = snapshotEntries(flatEntries);
     } catch (e) { console.warn('[bridge] /api/journal/today 失败,沿用 mock', e); }

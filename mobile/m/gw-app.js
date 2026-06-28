@@ -75,7 +75,7 @@
       // ★ bug 修:原硬编 '06-25'(mock 日 key)→ 时间线读 GW.journal['06-25']=mock,
       //   而 bridge 把真 md 存在 GW.journal[今天 key]。改成选中今天 → 时间线读真 md。
       dayKey: (GW.days().find(function (d) { return d.state === 'today'; }) || {}).key || '06-25',
-      tasks: GW.tasks, water: GW.water, mood: null, noteWritten: false,
+      tasks: GW.tasks, water: GW.water, mood: null, noteWritten: GW.noteWritten || false,
       enabled: ['cups', 'tasks', 'pulse', 'mood'], dynWidgets: [],
       thread: GW.thread, readonly: false,
     };
