@@ -71,7 +71,10 @@
     const st = {
       theme: opts.theme || 'day',
       tab: 'journal', subPage: null,
-      days: GW.days(), dayKey: '06-25',
+      days: GW.days(),
+      // ★ bug 修:原硬编 '06-25'(mock 日 key)→ 时间线读 GW.journal['06-25']=mock,
+      //   而 bridge 把真 md 存在 GW.journal[今天 key]。改成选中今天 → 时间线读真 md。
+      dayKey: (GW.days().find(function (d) { return d.state === 'today'; }) || {}).key || '06-25',
       tasks: GW.tasks, water: GW.water, mood: null, noteWritten: false,
       enabled: ['cups', 'tasks', 'pulse', 'mood'], dynWidgets: [],
       thread: GW.thread, readonly: false,
@@ -85,7 +88,8 @@
     function dayState(k) { const d = st.days.find((x) => x.key === k); return d ? d.state : 'today'; }
 
     function render() {
-      st.readonly = dayState(st.dayKey) === 'past';
+      var ds = dayState(st.dayKey);
+      st.readonly = (ds === 'past') && !(st.dayCatalog && st.dayCatalog.is_writable);
       gw.dataset.theme = st.theme;
       // iOS 真状态栏在 webview 上方,删 cd 原型画的 9:41 + 假电池(避免重复)
       gw.innerHTML = `<div class="gw-grain"></div><div class="gw-glow"></div>
@@ -149,7 +153,21 @@
         setTimeout(() => { d._born = false; }, 1300);
         return;
       }
-      st.dayKey = d.key; st.tab = 'journal'; render();
+      // FIX D — 同步 render 前清空 dayCatalog,让 readonly 计算回退到 ds==='past' 默认值
+      // 防 false-affordance flash(用上一日 catalog 在新日上一帧显示错误可写态)
+      st.dayCatalog = null;
+      st.dayKey = d.key; st.tab = 'journal';
+      // 切到非 creatable 日 → 主动重拉该日 catalog,让 tasks/water/is_writable 是该日真状态
+      if (d.state !== 'creatable' && window.fetch) {
+        var iso = d.iso;
+        window.fetch('/api/daily-tasks?date=' + iso).then(function (r) { return r.json(); }).then(function (j) {
+          st.dayCatalog = j;
+          if (Array.isArray(j.tasks)) st.tasks = j.tasks;
+          if (typeof j.water_filled === 'number') st.water = j.water_filled;
+          render();
+        }).catch(function () {});
+      }
+      render();
     }
 
     function wireHideOnScroll(scroll) {
