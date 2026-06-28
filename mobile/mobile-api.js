@@ -1198,6 +1198,24 @@
 
   function pickReply(d) { return d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content; }
 
+  // 一次性 LLM completion(非流式)— compact summary 等复用。失败返 null,不 throw(silent-failure)。
+  function _llmComplete(apiKey, model, messages, maxTokens) {
+    var url = "https://api.deepseek.com/v1/chat/completions";
+    var headers = { "Content-Type": "application/json", Authorization: "Bearer " + apiKey };
+    var payload = { model: model || "deepseek-chat", messages: messages, max_tokens: maxTokens || 500, temperature: 0.3, stream: false };
+    var CapHttp = _getCapHttp();
+    if (CapHttp) {
+      return CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 15000, readTimeout: 60000 })
+        .then(function (r) { return (r && r.status >= 200 && r.status < 300) ? pickReply(r.data) : null; })
+        .catch(function () { return null; });
+    }
+    return realFetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload) })
+      .then(function (r) { return r.json(); }).then(function (d) { return pickReply(d); })
+      .catch(function () { return null; });
+  }
+  // compact 摘要 prompt(对照 PC compact_summary.py)— 防 thread 清空后 AI 失忆冷启
+  var _COMPACT_SUMMARY_PROMPT = "这是一段刚被压进 md 的对话。\n请用 200 字以内中文写一个摘要,给后续对话延续上下文,**只写关键决策 / 待办 / 当下话题**,\n不写流程细节、不复述每句话、不带工具名。读者是这个对话的下一回合,不是外人。\n\n对话原文:\n═══════════════════════════════════════════\n{conversation}\n═══════════════════════════════════════════\n\n返一段散文,不带标题,不带 ``` 包裹。";
+
   // 真打一次 chat.completions ping(对齐桌面 setup_test L89-105):
   // 用 {api_key, base_url, model} 真打 POST base_url/chat/completions(messages=[ping], max_tokens=8)
   // 通 → {ok:true, reply, model};不通 → {ok:false, reason: "HTTP <code>: <message>"}
@@ -2441,6 +2459,20 @@
       return Store.getSetting("deepseek_key").then(function (key) {
         if (!key) return sseResp([{ type: "delta", text: "（还没填 DeepSeek key —— 点报头 ⚙ 进设置填了,AI 就能读今天的日记跟你聊。）" }, { type: "done", actions: [], model_id: "deepseek" }]);
         return Store.getSetting("deepseek_model").then(function (m) { return chatViaDeepseek(body, key, m || "deepseek-chat"); });
+      });
+    },
+    // compact 摘要(对照 PC POST /api/pulse/compact-summary)— thread 压缩后给 AI 写 200 字摘要防冷启。
+    // 失败/无 key → 返空 summary(silent-failure,前端 skip);移动端跳过 3 份 PULSE 自演化(无 PULSE 文件、无消费方)
+    "POST /api/pulse/compact-summary": function (req, u, body) {
+      var conversation = (body && body.conversation) || "";
+      if (!conversation.trim()) return jsonResp({ ok: true, summary: "" });
+      return Store.getSetting("deepseek_key").then(function (key) {
+        if (!key) return jsonResp({ ok: true, summary: "" });
+        return Store.getSetting("deepseek_model").then(function (model) {
+          var prompt = _COMPACT_SUMMARY_PROMPT.replace("{conversation}", conversation);
+          return _llmComplete(key, model || "deepseek-chat", [{ role: "user", content: prompt }], 500)
+            .then(function (text) { return jsonResp({ ok: true, summary: (text || "").trim() }); });
+        });
       });
     },
     // 设置保存:容错抽取 DeepSeek key/model 落本地(让现有设置 UI 能填 key)

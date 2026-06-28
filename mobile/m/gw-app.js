@@ -120,11 +120,14 @@
             <button class="gw-nav-item${st.tab === 'chat' ? ' on' : ''}" data-tab="chat">对话</button>
           </nav>
           <span class="gw-top-spacer"></span>
+          ${st.tab === 'chat' ? `<button class="gw-compact-ring" aria-label="整理对话历史(压成摘要)"></button>` : ''}
           <span class="gw-breath-dot" title="AI 在场"></span>
         </div>
         ${st.tab === 'journal' ? `<div class="gw-dateband"></div>` : ''}`;
       top.querySelector('.gw-burger').addEventListener('click', openDrawer);
       top.querySelectorAll('.gw-nav-item').forEach((b) => b.addEventListener('click', () => { st.tab = b.dataset.tab; render(); }));
+      const _ring = top.querySelector('.gw-compact-ring');
+      if (_ring) { _ring.addEventListener('click', () => runCompact()); setTimeout(updateCompactRing, 0); }
       if (st.tab === 'journal') buildDateband(top.querySelector('.gw-dateband'));
       return top;
     }
@@ -470,7 +473,96 @@
     GW.bus.on('point', (entry) => { st.thread.push({ kind: 'ref', who: 'me', refKind: '日记 · ' + entry.time, refText: entry.title || (entry.body || '').slice(0, 22) }); st.tab = 'chat'; render(); GW.whisper('已拉进对话 ✦ 指给 AI 看', true); });
     GW.bus.on('wantNewTask', () => { st.tab = 'chat'; render(); setTimeout(() => { const ta = gw.querySelector('.gw-chat-input'); if (ta) { ta.value = '我想要新打卡项：'; ta.focus(); ta.dispatchEvent(new Event('input')); } }, 60); });
 
+    /* ── compact:对话历史压缩 + 上下文管理(对照 PC compact-ring.js;移动跳过 3 份 PULSE 自演化,
+          因移动无 PULSE 文件、系统提示不注入 PULSE,只做 summary + history reset 控上下文长度)── */
+    const COMPACT_THRESHOLD = 150000;  // ~75K tokens,跟桌面一致
+    let compactRunning = false, lastAutoFireAt = 0;
+    function threadChars() {
+      let sum = 0;
+      for (const m of (st.thread || [])) {
+        sum += (m.text || m.content || m.body || '').length;
+        if (m.refText) sum += m.refText.length;
+      }
+      return sum;
+    }
+    function isStreamingNow() { return (st.thread || []).some((m) => m.streaming); }
+    function updateCompactRing() {
+      const ring = gw.querySelector('.gw-compact-ring');
+      if (!ring) return;
+      const chars = threadChars();
+      const pct = Math.min(150, Math.round((chars / COMPACT_THRESHOLD) * 100));
+      ring.style.setProperty('--pct', Math.min(100, pct));
+      ring.classList.toggle('over', pct >= 100);
+      ring.classList.toggle('warn', pct >= 80 && pct < 100);
+      ring.title = `对话 ${(chars / 1000).toFixed(1)}K / 150K · ${pct}% · 点一下整理`;
+      const autoOn = (st.compactAuto !== false);
+      if (autoOn && pct >= 100 && !compactRunning && !isStreamingNow()) {
+        const fails = st.compactFails || 0;
+        const cooldown = fails >= 2 ? 3600000 : 600000;
+        if (Date.now() - lastAutoFireAt >= cooldown) { lastAutoFireAt = Date.now(); runCompact({ skipConfirm: true, auto: true }); }
+      }
+    }
+    async function runCompact(opts) {
+      opts = opts || {};
+      if (compactRunning) return;
+      if (isStreamingNow()) { GW.whisper('AI 还在回复,等它写完再整理', false); return; }
+      const chars = threadChars();
+      if (chars === 0) { GW.whisper('对话还空,先聊点东西再整理', false); return; }
+      const snapshot = (st.thread || []).slice();
+      const cutoffIndex = snapshot.length;  // LLM 跑期间用户发的新消息只在 cutoff 之后,reset 不吃
+      let conversation = snapshot.map((m) => {
+        const role = (m.who === 'ai' || m.role === 'assistant') ? 'AI' : '用户';
+        const t = m.text || m.content || m.body || (m.refText ? '[引用] ' + m.refText : '');
+        return t ? `[${role}] ${t}` : '';
+      }).filter(Boolean).join('\n\n');
+      if (conversation.length > 80000) conversation = '[... 早期对话已省略 ...]\n\n' + conversation.slice(-80000);
+      if (!opts.skipConfirm) {
+        const ok = await GW.gatewayConfirm(`整理对话历史(${(chars / 1000).toFixed(1)}K 字符)?\n\n旧对话压成一段摘要,保留最近 5 轮 + 整理后发的新消息。AI 不会失忆。`);
+        if (!ok) return;
+      }
+      compactRunning = true; updateCompactRing();
+      GW.whisper(opts.auto ? '对话超长,自动整理中…' : '整理中…压一段摘要', false);
+      let summary = '';
+      try {
+        const r = await window.fetch('/api/pulse/compact-summary', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation }) });
+        if (r.ok) { const j = await r.json(); summary = (j.summary || '').trim(); }
+      } catch (e) {}
+      compactRunning = false;
+      if (!summary) {  // 摘要失败:不动历史(防失忆),auto 计失败 2 次自关
+        if (opts.auto) { st.compactFails = (st.compactFails || 0) + 1; if (st.compactFails >= 2) st.compactAuto = false; }
+        GW.whisper('整理没成(摘要失败),历史没动。' + (opts.auto && st.compactAuto === false ? ' 自动整理先关,下次手动点圆环。' : ''), false);
+        updateCompactRing(); return;
+      }
+      st.compactFails = 0;
+      const newAfterCutoff = (st.thread || []).slice(cutoffIndex);
+      const lastOld = snapshot.slice(Math.max(0, cutoffIndex - 5));
+      const composed = [{ kind: 'note', who: 'ai', time: '✦ 整理摘要', body: summary, sig: '旧对话已压缩', id: 'compact-' + Date.now(), _isCompactSummary: true }];
+      composed.push(...lastOld, ...newAfterCutoff);
+      // ★ 原地替换(不 reassign):st.thread === GW.thread 同一引用,reassign 会断链 → bridge 重载用旧 GW.thread 覆盖
+      st.thread.length = 0;
+      Array.prototype.push.apply(st.thread, composed);
+      render();
+      try { window.fetch('/api/thread/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ history: st.thread }) }); } catch (e) {}
+      GW.whisper('整理完成 — 旧对话压成摘要,保留最近 5 轮', false);
+    }
+    GW.runCompact = runCompact;
+    // WKWebView 安全 confirm(window.confirm 在 WKWebView 默默返 false — 6.17 compact 那个坑)
+    GW.gatewayConfirm = function (msg) {
+      return new Promise((resolve) => {
+        const scrim = document.createElement('div'); scrim.className = 'gw-confirm-scrim';
+        scrim.innerHTML = `<div class="gw-confirm"><div class="gw-confirm-msg">${GW.esc(msg || '').replace(/\n/g, '<br>')}</div><div class="gw-confirm-acts"><button class="gw-confirm-no">取消</button><button class="gw-confirm-yes">整理</button></div></div>`;
+        GW.root.appendChild(scrim); void scrim.offsetHeight; scrim.classList.add('on');
+        let done = false;
+        const fin = (v) => { if (done) return; done = true; scrim.classList.remove('on'); setTimeout(() => scrim.remove(), 250); resolve(v); };
+        scrim.addEventListener('click', (e) => { if (e.target === scrim) fin(false); });
+        scrim.querySelector('.gw-confirm-no').addEventListener('click', () => fin(false));
+        scrim.querySelector('.gw-confirm-yes').addEventListener('click', () => fin(true));
+      });
+    };
+
     render();
+    updateCompactRing();
+    setInterval(updateCompactRing, 3000);  // 对话长度轮询 + auto-compact 触发(对照 PC POLL_MS=3000)
     return { setTheme: (t) => { st.theme = t; render(); }, state: st };
   };
 })();
