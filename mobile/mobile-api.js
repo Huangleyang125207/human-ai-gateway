@@ -1828,12 +1828,25 @@
           var appended = headLine + blockBody.replace(/\s*$/, "") + "\n\n" + newH2Block + tail;
           nextMd = md.replace(existing[0], appended);
         } else {
-          // 新 H1 块,append 到 md 末尾 — 对齐 PC golden 字节(insert_stamps_user.md)
-          // 上块跟新块之间用 \n\n---\n\n 分隔(若 md 已 end with ---,只加 \n\n)
-          var trimmed = md ? md.replace(/\s*$/, "") : "";
-          var sep = !trimmed ? "" : (trimmed.endsWith("---") ? "\n\n" : "\n\n---\n\n");
+          // 新 H1 块:对齐 PC _insert_block 按时间序插入(原 bug:一律 append 到尾 →
+          //   已有 #14：00 时插 #15：00 反而排到 14:00 之前 / 乱序)。
           var blockMd = "# " + h + "：" + mm + "\n\n" + newH2Block;
-          nextMd = trimmed + sep + blockMd;
+          var newMin = h * 60 + (parseInt(mm, 10) || 0);
+          var h1ScanRe = /^# (\d{1,2})[：:](\d{2})/gm, sm, insertIdx = -1;
+          while ((sm = h1ScanRe.exec(md)) !== null) {
+            if (parseInt(sm[1], 10) * 60 + parseInt(sm[2], 10) > newMin) { insertIdx = sm.index; break; }
+          }
+          if (insertIdx < 0) {
+            // 没有更晚的时间块 → append 到尾(保留 PC golden 字节 insert_stamps_user.md)
+            var trimmed = md ? md.replace(/\s*$/, "") : "";
+            var sep = !trimmed ? "" : (trimmed.endsWith("---") ? "\n\n" : "\n\n---\n\n");
+            nextMd = trimmed + sep + blockMd;
+          } else {
+            // 插到第一个更晚的时间块之前(保持时序)
+            var before = md.slice(0, insertIdx).replace(/\s*$/, "");
+            var after = md.slice(insertIdx);
+            nextMd = before + "\n\n---\n\n" + blockMd.replace(/\s*$/, "") + "\n\n---\n\n" + after;
+          }
         }
         return Store.writeJournalMd(date, nextMd).then(function () {
           return jsonResp({ ok: true, inserted: "# " + h + "：" + mm, file: isoToStem(date) + ".md", appended_to_existing: !!existing });
