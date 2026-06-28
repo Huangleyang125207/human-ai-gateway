@@ -460,3 +460,40 @@ html[data-still] .gw-undo, html[data-still] .gw-whisper, html[data-still] .gw-mo
   .gw-grain, .gw-glow, .gw-breath-dot, .gw-grind-stone, .gw-grind-stone::after { animation: none !important; }
   .gw *, .gw *::before, .gw *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
+
+/* ── 聚合页(标签横切,对照 PC aggregate.js)── */
+.gw-agg { padding: 0 0 48px; }
+.gw-agg-tabs {
+  display: flex; gap: 14px; overflow-x: auto; padding: 14px 20px;
+  border-bottom: 1px solid var(--line-medium); -webkit-overflow-scrolling: touch;
+}
+.gw-agg-tabs::-webkit-scrollbar { display: none; }
+.gw-agg-tab {
+  flex: 0 0 auto; border: none; background: transparent;
+  font-family: var(--font-serif); font-size: 15px; color: var(--ink-faint);
+  padding: 4px 1px 6px; cursor: pointer; white-space: nowrap;
+  border-bottom: 2px solid transparent; transition: color var(--t-fast) var(--ease);
+}
+.gw-agg-tab.on { color: var(--ink-strong); border-bottom-color: var(--vermilion); }
+.gw-agg-tab i { font-style: normal; font-size: 11px; color: var(--vermilion); margin-left: 3px; vertical-align: super; }
+.gw-agg-desc {
+  padding: 16px 20px 4px; font-family: var(--font-serif); font-size: 13px;
+  color: var(--umber); font-style: italic;
+}
+.gw-agg-row {
+  display: flex; gap: 14px; width: 100%; text-align: left; border: none;
+  background: transparent; padding: 13px 20px; align-items: baseline;
+  border-bottom: 1px solid var(--line-medium); cursor: pointer;
+}
+.gw-agg-row.no-jump { cursor: default; }
+.gw-agg-row:active:not(.no-jump) { background: var(--paper-sunken); }
+.gw-agg-when {
+  flex: 0 0 50px; font-family: var(--font-sans); font-size: 12px;
+  color: var(--umber); line-height: 1.35;
+}
+.gw-agg-when i { display: block; font-style: normal; font-size: 11px; color: var(--ink-faint); }
+.gw-agg-text { flex: 1; font-family: var(--font-serif); font-size: 14px; color: var(--ink-soft); line-height: 1.55; }
+.gw-agg-text em {
+  display: inline-block; margin-left: 6px; font-style: normal; font-size: 11px;
+  color: var(--vermilion); border: 1px solid var(--vermilion); border-radius: 9px; padding: 0 6px;
+}

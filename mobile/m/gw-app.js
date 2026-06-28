@@ -237,7 +237,47 @@
       top.querySelector('.gw-burger').addEventListener('click', () => { st.subPage = null; render(); });
       scroll.appendChild(top);
       if (st.subPage === 'settings') scroll.appendChild(settings());
+      else if (st.subPage === 'aggregate') scroll.appendChild(aggregate());
       else { const e = document.createElement('div'); e.className = 'gw-empty'; e.innerHTML = `<b>${meta.label}</b>${meta.desc || ''}。<br>桌面已有，移动端按路线图往上加。`; scroll.appendChild(e); }
+    }
+
+    // 聚合页(对照 PC shared/aggregate.js)— GET /api/tag-aggregate → tab/行 + tap-跳历史日
+    function aggregate() {
+      const wrap = document.createElement('div'); wrap.className = 'gw-agg';
+      wrap.innerHTML = `<div class="gw-agg-tabs"></div><div class="gw-agg-body"><div class="gw-empty">读取中…</div></div>`;
+      const tabsEl = wrap.querySelector('.gw-agg-tabs');
+      const bodyEl = wrap.querySelector('.gw-agg-body');
+      let sections = [], active = 0;
+      function jump(iso) {
+        st.subPage = null;
+        const key = iso.slice(5);  // 2026-05-07 → 05-07(day.key 格式)
+        const day = (st.days || []).find((d) => d.key === key);
+        if (day) st.dayKey = key;
+        st.tab = 'journal'; render();
+      }
+      function renderActive() {
+        const sec = sections[active];
+        if (!sec) { bodyEl.innerHTML = '<div class="gw-empty">还没有聚合标签</div>'; return; }
+        const rows = sec.rows.slice().reverse();  // 新在上(对照 PC iso_date DESC)
+        bodyEl.innerHTML = (sec.description ? `<div class="gw-agg-desc">${sec.description}</div>` : '') +
+          rows.map((r) => `<button class="gw-agg-row${r.iso_date ? '' : ' no-jump'}" data-iso="${r.iso_date || ''}">
+            <span class="gw-agg-when">${r.date_short || ''}<i>${r.time || ''}</i></span>
+            <span class="gw-agg-text">${r.content || ''}${r.sub_tag ? `<em>${r.sub_tag}</em>` : ''}</span></button>`).join('');
+        bodyEl.querySelectorAll('.gw-agg-row').forEach((b) => {
+          if (!b.dataset.iso) return;
+          b.addEventListener('click', () => jump(b.dataset.iso));
+        });
+      }
+      function renderTabs() {
+        tabsEl.innerHTML = sections.map((s, i) => `<button class="gw-agg-tab${i === active ? ' on' : ''}" data-i="${i}">#${s.tag}<i>${s.rows.length}</i></button>`).join('');
+        tabsEl.querySelectorAll('.gw-agg-tab').forEach((b) => b.addEventListener('click', () => { active = +b.dataset.i; renderTabs(); renderActive(); }));
+      }
+      window.fetch('/api/tag-aggregate').then((r) => r.json()).then((d) => {
+        sections = (d && d.sections) || [];
+        if (!sections.length) { bodyEl.innerHTML = '<div class="gw-empty">还没有聚合标签。跟 AI 说「把 #X 收进聚合页」即可开一个。</div>'; return; }
+        renderTabs(); renderActive();
+      }).catch(() => { bodyEl.innerHTML = '<div class="gw-empty">聚合页读取失败</div>'; });
+      return wrap;
     }
 
     function settings() {
