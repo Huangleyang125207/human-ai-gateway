@@ -3043,7 +3043,7 @@ async def scrapbook_upsert(req: Request):
         if idx < 0:
             raise HTTPException(404, f"id {body['id']} not found")
         item = items[idx]
-        for k in ("src", "x_pct", "y_px", "w", "h", "rotation", "anchor_time", "z", "align", "x", "y"):
+        for k in ("src", "x_pct", "y_px", "w", "h", "size_pct", "rotation", "cutout", "anchor_time", "z", "align", "x", "y"):
             if k in body:
                 item[k] = body[k]
         # 用户拖完后传上来的 y_px 是真实值 → 清掉 auto_y,
@@ -3060,7 +3060,10 @@ async def scrapbook_upsert(req: Request):
             "y_px": float(body.get("y_px", 0)),
             "w": int(body.get("w", 200)),
             "h": int(body.get("h", 200)),
+            # size_pct:贴纸占 .sb-layer 宽 %(等比缩放契约,换分辨率不漂);默认 18% — 对齐移动端 shim
+            "size_pct": float(body.get("size_pct", 18)),
             "rotation": float(body.get("rotation", 0)),
+            "cutout": bool(body.get("cutout", True)),
             "anchor_time": body.get("anchor_time", ""),
             "z": int(body.get("z", 1)),
         }
