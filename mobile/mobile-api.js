@@ -1338,7 +1338,16 @@
     // ★ Scrapbook endpoints — 对齐 PC server.py 的 /api/scrapbook/* 三件套
     "GET /api/scrapbook": function (req, u) {
       var date = new URL(u, location.origin).searchParams.get("date") || todayIso();
-      return Store.readScrapbook(date).then(function (items) { return jsonResp({ ok: true, date: date, items: items }); });
+      return Store.readScrapbook(date).then(function (items) {
+        // ★ src 若是 /attachments/{date}/{stem} 路径 → 解析成 dataURL 供 <img> 渲染
+        //   (WKWebView 的 <img src> 不走 shim fetch 拦截,必须真 dataURL;AI 路径存的是路径)
+        return Promise.all((items || []).map(function (it) {
+          if (!it.src || it.src.indexOf("data:") === 0) return it;
+          var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(it.src);
+          if (!m) return it;
+          return Store.readAttachment(m[1], m[2]).then(function (d) { return d ? Object.assign({}, it, { src: d }) : it; });
+        })).then(function (resolved) { return jsonResp({ ok: true, date: date, items: resolved }); });
+      });
     },
     "POST /api/scrapbook/upsert": function (req, u, body) {
       body = body || {};

@@ -201,11 +201,17 @@
       function refresh() { send.disabled = !(ta.value.trim() || pending.length); ta.style.height = 'auto'; ta.style.height = Math.min(96, ta.scrollHeight) + 'px'; }
       ta.addEventListener('input', refresh);
       ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); } });
-      bottom.querySelector('.gw-chat-attach').addEventListener('click', () => {
-        // demo:贴一张占位图(真机走 Capacitor Camera)
-        pending.push('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%2280%22%3E%3Crect width=%2280%22 height=%2280%22 fill=%22%23cdbfa6%22/%3E%3C/svg%3E');
-        chips.hidden = false; chips.innerHTML = pending.map((u, i) => `<div class="gw-attach-chip"><img src="${u}"><button class="gw-attach-x" data-i="${i}">×</button></div>`).join('');
-        chips.querySelectorAll('.gw-attach-x').forEach((x) => x.addEventListener('click', () => { pending.splice(+x.dataset.i, 1); chips.hidden = !pending.length; chips.innerHTML = pending.map((u, i) => `<div class="gw-attach-chip"><img src="${u}"><button class="gw-attach-x" data-i="${i}">×</button></div>`).join(''); refresh(); }));
+      function renderChips() {
+        chips.hidden = !pending.length;
+        chips.innerHTML = pending.map((u, i) => `<div class="gw-attach-chip"><img src="${u}"><button class="gw-attach-x" data-i="${i}">×</button></div>`).join('');
+        chips.querySelectorAll('.gw-attach-x').forEach((x) => x.addEventListener('click', () => { pending.splice(+x.dataset.i, 1); renderChips(); refresh(); }));
+      }
+      // ★ 真选图(对照 PC 对话框贴图):chatbar 附件 → WKWebView file picker → dataURL
+      bottom.querySelector('.gw-chat-attach').addEventListener('click', async () => {
+        const dataUrl = await GW.pickPhoto();
+        if (!dataUrl) return;
+        pending.push(dataUrl);
+        renderChips();
         refresh();
       });
       function fire() { const t = ta.value.trim(); if (!t && !pending.length) return; const imgs = pending.slice(); ta.value = ''; pending = []; chips.hidden = true; chips.innerHTML = ''; refresh(); GW.sendChat(thread, st, t, imgs); }
