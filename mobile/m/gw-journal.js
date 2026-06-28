@@ -59,6 +59,21 @@
         <div class="gw-entry-body">${bodyHtml}</div>
         ${commits}
       </div>`;
+    // ★ scrapbook 贴纸:anchor_time 命中本块 → float:right 浮一张,正文文字绕图(对照 PC paper renderStickers)
+    const stickers = (GW.scrapbook || []).filter((s) => s.anchor_time === entry.time && s.src);
+    if (stickers.length) {
+      const body = row.querySelector('.gw-entry-body');
+      stickers.forEach((s) => {
+        const fig = document.createElement('figure');
+        fig.className = 'gw-sticker landing';
+        fig.style.width = Math.max(24, Math.min(48, (s.size_pct || 18) * 1.6)) + '%';
+        fig.style.setProperty('--rot', (s.rotation || 1.5) + 'deg');
+        fig.dataset.skId = s.id;
+        fig.innerHTML = `<img src="${s.src}" alt="">`;
+        if (body) body.insertBefore(fig, body.firstChild);
+        setTimeout(() => fig.classList.remove('landing'), 760);
+      });
+    }
     wrap.appendChild(del); wrap.appendChild(row);
     if (!st.readonly) wireEntryGestures(row, wrap, entry, st);
     return wrap;

@@ -146,6 +146,9 @@
       _journalSnap[dayKey] = snapshotEntries(flatEntries);
     } catch (e) { console.warn('[bridge] /api/journal/today 失败,沿用 mock', e); }
 
+    // ★ scrapbook 贴纸 —— 读 /api/scrapbook 进 GW.scrapbook(buildEntry 按 anchor_time 浮进对应块)
+    try { var sb = await safeJson('/api/scrapbook?date=' + iso); GW.scrapbook = (sb && sb.items) || []; } catch (e) { GW.scrapbook = []; }
+
     // 3d. thread history
     // mobile-api 直接 JSON.stringify 存读 thread array,save 啥 read 啥。
     // 所以保留 cd 原 schema({kind,who,text,id,attachments?})— 不双向 transform。

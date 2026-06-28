@@ -1353,6 +1353,8 @@
           anchor_time: body.anchor_time,
           x_pct: typeof body.x_pct === "number" ? body.x_pct : 75,
           y_px: typeof body.y_px === "number" ? body.y_px : 0,
+          // ★ size_pct:贴纸占 .sb-layer 宽 %(对齐 PC 等比缩放契约,换分辨率不漂);默认 ~18%
+          size_pct: typeof body.size_pct === "number" ? body.size_pct : 18,
           w: body.w || 220,
           h: body.h || 220,
           rotation: typeof body.rotation === "number" ? body.rotation : (Math.random() * 4 - 2),
