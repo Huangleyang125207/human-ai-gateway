@@ -876,6 +876,7 @@
         intake: { type: "integer", description: "今天吃了几粒(优先级最高)" },
         increment: { type: "integer", description: "增量,如 +1" },
         checked: { type: "boolean", description: "直接勾/取消" },
+        daily_dose: { type: "integer", description: "可选 — 显式声明今日 dose 上限(防 fresh meta clamp-to-1,如喝水=8)" },
       }, required: ["task_name"] }}},
     { type: "function", function: { name: "set_daily_task_meta", description: "改打卡 meta(每天 N 粒/瓶装颗数)",
       parameters: { type: "object", properties: {
@@ -1673,7 +1674,20 @@
         if (md === null) return jsonResp({ ok: false, error: "no file" }, 404);
         var meta = {}; try { meta = rs[1] ? JSON.parse(rs[1]) : {}; } catch (e) {}
         var log = {}; try { log = rs[2] ? JSON.parse(rs[2]) : {}; } catch (e) {}
-        var dose = Math.max(1, parseInt(meta.daily_dose, 10) || 1);
+        // FIX 7c — 喝水特例:fresh meta + AI 漏传 dose → 默认 dose=8,防 clamp-to-1
+        // FIX E — 多名匹配(喝水/八杯水/water)+ 立即持久化(避免每次 fresh meta 都重复 patch)
+        var _waterMetaDirty = false;
+        if ((name === '喝水' || name === '八杯水' || name === 'water') && !body.daily_dose && !meta.daily_dose) {
+          meta.daily_dose = 8;
+          _waterMetaDirty = true;
+        }
+        // FIX F — body.daily_dose 验证(非整数或 <1 直接 400)
+        if ('daily_dose' in body) {
+          var bdd = parseInt(body.daily_dose, 10);
+          if (isNaN(bdd) || bdd < 1) return jsonResp({ ok: false, error: 'daily_dose must be int >=1' }, 400);
+        }
+        // FIX 7b — caller 显式传 daily_dose 优先,其次 meta,最后默认 1
+        var dose = Math.max(1, parseInt(body.daily_dose, 10) || parseInt(meta.daily_dose, 10) || 1);
         var cur = log[date] | 0;
         var next;
         if ("intake" in body) {
@@ -1698,6 +1712,8 @@
         var p = [Store.writeJournalMd(date, newMd)];
         if (Object.keys(log).length === 0) p.push(Store.removeSetting("taskintake/" + name));
         else p.push(Store.setSetting("taskintake/" + name, JSON.stringify(log)));
+        // FIX E — 喝水默认 dose=8 立即持久化(避免每次 /check 都 fresh meta 重复 patch + 防 race)
+        if (_waterMetaDirty) p.push(Store.setSetting("taskmeta/" + name, JSON.stringify(meta)));
         return Promise.all(p).then(function () {
           return jsonResp({
             ok: true, task_name: name, checked: checked,
@@ -2068,7 +2084,8 @@
     "POST /api/journal/append-comment": function (req, u, body) {
       var date = (body && body.date) || todayIso();
       var time = body && body.time;
-      var comment = body && body.comment;
+      // 双读 comment_md(PC tool 用)+ comment(mobile spec 用),兼容两端 AI emit
+      var comment = body && (body.comment_md || body.comment);
       var author = (body && body.author) || "ai";
       if (!time || !comment) return jsonResp({ error: "缺 time 或 comment" }, 400);
       return Store.readJournalMd(date).then(function (md) {
@@ -2327,8 +2344,14 @@
   //   - overlay 顶部固定显示测试结果
   //   - vault timeline 渲染 # 9:30 / # 15:00 等 H1 + 各 H2 列表(scroll panel)
   //   - scrapbook sticker 真 anchor 到对应 H1 DOM 旁(根据 anchor_time 找 DOM)
+  // ★ 真 bug 修(2026-06-28):这些固定覆盖层 + dump 是 self-test 脚手架,production 绝不能挂 ——
+  //   __gw_vault_timeline__(position:fixed top:350 z:99997)会盖住今日打卡 chip(逼出 row-delegation
+  //   tap hack)。只在 debug 模式(与 self-test 同 gate)渲染。
+  var __dbgOverlays = (typeof window !== "undefined") &&
+    (window.__GW_RUN_SELF_TEST__ === true || !!window.__GW_REAL_KEY__);
   setTimeout(function () {
     if (typeof document === "undefined") return;
+    if (!__dbgOverlays) return;
     Store.getSetting("__last_test_overlay__").then(function (html) {
       if (!html) return;
       // ★ sanitize:含 <svg / dataURL 的 stale overlay 不 inject(防超大 widget 渲染)
@@ -2339,14 +2362,32 @@
       var wrap = document.createElement("div");
       wrap.innerHTML = html;
       var node = wrap.firstChild;
-      if (node && !document.getElementById("__gw_strict_overlay__")) document.body.appendChild(node);
+      if (node && !document.getElementById("__gw_strict_overlay__")) {
+        document.body.appendChild(node);
+        /* ★ 真 bug 修:strict_overlay + 子树全 pointer-events:none,让 tap 穿透到下层 widget */
+        node.style.pointerEvents = "none";
+        if (!document.getElementById("__gw_strict_overlay_style__")) {
+          var s = document.createElement("style");
+          s.id = "__gw_strict_overlay_style__";
+          s.textContent = "#__gw_strict_overlay__, #__gw_strict_overlay__ * { pointer-events: none !important; }";
+          document.head.appendChild(s);
+        }
+      }
     }).catch(function () {});
     // ★ Vault timeline panel:解析 vault md 渲染 H1 + H2 列表 到固定 scroll panel
     Store.readJournalMd(todayIso()).then(function (md) {
       if (!md || document.getElementById("__gw_vault_timeline__")) return;
       var panel = document.createElement("div");
       panel.id = "__gw_vault_timeline__";
-      panel.style.cssText = "position:fixed;top:350px;left:10px;right:10px;height:380px;background:rgba(255,250,243,0.97);border:2px solid #a86e46;border-radius:12px;padding:10px;font:13px/1.5 -apple-system,sans-serif;color:#3a2418;overflow:auto;z-index:99997;box-shadow:0 6px 20px rgba(168,110,70,0.3);";
+      panel.style.cssText = "position:fixed;top:350px;left:10px;right:10px;height:380px;background:rgba(255,250,243,0.97);border:2px solid #a86e46;border-radius:12px;padding:10px;font:13px/1.5 -apple-system,sans-serif;color:#3a2418;overflow:auto;z-index:99997;box-shadow:0 6px 20px rgba(168,110,70,0.3);pointer-events:none;";
+      /* ★ 真 bug 修 #1:panel 加 pointer-events:none */
+      if (!document.getElementById("__gw_vault_timeline_style__")) {
+        var styleNode = document.createElement("style");
+        styleNode.id = "__gw_vault_timeline_style__";
+        styleNode.textContent = "#__gw_vault_timeline__ * { pointer-events: none !important; }";
+        document.head.appendChild(styleNode);
+      }
+      /* ★ 真 bug 修 #2:children 默认 pointer-events:auto 会 intercept,必须全 force none */
       var title = "<div style='font-weight:700;font-size:14px;margin-bottom:6px;color:#7a5230;border-bottom:1px solid #d4a373;padding-bottom:4px;'>📓 今日时间线(vault md real)</div>";
       var html = title;
       var blocks = md.split(/^# /m).slice(1); // 去掉首 # 之前
@@ -2392,12 +2433,12 @@
             }
             var img = document.createElement("img");
             img.src = dataUrl;
-            img.style.cssText = "position:fixed;top:" + topPx + "px;left:" + leftPx + "px;width:100px;height:100px;transform:rotate(" + (it.rotation || -2) + "deg);z-index:99998;border:3px solid #fff;border-radius:6px;box-shadow:0 6px 20px rgba(168,110,70,0.5);background:#fff;";
+            img.style.cssText = "position:fixed;top:" + topPx + "px;left:" + leftPx + "px;width:100px;height:100px;transform:rotate(" + (it.rotation || -2) + "deg);z-index:99998;border:3px solid #fff;border-radius:6px;box-shadow:0 6px 20px rgba(168,110,70,0.5);background:#fff;pointer-events:none;";
             img.alt = "scrapbook anchor=" + it.anchor_time + (anchorEl ? " (DOM真锚)" : " (fallback)");
             img.id = "__gw_scrapbook_anchor_" + idx;
             if (!document.getElementById(img.id)) document.body.appendChild(img);
             var label = document.createElement("div");
-            label.style.cssText = "position:fixed;top:" + (topPx + 105) + "px;left:" + leftPx + "px;background:#a86e46;color:#fff;font:10px/1 -apple-system,sans-serif;padding:2px 5px;border-radius:3px;z-index:99998;";
+            label.style.cssText = "position:fixed;top:" + (topPx + 105) + "px;left:" + leftPx + "px;background:#a86e46;color:#fff;font:10px/1 -apple-system,sans-serif;padding:2px 5px;border-radius:3px;z-index:99998;pointer-events:none;";
             label.textContent = (anchorEl ? "✓ " : "○ ") + "anchor # " + it.anchor_time;
             label.id = "__gw_scrapbook_label_anchor_" + idx;
             if (!document.getElementById(label.id)) document.body.appendChild(label);
@@ -2407,7 +2448,7 @@
     }).catch(function () {});
   }, 200);  // app launch 200ms 立即恢复
 
-  // ★ 永久 dump chip rects 给 idb_runner.sh 用(launch+3s 后写 plist)
+  // ★ dump chip rects 给 idb_runner.sh 用(launch+3s 后写 plist)— 不可见(只读 rect 写 plist),不 gate 免断 runner
   setTimeout(function() {
     try {
       var rects = [];
