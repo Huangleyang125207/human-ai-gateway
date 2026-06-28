@@ -260,22 +260,23 @@
         const sec = sections[active];
         if (!sec) { bodyEl.innerHTML = '<div class="gw-empty">还没有聚合标签</div>'; return; }
         if (!sec.rows.length) {
-          bodyEl.innerHTML = (sec.description ? `<div class="gw-agg-desc">${sec.description}</div>` : '') +
-            `<div class="gw-empty">这个标签还没有条目。点「⟳ 刷新」扫日记收进来，或写日记时给条目带 #${sec.tag}。</div>`;
+          bodyEl.innerHTML = (sec.description ? `<div class="gw-agg-desc">${GW.esc(sec.description)}</div>` : '') +
+            `<div class="gw-empty">这个标签还没有条目。点「⟳ 刷新」扫日记收进来，或写日记时给条目带 #${GW.esc(sec.tag)}。</div>`;
           return;
         }
         const rows = sec.rows.slice().reverse();  // 新在上(对照 PC iso_date DESC)
-        bodyEl.innerHTML = (sec.description ? `<div class="gw-agg-desc">${sec.description}</div>` : '') +
-          rows.map((r) => `<button class="gw-agg-row${r.iso_date ? '' : ' no-jump'}" data-iso="${r.iso_date || ''}">
-            <span class="gw-agg-when">${r.date_short || ''}<i>${r.time || ''}</i></span>
-            <span class="gw-agg-text">${r.content || ''}${r.sub_tag ? `<em>${r.sub_tag}</em>` : ''}</span></button>`).join('');
+        // ★ 全部动态内容走 GW.esc(标签聚合.md 是 AI/user 写的,可能含 HTML — 防注入,对照 PC aggregate.js escape)
+        bodyEl.innerHTML = (sec.description ? `<div class="gw-agg-desc">${GW.esc(sec.description)}</div>` : '') +
+          rows.map((r) => `<button class="gw-agg-row${r.iso_date ? '' : ' no-jump'}" data-iso="${GW.esc(r.iso_date || '')}">
+            <span class="gw-agg-when">${GW.esc(r.date_short || '')}<i>${GW.esc(r.time || '')}</i></span>
+            <span class="gw-agg-text">${GW.esc(r.content || '')}${r.sub_tag ? `<em>${GW.esc(r.sub_tag)}</em>` : ''}</span></button>`).join('');
         bodyEl.querySelectorAll('.gw-agg-row').forEach((b) => {
           if (!b.dataset.iso) return;
           b.addEventListener('click', () => jump(b.dataset.iso));
         });
       }
       function renderTabs() {
-        tabsEl.innerHTML = sections.map((s, i) => `<button class="gw-agg-tab${i === active ? ' on' : ''}" data-i="${i}">#${s.tag}<i>${s.rows.length}</i></button>`).join('');
+        tabsEl.innerHTML = sections.map((s, i) => `<button class="gw-agg-tab${i === active ? ' on' : ''}" data-i="${i}">#${GW.esc(s.tag)}<i>${s.rows.length}</i></button>`).join('');
         tabsEl.querySelectorAll('.gw-agg-tab').forEach((b) => b.addEventListener('click', () => { active = +b.dataset.i; renderTabs(); renderActive(); }));
       }
       function reload(focusTag) {

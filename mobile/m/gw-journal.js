@@ -69,7 +69,7 @@
         fig.style.width = Math.max(24, Math.min(48, (s.size_pct || 18) * 1.6)) + '%';
         fig.style.setProperty('--rot', (s.rotation || 1.5) + 'deg');
         fig.dataset.skId = s.id;
-        fig.innerHTML = `<img src="${s.src}" alt="">`;
+        fig.innerHTML = `<img src="${GW.esc(s.src)}" alt="">`;  // esc:防 src 属性注入(防御纵深)
         if (body) body.insertBefore(fig, body.firstChild);
         setTimeout(() => fig.classList.remove('landing'), 760);
       });
