@@ -1,6 +1,14 @@
-# ★ Test-First Parity Loop 真完成(2026-06-27 20:30 收尾;21:42 接交互层 1/64 PASS)
+> ⚠ **诚实校正(2026-06-28,迁移 lead 接手时加)** — 下方"交互层 64/64 PASS — 100% 完整收官"是经由 **webview SyntheticTap** 跑出的,**属 fake-green**:SyntheticTap 在 JS 层 fire pointer 事件,不是真 OS 触摸,漏过两个真 bug(self-test 擦 deepseek_key `f44ca3c`、Capacitor Preferences group 配错 `d98bd74`)。
+> - **契约层 `run.mjs` 78/78 仍是干净可信的真绿**(字节比,无 LLM/模拟器)——这层不受影响。
+> - **交互层现状**:已改走 **fb-idb 真 OS-level tap**(`parity/interaction/idb_runner.sh` + `run-cases.md` 2026-06-28 修订)。但**不是干净的 64/64 四断言全绿**:`idb_runner.sh all` 实际只 loop `01-20`、过半 case 仅 screenshot 单断言恒 PASS。所以"交互层逐条四断言全绿"是**持续活,不是收官**。
+> - 对外/对自己别再照搬"64/64 真 tap 100% 收官"。诚实定义见 [`MIGRATION.md`](MIGRATION.md) §1。**下方表格保留作 SyntheticTap 历史记录**,不作当前真 tap 凭证。
 
-跑 `node mobile/parity/run.mjs` → **78/78 PASS** ✅ · 跨 17 endpoint 簇 · 84 golden case 93% cover · (node + memory Backend,无需 LLM 或 simulator)
+---
+
+# ★ Test-First Parity Loop(契约层真完成 · 交互层见顶部校正)
+
+跑 `node mobile/parity/run.mjs` → **78/78 PASS** ✅ · 跨 17 endpoint 簇 · golden 库 **109 文件**(命名 `feature__case.<kind>`)· (node + memory Backend,无需 LLM 或 simulator)
+> 计数口径(三者别混):golden **文件 109** / 契约 run.mjs **case ≈78** / 交互 **case 64**。
 
 ## ★ 交互层(本 session 21:00 接通 — run-cases.md 协议真在 simulator 跑)
 
@@ -71,18 +79,18 @@
 | `journal_edit__user_patches_ai_block` | UI已建 | POST patch user→@ai → 200 + md 真改"人接管了" | ✅ PASS(00:12) | — (contract) |
 | `thread__tool_chip_three_states` | UI已建 | POST tool/dispatch ok (read_today_schedule) + fail (nonexistent) 两路径 | ✅ PASS(00:17) | — (contract) |
 
-# **64/64 PASS — 100% 完整收官**
+# （历史 · SyntheticTap 跑）64/64 — 已被顶部 banner 校正,非真 OS tap 收官
 
-plist `__interaction_test_report__` = `INTERACTION TEST: 64/64 PASS`
+plist `__interaction_test_report__` = `INTERACTION TEST: 64/64 PASS`（SyntheticTap 产,见顶部校正）
 **14 ★Cannot-break + 50 UI已建/non-★** — 64 全 covered
 
 ★ case_1 改成动态:hour<12 期望 200 (可补昨天),hour>=12 期望 400 (闭集) — 防 date 跨夜回归
 
 ---
 
-## 完工(2026-06-28 00:17)
+## 历史快照(2026-06-28 00:17 · SyntheticTap 跑 · 见顶部诚实校正)
 
-64 / 64 case 真在 iOS Simulator 跑 PASS(plist 真证据)。所有 ★Cannot-break 红线全护:
+64 / 64 case 经 SyntheticTap 在 iOS Simulator 跑 PASS(plist 证据,**非真 OS tap**)。下列 ★Cannot-break 红线**契约层**全护(交互层真 tap 验仍持续活):
 - 4 daily-tasks 写窗口闭集(yesterday/future/yesterday-ok/non_int)
 - 4 check 契约(clamp / delete_cascade / non_int_intake / check_default)
 - 3 journal authorship + H2 guard(refuse user / allow ai / rename blocked)

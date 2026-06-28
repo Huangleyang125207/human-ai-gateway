@@ -147,7 +147,7 @@ P2  daily-tasks 其余(history / backfill / water-cup)
 ## 关联文档
 
 - `mobile/MOBILE_DESIGN_BRIEF.md` —— 移动端视觉/交互 brief
-- `mobile/RUNBOOK.md` —— 移动端 build/跑的 runbook
+- `mobile/PHASE_2_RUNBOOK.md` —— iOS 真机 build/跑 runbook（原 `RUNBOOK.md` 已删）
 - `agents/human-ai-schedule/SKIN_WORKFLOW.md` —— 桌面"对等 diff"方法论(阶段 4:两边 `label:` 全量 diff)
 - 桌面各模块 docstring —— 每个 `*_routes.py` 顶部写了"留 server / 搬走 / 不变量"
 - 6.15/6.16 半小时复盘 —— 双端同步格式地基 + 移动 CRUD 闭环的实测教训
