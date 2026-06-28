@@ -130,9 +130,11 @@
 .gw-cups-foot .hint { color: var(--ink-faint); }
 
 /* 3.2 今日打卡:横滑 chip,点 toggle,长按 sheet */
-.gw-tasks { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
+.gw-tasks { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+/* ★ mask-image 之前在 .gw-tasks 上让 chip 1/3 边缘 pointer events 被 WKWebView 跳过 — 删掉 */
 .gw-tasks::-webkit-scrollbar { display: none; }
-.gw-task { flex: 0 0 auto; width: 56px; display: flex; flex-direction: column; align-items: center; gap: 7px; background: none; border: 0; cursor: pointer; padding: 4px 0; transition: transform var(--t-fast) var(--ease); }
+.gw-task { flex: 0 0 auto; width: 56px; display: flex; flex-direction: column; align-items: center; gap: 7px; background: none; border: 0; cursor: pointer; padding: 4px 0; transition: transform var(--t-fast) var(--ease); touch-action: manipulation; }
+/* ★ touch-action: manipulation 让 chip 1/3 边缘 tap 真接 pointer event (绕 iOS 横滑误判) */
 .gw-task:active { transform: scale(0.95); }
 .gw-task-disc { position: relative; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; }
 .gw-task-disc .ring { position: absolute; inset: 0; }

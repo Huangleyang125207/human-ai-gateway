@@ -42,7 +42,13 @@ plist_set() {
 }
 
 plist_delete() {
-  xcrun simctl spawn "$SIMID" defaults delete "$BUNDLE" "CapacitorStorage.$1" 2>&1 | head -1
+  # ★ defaults delete 只删 in-memory NSUserDefaults,plist 文件不同步 → app launch 仍读旧值
+  # 必须用 plutil 直删 plist 文件 + defaults delete 同时,确保两层都干净
+  # plutil 把 . 当 path separator,key 内字面 . 须 escape \. (但实际 key 名 'CapacitorStorage.X' 是单层 flat key)
+  local key="$1"
+  xcrun simctl spawn "$SIMID" defaults delete "$BUNDLE" "CapacitorStorage.${key}" 2>/dev/null | head -1
+  # 用 PlistBuddy 真删 flat key (PlistBuddy 用 :: 作 path 分隔,不冲突 .)
+  /usr/libexec/PlistBuddy -c "Delete :CapacitorStorage.${key}" "$(PLIST)" 2>/dev/null || true
 }
 
 # Seed today md(含 supplements 顶部段 + 至少 1 个 journal block)
