@@ -33,3 +33,6 @@ __pycache__/
 # Claude Code session/config (machine-specific)
 .claude/
 **/.claude/
+
+# Capacitor plugin Android build output (Gradle)
+mobile/plugins/*/android/build/
