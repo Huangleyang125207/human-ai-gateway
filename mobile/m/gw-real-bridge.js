@@ -125,17 +125,20 @@
       (todayData.blocks || []).forEach(function (b) {
         var t = b.time || '00:00';
         (b.h2 || []).forEach(function (h) {
+          // server.py parse_journal 把 @author marker 泄漏进 h.title 末尾、commit 留整行字符串。
+          // 抽 marker 给 _authorMark(compose 原样回写,原块无 marker → null → patch 不凭空加);
+          // commit 解析成 {who,text,raw},raw 留作 byte 回写。
+          var pa = parseH2Author(h.title || '');
           flatEntries.push({
             id: 'r' + t.replace(':', '') + '_' + (idx++),
             time: t,
             tags: (h.tags || []).map(function (tg) { return tg.charAt(0) === '#' ? tg : '#' + tg; }),
-            author: h.author === 'ai' ? '@ai' : '@我',
-            title: h.title || '',
+            author: pa.mark === 'ai' ? '@ai' : '@我',   // gw-journal 题签显示用
+            _authorMark: pa.mark,                        // 'ai' | 'user' | null —— compose 原样回写
+            title: pa.title,
             body: h.body || '',
-            commits: (h.commits || []).map(function (c) {
-              return { who: c.author === 'ai' ? 'ai' : 'me', text: c.text || '' };
-            }),
-            isNote: /21\s*[:：]?\s*30/.test(t) && /纸条/.test(h.title || '')
+            commits: (h.commits || []).map(parseCommitLine),
+            isNote: /21\s*[:：]?\s*30/.test(t) && /纸条/.test(pa.title)
           });
         });
       });
@@ -269,17 +272,46 @@
     });
     _journalSnap[dayKey] = snapshotEntries(nowEntries);
   }
+  // ── parse_journal 的逆运算(byte 对齐桌面 server.py,跨端 git-sync 字节兼容)──
+  // server.py parse_journal 不剥 @author marker,它泄漏进 title 末尾。抽出来:
+  // 返 {mark:'ai'|'user'|null, title:去 marker 后的纯标题}。末尾锚 → 不碰标题内部字节;
+  // marker 若在中间(罕见/手写畸形)则留在 title 里照样原样回写,仍 byte-identical。
+  function parseH2Author(rawTitle) {
+    rawTitle = rawTitle || '';
+    var m = /\s*@(user|ai)\b\s*$/.exec(rawTitle);
+    if (!m) return { mark: null, title: rawTitle.trim() };
+    return { mark: m[1], title: rawTitle.slice(0, m.index).trim() };
+  }
+
+  // 一条 #commit 行 → {who,text,raw}。raw 整行原样留作 byte 回写(全角/半角变体不归一,
+  // 免 git 伪 diff);who/text 仅供 gw-journal 夹批题签(批/我)显示,错了不污染字节。
+  // 兼容:`- #commit（claude-opus-4.8）： text` / `#commit (claude-opus-4.7): text`
+  function parseCommitLine(raw) {
+    raw = String(raw == null ? '' : raw);
+    var m = /#commit\s*[（(]\s*([^）)]*?)\s*[）)]\s*[:：]\s*([\s\S]*)$/.exec(raw);
+    var who = 'me', text = raw.replace(/^[\s-]*#commit\s*/, '').trim();
+    if (m) {
+      text = m[2].trim();
+      // 模型名 → ai;用户手柄(如 葱鸭)→ me(失败安全默认 me)
+      if (/claude|gpt|opus|sonnet|deepseek|minimax|gemini|\bai\b/i.test(m[1])) who = 'ai';
+    }
+    return { who: who, text: text, raw: raw };
+  }
+
+  // model → canonical H2 块。形态:`## #tags 内联title [@user|@ai]` + 空行 + body
+  //   [+ 空行 + 原样 #commit 行]。铁律(对齐桌面 / 修复跨端 byte 兼容):
+  //   ① 时间只在 H1,绝不进 H2  ② title 内联,不写 ### H3  ③ @author 仅当原块本就有
+  //   ④ #commit 整行 raw 回写(authorship Cannot-break:@user 块/批注字节不可被改写,6.16 丢批注)
   function composeEntryMd(e) {
     var tagLine = (e.tags || []).join(' ');
-    var header = e.time + (tagLine ? ' ' + tagLine : '') + (e.author === '@ai' ? ' @ai' : ' @user');
-    var titleLine = e.title ? '### ' + e.title + '\n' : '';
-    var body = e.body || '';
-    var commitBlock = (e.commits && e.commits.length)
-      ? '\n\n<commit>\n' + e.commits.map(function (c) {
-          return '@' + (c.who === 'ai' ? 'ai' : 'user') + ' ' + c.text;
-        }).join('\n') + '\n</commit>'
-      : '';
-    return '## ' + header + '\n' + titleLine + body + commitBlock;
+    var title = e.title || '';
+    var h2 = '## ' + tagLine
+      + (title ? (tagLine ? ' ' : '') + title : '')
+      + (e._authorMark ? ' @' + e._authorMark : '');
+    var out = h2 + '\n\n' + (e.body || '');
+    var commitRaws = (e.commits || []).map(function (c) { return c && c.raw; }).filter(Boolean);
+    if (commitRaws.length) out += '\n\n' + commitRaws.join('\n');
+    return out;
   }
 
   // ──────────── 5. sendChat 真 SSE 流式 ────────────
