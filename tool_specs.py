@@ -164,7 +164,7 @@ TOOLS = [
                 "required": ["action"],
                 "properties": {
                     "action": {"type": "string", "enum": ["add", "edit", "del"]},
-                    "text": {"type": "string", "description": "新内容,不含 '- [ ] '"},
+                    "text": {"type": "string", "description": "新内容,不含 '- [ ] '。用最短可辨认名(『鱼油』,别写『南非醉茄 KSM-66(Nature Love,90粒新版)』);品牌/规格/剂量别进名字 —— 打卡 chip 最多两行,超长截断"},
                     "old_text": {"type": "string", "description": "edit/del 用,substring 匹配老 item"},
                 },
             },

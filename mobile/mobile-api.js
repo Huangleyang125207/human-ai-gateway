@@ -1007,7 +1007,7 @@
     { type: "function", function: { name: "manage_daily_task", description: "加新打卡 task 到补剂段(每天追踪一项)",
       parameters: { type: "object", properties: {
         action: { type: "string", enum: ["add", "delete"], description: "默认 add" },
-        task_name: { type: "string" },
+        task_name: { type: "string", description: "最短可辨认名(『鱼油』,别写『南非醉茄 KSM-66(Nature Love,90粒新版)』);品牌/规格/剂量进 meta 别进名字 —— 打卡 chip 最多两行,超长截断" },
       }, required: ["task_name"] }}},
     // Group C
     { type: "function", function: { name: "search_journal", description: "在本机 vault 全部日记里搜关键词,返匹配的日期 + 时间块 + 片段",
