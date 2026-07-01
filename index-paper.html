@@ -264,13 +264,15 @@
 <script src="./shared/day-paper.js?v=20260613a" defer></script>
 <script src="./vendor/marked.min.js" defer></script>
 <script src="./vendor/dompurify.min.js" defer></script>
-<script src="./shared/md.js?v=20260612a" defer></script>
+<script src="./shared/md.js?v=20260701link" defer></script>
 <script src="./shared/index-paper-data.js?v=20260613a" defer></script>
 <!-- 对话:thread.js 原件(streaming + past_boards 红线在此,不动);scroll-drag 供 resizer -->
 <script src="./shared/scroll-drag.js?v=20260517e" defer></script>
 <script src="./shared/thread.js?v=20260603urlstrip" defer></script>
 <!-- 设置:marketplace.js 原件(钥匙保存/模型测试/consent/检查更新/widget 全现成),纸衣走 marketplace-paper.css -->
 <script src="./shared/marketplace.js?v=20260613a" defer></script>
+<!-- 外链兜底:AI/日记里的 http(s) 链接点击 → /api/open-external → 系统 open(WKWebView 裸 <a> 哑火) -->
+<script src="./shared/external-links.js?v=20260701link" defer></script>
 <a href="#" onclick="window.gatewaySkin&&window.gatewaySkin.set('classic');return false;" style="position:fixed;right:16px;bottom:14px;font-family:var(--font-kai);font-size:12.5px;color:var(--ink-soft,#888);text-decoration:none;letter-spacing:.14em;opacity:.62;z-index:60;border-bottom:1px solid var(--hairline-strong,#ccc);" title="切回标准版">切回标准版</a>
 </body>
 </html>

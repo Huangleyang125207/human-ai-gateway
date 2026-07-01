@@ -30,6 +30,19 @@
     mangle: false,     // 不混淆邮箱
   });
 
+  // 外链统一打 target="_blank" + rel noopener —— 让 webview 的外链兜底 handler 能接管:
+  //   桌面 external-links.js(POST /api/open-external → 系统 open)/ 移动 window.open(url,"_system")。
+  // 否则裸 <a href> 在 WKWebView 里点击 = navigate-in-place 被拦 = 哑火(既打不开也难复制)。
+  DOMPurify.addHook("afterSanitizeAttributes", function (node) {
+    if (node.tagName === "A") {
+      const href = node.getAttribute("href") || "";
+      if (/^https?:\/\//i.test(href)) {
+        node.setAttribute("target", "_blank");
+        node.setAttribute("rel", "noopener noreferrer");
+      }
+    }
+  });
+
   const PURIFY_CONFIG = {
     ALLOWED_TAGS: [
       "p", "br", "hr", "div", "span",

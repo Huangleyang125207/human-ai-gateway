@@ -32,6 +32,10 @@
   -webkit-touch-callout: none;
 }
 .gw input, .gw textarea { -webkit-user-select: text; user-select: text; }
+/* 对话正文 + 外链:放开长按复制/系统气泡(Copy Link / 打开);其余 .gw 仍关选择防放大镜 */
+.gw-msg-text, .gw-note-body, .gw a {
+  -webkit-user-select: text; user-select: text; -webkit-touch-callout: default;
+}
 
 /* 纸纹 + 呼吸暖光(安静,不是 dashboard) */
 .gw-grain {

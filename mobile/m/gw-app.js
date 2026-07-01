@@ -85,6 +85,20 @@
     GW.root = gw;
     mountEl.innerHTML = ''; mountEl.appendChild(gw);
 
+    // 外链:WKWebView 里裸 <a href> 点击 = navigate-in-place 被拦(哑火)→ 拦 http(s) 走系统浏览器。
+    // 配合 md.js 给外链打的 target=_blank,长按复制则靠 components.css 放开 user-select/touch-callout。
+    if (!GW._extLinkBound) {
+      GW._extLinkBound = true;
+      document.addEventListener('click', function (e) {
+        const a = e.target.closest && e.target.closest('a[href]');
+        if (!a) return;
+        const href = a.getAttribute('href') || '';
+        if (!/^https?:\/\//i.test(href)) return;   // 只接管外链;内部锚点/操作不动
+        e.preventDefault();
+        window.open(href, '_system');              // Capacitor:_system = 交给系统浏览器
+      }, true);
+    }
+
     function dayState(k) { const d = st.days.find((x) => x.key === k); return d ? d.state : 'today'; }
 
     function render() {
