@@ -53,8 +53,8 @@
         <header class="agg-head">
           <div class="agg-title">标签聚合</div>
           <div class="agg-tabs" id="aggTabs"></div>
-          <button class="agg-register" id="aggRegister" title="注册新 project tag(给新 tag 开一段表)">+ 注册</button>
-          <button class="agg-refresh" id="aggRefresh" title="AI 扫 schedule 同步新行(只 append 不 delete)">⟳ 刷新</button>
+          <button class="agg-register" id="aggRegister" title="注册新分类标签(为其开启单独分组)">+ 注册</button>
+          <button class="agg-refresh" id="aggRefresh" title="AI 扫描日程表并同步新增条目(只增不删除)">⟳ 刷新</button>
           <button class="agg-rules-btn" id="aggRulesBtn" title="聚合规则" aria-label="rules">规则</button>
           <button class="market-close" id="aggClose" aria-label="close">×</button>
         </header>
@@ -62,7 +62,7 @@
           <summary>聚合规则(点开看)</summary>
           <div class="agg-rules-body">
             <p><strong>视图关系</strong>:schedule 按时间线索;本页按项目主题。两套视图必须一致。</p>
-            <p><strong>什么会进聚合</strong>:H2 的 tag 命中已注册 project tag(<code>#yanpai #ESP32 #配置系统</code>)的 entry。
+            <p><strong>什么会进聚合</strong>:H2 的 tag 命中已注册 project tag(<code>#工作 #生活 #健康</code>)的 entry。
               <code>#parent/child</code> sub-tag roll-up 到 parent 段、Sub 列填 <code>/child</code>。</p>
             <p><strong>什么不进</strong>:generic tag(<code>#运动 #饮食 #娱乐</code>) / 单挂 <code>#协作</code> 没项目 tag / 没注册的新 tag(出现 ≥ 3 次再入聚合)。</p>
             <p><strong>表格列</strong>:Date(<code>M.D</code>) / Time(全角冒号<code>：</code>跟源 H1 一致) / Link(<code>file#anchor</code>) / Content(一句话提示词)/ Sub(可选)。一时间块 = 一行,不合并。</p>
@@ -227,7 +227,7 @@
     });
 
     if (!rows.length) {
-      body.innerHTML = `<div class="agg-empty">这个 tag 下没有 entry</div>`;
+      body.innerHTML = `<div class="agg-empty">这个分类还没有日记条目</div>`;
       return;
     }
 

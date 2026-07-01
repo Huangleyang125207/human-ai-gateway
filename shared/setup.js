@@ -149,7 +149,7 @@
           </section>
 
           <section class="setup-section">
-            <h3>② 眼睛 · <span class="setup-role">阿里云百炼(给 DeepSeek 装视觉)</span></h3>
+            <h3>② 眼睛 · <span class="setup-role">阿里云百炼（提供图片识别）</span></h3>
             <div class="setup-howto setup-howto-secondary">
               根据指引获取阿里云百炼 API,为你的 DeepSeek 装上眼睛。
               <ol>
@@ -173,7 +173,7 @@
           </section>
 
           <details class="setup-details setup-section">
-            <summary>③ 百度抠图(可选 · 折叠) — Win/Linux 用户兜底</summary>
+            <summary>③ 百度抠图(可选 · 折叠) — 仅 Windows / Linux 使用</summary>
             <div class="setup-howto setup-howto-secondary">
               macOS 优先用系统 Subject Lift(本地、免费、220ms)。<b>只在 Win/Linux 上跑 + 抠图质量不够时才填。</b>
               新用户:跳过这一段。
@@ -225,10 +225,10 @@
         <button id="dsTest" class="bailian-test-btn">${deepseek._testing ? "⋯ 测试中" : (deepseek.tested ? "✓ 通过" : "测试")}</button>
       </div>
       ${deepseek._err ? `<div class="setup-prov-err">${escape(deepseek._err)}</div>` : ""}
-      <div class="bailian-models-label">启用 model(运行时可在 thread header 切换)</div>
+      <div class="bailian-models-label">启用模型(运行时可在对话框切换)</div>
       <div class="bailian-models">${checks}</div>
       <div class="bailian-default-row">
-        <label>默认 model</label>
+        <label>默认模型</label>
         <select id="dsDefault">
           ${deepseek.models.filter(m => deepseek.selected[m.id]).map(m =>
             `<option value="${escape(m.id)}" ${m.id === deepseek.default_model_id ? "selected" : ""}>${escape(m.label)}</option>`
@@ -255,7 +255,7 @@
   }
 
   async function testDeepseek() {
-    if (!deepseek.api_key) { deepseek._err = "key 是空的"; renderDeepseek(); return; }
+    if (!deepseek.api_key) { deepseek._err = "密钥不能为空"; renderDeepseek(); return; }
     deepseek._testing = true; deepseek._err = "";
     renderDeepseek();
     const testModel = deepseek.default_model_id ||
@@ -298,7 +298,7 @@
         <button id="bailianTest" class="bailian-test-btn">${bailian._testing ? "⋯ 测试中" : (bailian.tested ? "✓ 通过" : "测试")}</button>
       </div>
       ${bailian._err ? `<div class="setup-prov-err">${escape(bailian._err)}</div>` : ""}
-      <div class="bailian-models-label">视觉 model(可多选,默认 flash 够用)</div>
+      <div class="bailian-models-label">视觉模型(可多选,推荐使用默认)</div>
       <div class="bailian-models">${checks}</div>
     `;
     document.getElementById("bailianKey").addEventListener("input", e => {
@@ -317,7 +317,7 @@
   }
 
   async function testBailian() {
-    if (!bailian.api_key) { bailian._err = "key 是空的"; renderBailian(); return; }
+    if (!bailian.api_key) { bailian._err = "密钥不能为空"; renderBailian(); return; }
     bailian._testing = true; bailian._err = "";
     renderBailian();
     const testModel = bailian.models.find(m => bailian.selected[m.id])?.id || "qwen3-vl-flash";
@@ -388,15 +388,15 @@
     if (btn) btn.disabled = !anyOk;
     if (hint) {
       if (!deepseek.tested && !bailian.tested) {
-        hint.textContent = "填 ① DeepSeek 或 ② 百炼任一个 key + 测试即可保存(推荐先填免费的 ② 百炼)";
+        hint.textContent = "设置 ① DeepSeek 或 ② 百炼任一个密钥并测试即可保存(推荐先填免费的 ② 百炼)";
       } else if (dsOk && blOk) {
         hint.textContent = "全部就绪 — 保存";
       } else if (blOk && !deepseek.tested) {
-        hint.textContent = "百炼测试通过 — 可保存(对话用 qwen 模型;想换 DeepSeek 后续设置里加)";
+        hint.textContent = "百炼测试通过 — 可保存(对话将使用阿里云模型;如需切换到 DeepSeek 可在后续设置中添加)";
       } else if (dsOk && !bailian.tested) {
-        hint.textContent = "DeepSeek 就绪 — 可保存(视觉助手没配的话拖图会瘸)";
+        hint.textContent = "DeepSeek 就绪 — 可保存(未配置图片识别时,图片功能受限)";
       } else if (deepseek.tested && !Object.values(deepseek.selected).some(v=>v)) {
-        hint.textContent = "至少勾选一个 DeepSeek model";
+        hint.textContent = "至少选择一个 DeepSeek 模型";
       }
     }
   }

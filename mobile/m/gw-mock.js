@@ -126,31 +126,31 @@
 
   GW.journal = {
     '06-25': [
-      { id: 'e1', time: '07:30', tags: ['#思考'], author: '@我', dropcap: true,
-        body: '今早醒来突然觉得，所谓"自主选择"可能就是大脑后处理编出来的故事 —— 决定先发生，理由后补。越想越像。',
-        commits: [{ who: 'ai', text: '你这条把"选择"和"后处理"拆开说了。昨天 #思考 那条还把它们当一回事 —— 你在挪动自己。' }] },
-      { id: 'e2', time: '09:00', tags: ['#yanpai'], author: '@我',
-        title: '演牌 backlog 收尾',
-        body: '跑了一遍 v0.1.20 review，把 22 项 P1+P2 收口。\n剩下的滑点模型留到下午，先记一笔别动它。' },
-      { id: 'e3', time: '11:30', tags: ['#配置系统', '#gateway'], author: '@我 @claude',
-        title: '双端同步格式地基',
-        body: 'md 是真相这条今天彻底落定了：HTML 是热镜像，两边都能改，冲突时以 md 字节为准。\n移动端不再是缩小的桌面，是同一个程序换一套手的语言。',
-        commits: [{ who: 'ai', text: '这条我镜像进 #配置系统 聚合了。"换一套手的语言"——我留着这句，下次你纠结要不要照搬桌面时提醒你。' }] },
-      { id: 'e4', time: '14:00', tags: ['#思考'], author: '@我 @claude',
-        body: '走在路上看到一只猫，想起 KS 测试在尾部漂移的现象。分布的尾巴和猫的尾巴，今天都不太服管。' },
+      { id: 'e1', time: '07:30', tags: ['#心情'], author: '@我', dropcap: true,
+        body: '今早醒得早，窗外天刚亮。坐了一会儿，觉得新的一天还挺值得期待的。',
+        commits: [{ who: 'ai', text: '你今天起得早，状态看着不错。这种安静的清晨，多记几笔。' }] },
+      { id: 'e2', time: '09:00', tags: ['#工作'], author: '@我',
+        title: '完成一项任务',
+        body: '花了点时间把手头的事推进到一个节点。\n剩下的部分留到下午，先记一笔别动它。' },
+      { id: 'e3', time: '11:30', tags: ['#生活'], author: '@我 @claude',
+        title: '记录今天的一个想法',
+        body: '今天想清楚了一件一直纠结的事，心里踏实了不少。\n把它写下来，免得过几天又忘了。',
+        commits: [{ who: 'ai', text: '这条我帮你记下来了。下次你纠结同一件事时，我提醒你今天的结论。' }] },
+      { id: 'e4', time: '14:00', tags: ['#心情'], author: '@我 @claude',
+        body: '走在路上看到一只猫，心情忽然就好了起来。' },
     ],
     '06-24': [
-      { id: 'p1', time: '10:00', tags: ['#a股'], author: '@我', title: '复权因子又对不上', body: '第三方源和交易所差了两个交易日，先用交易所的兜底。' },
+      { id: 'p1', time: '10:00', tags: ['#工作'], author: '@我', title: '处理一个小问题', body: '两边的数据对不上，先用其中一份兜底，回头再细查。' },
       { id: 'p2', time: '21:30', tags: ['#纸条'], author: '@claude', isNote: true,
-        body: '今天你把"双端同步"这块硬骨头啃下来了。\n你说移动端是"换一套手的语言"——我觉得这句比代码更重要。早点睡。', sig: '— Gateway · 6.24 夜' },
+        body: '今天你把一件难事啃下来了。\n慢慢来，今天已经做得很好了。早点睡。', sig: '— Gateway · 今夜' },
     ],
   };
 
   GW.tasks = [
-    { name: '鱼油', glyph: '鱼', done: true, today_intake: 2, daily_dose: 2 },
-    { name: '苏糖酸镁', glyph: '镁', done: false, today_intake: 1, daily_dose: 2 },
-    { name: '南非醉茄', glyph: '茄', done: false, today_intake: 0, daily_dose: 1 },
-    { name: 'D3+K2', glyph: 'D', done: false, today_intake: 0, daily_dose: 1, days_left: 3 },
+    { name: '维生素', glyph: '维', done: true, today_intake: 2, daily_dose: 2 },
+    { name: '矿物质', glyph: '矿', done: false, today_intake: 1, daily_dose: 2 },
+    { name: '蛋白质', glyph: '蛋', done: false, today_intake: 0, daily_dose: 1 },
+    { name: '补充剂', glyph: '补', done: false, today_intake: 0, daily_dose: 1, days_left: 3 },
   ];
   GW.water = 6;
   GW.MOODS = ['😴', '🙂', '😐', '😟', '😣', '🤔', '🤩'];
@@ -162,8 +162,8 @@
       sig: '— Gateway · 6.24 夜' },
     { kind: 'msg', who: 'me', text: '看看我上午写了啥' },
     { kind: 'tool', id: 'tc1', name: 'read_today_schedule', args: {}, state: 'ok' },
-    { kind: 'msg', who: 'ai', text: '上午两条：7:30 那条在想自由意志，9:00 收了演牌的 backlog。11:30 你把"双端同步"定了调 —— 那条我觉得最关键。' },
+    { kind: 'msg', who: 'ai', text: '上午几条：7:30 记了点心情，9:00 完成了一项任务。11:30 那条想法我觉得最关键 —— 帮你留着了。' },
   ];
 
-  GW.SUGGEST_TAGS = ['#gateway', '#a股', '#身体', '#桌宠', '#杂', '#风险'];
+  GW.SUGGEST_TAGS = ['#工作', '#生活', '#健康', '#心情', '#运动', '#杂'];
 })();

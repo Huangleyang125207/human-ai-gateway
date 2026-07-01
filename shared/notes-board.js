@@ -2,7 +2,7 @@
  *
  * 跟 chat-view 同 panel,thread-head 用 tab 切换。
  * 数据源:GET /api/eval/today → 渲染 4 段 + feature_intro。
- * 空状态:[立刻跑一次] 按钮触发 POST /api/eval/run。
+ * 空状态:[立刻生成] 按钮触发 POST /api/eval/run。
  */
 (function () {
   const tvtChat = document.getElementById("tvtChat");
@@ -49,8 +49,8 @@
     boardContent.innerHTML = `
       <div class="board-empty">
         <div>还没有任何复盘。</div>
-        <div style="margin-top: 8px; font-size: 12px;">日程跑到 21:30 自动出,也可以现在手动跑。</div>
-        <button id="boardRunNow">立刻跑一次</button>
+        <div style="margin-top: 8px; font-size: 12px;">日程运行到 21:30 会自动生成，也可以现在手动生成。</div>
+        <button id="boardRunNow">立刻生成</button>
       </div>
     `;
     document.getElementById("boardRunNow").addEventListener("click", runEvalNow);
@@ -61,7 +61,7 @@
     btn = btn || document.getElementById("boardRunNow") || document.getElementById("boardRefreshBtn");
     const targetDate = btn?.dataset?.runDate || ""; // 空 = 今天
     const oldLabel = btn?.textContent;
-    if (btn) { btn.disabled = true; btn.textContent = "AI 在写⋯ (可能要 1-2 分钟)"; }
+    if (btn) { btn.disabled = true; btn.textContent = "正在生成⋯ (可能要 1-2 分钟)"; }
     try {
       const r = await fetch("/api/eval/run", {
         method: "POST", headers: {"Content-Type":"application/json"},
@@ -84,8 +84,8 @@
           <span class="board-card-title">今晚还没复盘</span>
           <span class="board-card-date">${new Date().toLocaleDateString("zh-CN", {month:"long",day:"numeric",weekday:"long"})}</span>
         </div>
-        <div class="board-card-body" style="opacity:.7;">21:30 自动出。也可以现在手动跑。</div>
-        <div class="board-actions"><button id="boardRunNow">立刻跑一次</button></div>
+        <div class="board-card-body" style="opacity:.7;">21:30 自动生成。也可以现在手动生成。</div>
+        <div class="board-actions"><button id="boardRunNow">立刻生成</button></div>
       </div>`;
     const pastCards = items
       .filter(x => !x.is_today)
@@ -94,7 +94,7 @@
 
     boardContent.innerHTML = `
       ${todayCard}
-      ${pastCards ? `<div class="board-past-divider">过去 ${items.filter(x=>!x.is_today).length} 晚</div>${pastCards}` : ""}
+      ${pastCards ? `<div class="board-past-divider">过去 ${items.filter(x=>!x.is_today).length} 天</div>${pastCards}` : ""}
     `;
     const runBtn = document.getElementById("boardRunNow");
     if (runBtn) runBtn.addEventListener("click", () => runEvalNow(runBtn));
@@ -118,7 +118,7 @@
         </div>
         <div class="board-card-body" style="opacity:.75;">那晚 21:30 时 app 没启动 — 现在能补跑一份。</div>
         <div class="board-actions">
-          <button class="board-backfill-btn" data-run-date="${escapeHtml(item.date)}">补跑那晚</button>
+          <button class="board-backfill-btn" data-run-date="${escapeHtml(item.date)}">补充生成</button>
         </div>
       </div>
     `;

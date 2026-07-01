@@ -1442,7 +1442,7 @@ def _list_today_tasks():
 
 def _resolve_task_name(name):
     """模糊解析 daily-task 名 → 完整规范名。
-    AI 实测倾向用'语义全名'省 suffix(如'南非醉茄 KSM-66（Nature Love）' 漏'，90粒新版'),
+    AI 实测倾向用'语义全名'省 suffix(如'维生素（某品牌）' 漏'，60粒装'),
     严格匹配会全失败。这里兜:子串包含(任一方向)唯一命中 → 用全名。多/无 → 报错带候选。
     返 (full_name, None) 或 (None, error_dict)。"""
     name = (name or "").strip()
@@ -1465,8 +1465,8 @@ def _resolve_task_name(name):
         return None, {"error": f"task '{name}' 模糊匹配多条,请用更精确名",
                       "candidates": matches}
     # 3) 归一化(去掉中英括号内容 + 去空格 + 小写)再比 —— 兜 AI 漏 suffix
-    #    例:"南非醉茄 KSM-66（Nature Love）" vs "南非醉茄 KSM-66（Nature Love，90粒新版）"
-    #    步2 不命中(位置 25 处 `）` vs `，` 卡),步3 归一化后两边都是"南非醉茄ksm-66" → 命中
+    #    例:"维生素（某品牌）" vs "维生素（某品牌，60粒装）"
+    #    步2 不命中(`）` vs `，` 卡),步3 归一化后两边都是"维生素某品牌" → 命中
     def _norm(s):
         return re.sub(r"[\(（][^\)）]*[\)）]", "", s or "").lower().replace(" ", "").strip()
     nn = _norm(name)
@@ -2927,7 +2927,7 @@ def get_user_widgets():
 
 
 # "第N天" baseline:新用户用自己 vault 里最早的 schedule 日为 day-one,
-# 没有 schedule 文件就是当天 = 第一天。葱鸭自己的 vault 最早是 26.5.3,所以
+# 没有 schedule 文件就是当天 = 第一天。早期 vault 最早是某个起始日,所以
 # 他的 day-one 仍是 5.3,backward compat;陌生新用户装机当天就是第一天。
 # 也可以在 .gateway-config.json 里写 "vault_day_one": "YYYY-MM-DD" 显式覆盖。
 _DAY_CN = ["零","一","二","三","四","五","六","七","八","九","十",
@@ -3094,7 +3094,7 @@ DAILY_TASK_META_MAP = DATA_DIR / "daily-task-meta.json"
 
 
 def _sanitize_task_filename(name: str) -> str:
-    """task name → 文件名安全的 stem。'鱼油（Swisse）' → '鱼油_Swisse_'"""
+    """task name → 文件名安全的 stem。'维生素（每日）' → '维生素_每日_'"""
     safe = re.sub(r"[^\w一-鿿]+", "_", name).strip("_")
     return safe or "task"
 

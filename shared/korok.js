@@ -96,7 +96,7 @@
     "first-pill":        "嗯。今天这一颗记上了。",
     "first-ref":         "我看见这一处了。说吧。",
     "first-hatch":       "好。告诉我想追什么 — 我现做。",
-    "first-edit":        "改的字直接回到 md 那一边了。两边同一份。",
+    "first-edit":        "改的字直接同步到另一边了。两边同一份。",
   };
 
   function unlockTower(id) {

@@ -61,15 +61,15 @@
         </section>
 
         <section class="consent-item">
-          <div class="consent-title">使用统计(每日心跳)</div>
+          <div class="consent-title">使用统计(每日检测)</div>
           <div class="consent-desc">
             <b>收集</b>:应用版本、操作系统平台、UTC 时区偏移,每 24 小时一次。
-            <br><b>不收集</b>:任何 vault 数据或可关联到个人身份的信息。
+            <br><b>不收集</b>:任何日记内容或可关联到个人身份的信息。
           </div>
         </section>
 
         <section class="consent-meta">
-          <div><span class="consent-meta-k">接收端</span>腾讯云国内服务器(自托管),不接入第三方分析平台。</div>
+          <div><span class="consent-meta-k">数据接收方</span>腾讯云国内服务器(自托管),不接入第三方分析平台。</div>
           <div><span class="consent-meta-k">匿名标识</span><code>${state.client_id || '—'}</code> · 设备级 UUID,可随时重置或撤销</div>
           <div><span class="consent-meta-k">撤回入口</span>设置 → 数据 → 云上报</div>
         </section>

@@ -159,7 +159,7 @@
     host.appendChild(block);
   }
 
-  /* ════ 今日 PULSE(一行小报,纯本地派生)════ */
+  /* ════ 今日概览════ */
   function renderPulse(host, st) {
     const done = st.tasks.filter((t) => t.today_intake >= t.daily_dose).length;
     const total = st.tasks.length;

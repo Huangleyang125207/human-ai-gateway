@@ -284,7 +284,7 @@
     // 「喝水」在水杯 grid 单独显示,不重复在补剂 tile 行
     tasks = (tasks || []).filter(t => t.name !== WATER_TASK_NAME);
     if (!tasks.length) {
-      container.innerHTML = `<div class="daily-tasks-empty">没有 daily task — 右键页面空白 → 「加一项每日任务」</div>`;
+      container.innerHTML = `<div class="daily-tasks-empty">暂无日常任务,右键页面空白处可添加</div>`;
       if (counter) counter.parentElement.innerHTML = `<b id="tasks-count">0</b> / 0 项`;
       return;
     }
@@ -517,14 +517,14 @@
         const cut = await cutR.json();
         if (!cut.ok) throw new Error(cut.detail || "cutout failed");
         if (cut.ocr_pill_count) {
-          window.gatewayToast?.(`✓ 已落 ${taskName} · OCR 识别 ${cut.ocr_pill_count} 颗`);
+          window.gatewayToast?.(`✓ 已保存 ${taskName} · 识别到 ${cut.ocr_pill_count} 颗`);
         } else {
-          window.gatewayToast?.("✓ 已落 " + taskName + " · 未识别到颗数,弹卡片让你确认");
+          window.gatewayToast?.("✓ 已记录 " + taskName + " · 未识别到颗数，请确认");
           // 走 AI thread:发交互卡片让用户确认/输入颗数
           window.gateway.thread?.addRef?.({
             kind: "task-pillcount",
             label: `📦 ${taskName} · 待填颗数`,
-            payload: `刚上传了「${taskName}」的图,但 OCR 没识别到瓶装颗数(常见原因: 字太花/被反光遮挡/在瓶底没拍到)。\n\n请问用户这瓶大概多少颗,然后调 \`set_daily_task_meta\` 工具(task_name="${taskName}", total_pills=数字)写入。也可以让用户在卡片上直接点 + 来手填。`,
+            payload: `刚上传了「${taskName}」的图,但系统没识别到瓶子里的颗数(常见原因: 字太花/被反光遮挡/在瓶底没拍到)。\n\n请问用户这瓶大概多少颗,然后调 \`set_daily_task_meta\` 工具(task_name="${taskName}", total_pills=数字)写入。也可以让用户在卡片上直接点 + 来手填。`,
           });
           window.gateway.thread?.open?.();
           const input = document.getElementById("threadInput");
@@ -583,7 +583,7 @@
           <label class="task-meta-row">
             <span class="task-meta-label">瓶装总颗数</span>
             <span class="task-meta-stepper">
-              <input type="number" min="1" max="9999" id="tmTotal" placeholder="OCR 自动 / 手填" value="${totalVal}">
+              <input type="number" min="1" max="9999" id="tmTotal" placeholder="系统识别 / 手动输入" value="${totalVal}">
               <span class="task-meta-unit">颗 · 余 <b id="tmRemaining">${remainingTxt}</b></span>
             </span>
           </label>
@@ -706,7 +706,7 @@
         return `<div class="hist-cell hist-${cls}" title="${d.date}">${label}</div>`;
       }).join("");
     } catch (e) {
-      overlay.querySelector("#taskModalHistGrid").textContent = "history load failed";
+      overlay.querySelector("#taskModalHistGrid").textContent = "历史数据加载失败";
     }
   }
 

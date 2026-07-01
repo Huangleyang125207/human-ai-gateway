@@ -332,7 +332,7 @@
           body: JSON.stringify({date: currentDate, ...it}),
         });
       } catch (e) {
-        window.gateway?.whisper?.("scrapbook 没存上 — " + e.message);
+        window.gateway?.whisper?.("图片没保存上 — " + e.message);
       }
     }, 600);
   }

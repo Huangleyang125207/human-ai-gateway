@@ -7,15 +7,15 @@
 
 ---
 
-## 真 key(保留 · 仅 simulator 自验用)
+## DeepSeek key(已撤销 + 换占位 · 运行期注入)
 
 ```
-REDACTED
+[REDACTED — 原真 key 已按"干净初始态"撤销并从本文件清除]
 ```
 
 - 用途:simulator 自验 chat / tool loop 时注入,**不是给最终用户的**。
 - 已注入 simulator 的 Capacitor Preferences(plist 内,uninstall 才清),新 session 不需重注入。
-- ❌ 已从 source(www/index.html)cleanup,**不入 git**;本文件作为 session 测试约定刻意保留它。
+- ❌ 不入 shipped source;原刻意保留的真 key 已撤销 + 换占位(若已进 git 历史需 BFG/filter-repo 清史)。
 - 运行期注入靠 `window.__GW_REAL_KEY__`;无注入则 self-test 的 T7-T16 跳过。
 
 ---

@@ -485,7 +485,7 @@
       if (grindEl.parentNode) grindEl.remove();
       st.thread.push({
         kind: 'msg', who: 'ai',
-        text: '(chat 出错:' + (e && e.message || '未知') + ')',
+        text: '(出错了:' + (e && e.message || '未知') + ')',
         id: aiId
       });
       GW.renderThread(container, st);

@@ -78,7 +78,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>LSMinimumSystemVersion</key>   <string>10.14</string>
     <key>LSUIElement</key>              <false/>
     <key>NSHighResolutionCapable</key>  <true/>
-    <key>NSHumanReadableCopyright</key> <string>Human-AI · 葱鸭 × claude-opus-4.7</string>
+    <key>NSHumanReadableCopyright</key> <string>Human-AI</string>
 </dict>
 </plist>
 PLIST

@@ -62,7 +62,7 @@
     setText: function (k, v) {
       var prefs = _getPrefs(), fs = _getFs();
       if (k.indexOf("setting/") === 0 && prefs) return prefs.set({ key: k.slice(8), value: v });
-      if (!fs) return Promise.reject(new Error("Storage unavailable(_fs=null)"));
+      if (!fs) return Promise.reject(new Error("存储不可用"));
       return fs.writeFile({ path: capPath(k), data: v, directory: DIR, encoding: "utf8", recursive: true });
     },
     remove: function (k) {
@@ -471,7 +471,7 @@
   // ── vision_classify 移植 — 调阿里云百炼 qwen3-vl-flash(OpenAI 兼容)
   // 复刻桌面 server.py:2171 _qwen_classify_image 的 system prompt + JSON mode
   function _qwenClassifyImage(dataUrl, extraQuestion, key) {
-    if (!key) return Promise.resolve({ error: "no_dashscope_key", hint: "进设置填阿里云百炼 key 解锁视觉" });
+    if (!key) return Promise.resolve({ error: "no_dashscope_key", hint: "进设置填 API key 解锁拍照识图" });
     if (!dataUrl) return Promise.resolve({ error: "no_image" });
     var CapHttp = _getCapHttp();
     var url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
@@ -548,7 +548,7 @@
       p = realFetch(url + "?" + qs, { headers: headers }).then(function (r) { return r.text(); });
     }
     return p.then(function (html) {
-      if (!html) return "[360 搜索:空响应]";
+      if (!html) return "[搜索无结果]";
       // DOMParser 解析 + 模糊 class 匹配(critic 校正)
       try {
         var doc = new DOMParser().parseFromString(html, "text/html");
@@ -566,11 +566,11 @@
           if (title) out.push("【" + title + "】 " + (href ? href + " — " : "") + dt);
         }
         return out.length ? out.join("\n\n") : "[360 搜索无结果]";
-      } catch (e) { return "[360 解析异常:" + (e.message || "") + "]"; }
-    }).catch(function (e) { return "[360 异常:" + (e && e.message || e) + "]"; });
+      } catch (e) { return "[搜索出错:" + (e.message || "") + "]"; }
+    }).catch(function (e) { return "[搜索异常:" + (e && e.message || e) + "]"; });
   }
   function _mobileWebSearchBailian(query, key) {
-    if (!key) return Promise.resolve("[未配置阿里云百炼 key — 进设置填 dashscope key 解锁联网搜]");
+    if (!key) return Promise.resolve("[未配置搜索 API — 进设置填写以解锁联网搜索]");
     var CapHttp = _getCapHttp();
     var url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
     var headers = { "Content-Type": "application/json", Authorization: "Bearer " + key };
@@ -589,8 +589,8 @@
     }
     return p.then(function (d) {
       var c = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
-      return c || "[百炼空响应]";
-    }).catch(function (e) { return "[百炼异常:" + (e && e.message || e) + "]"; });
+      return c || "[搜索无响应]";
+    }).catch(function (e) { return "[搜索异常:" + (e && e.message || e) + "]"; });
   }
 
   // ── 工具:日期 ───────────────────────────────────────
@@ -738,11 +738,10 @@
       "# 每日补剂打卡", "",
       "- [ ] 喝水",
       "  - [ ] 1", "  - [ ] 2", "  - [ ] 3", "  - [ ] 4", "  - [ ] 5", "  - [ ] 6", "  - [ ] 7", "  - [ ] 8",
-      "- [ ] 鱼油（Swisse）", "  - [ ] 1", "  - [ ] 2",
-      "- [ ] 肌酸",
-      "- [ ] 苏糖酸镁",
-      "- [ ] 维生素 D3+K2（gloryfeel）",
-      "- [ ] 南非醉茄 KSM-66（Nature Love，90粒新版）",
+      "- [ ] 维生素", "  - [ ] 1", "  - [ ] 2",
+      "- [ ] 矿物质",
+      "- [ ] 蛋白质补剂",
+      "- [ ] 草本补充",
       "", "---", "", "",
     ].join("\n");
   }
@@ -849,7 +848,7 @@
     // 次选:NET / 净含量 / 装量 / Net Content N
     m = t.match(/(?:net\s*(?:content)?|净含量|装量)[\s:：]*(\d+)/i);
     if (m) return parseInt(m[1], 10);
-    // 退一步:孤立 token 数字(避开 KSM-66 / SAM-e / B-12 这种品牌名连字符内数字)
+    // 退一步:孤立 token 数字(避开 SAM-e / B-12 这种品牌名连字符内数字)
     // 严格:前后必须是行首/尾或空白/标点,排除 mg/iu/mcg/g/ml 剂量
     var rest = t.replace(/\d+\s*(?:mg|mcg|μg|iu|g|ml|fl\s*oz)/gi, "");
     var standalone = rest.match(/(?:^|[\s,，。;；:：])(\d+)(?=$|[\s,，。;；:：])/g) || [];
@@ -894,10 +893,10 @@
       if (dates.length) return;
       var today = todayIso();
       var sample = suppTemplate() + [
-        "# 9：00", "", "## #ESP32 桌宠固件烧录", "",
-        "折腾了一上午终于把固件刷进去了。**意义**:硬件这条线终于能自测了。", "", "---", "",
-        "# 13：00", "", "## #配置系统/ctrl-c-v 跑通移动端 shim 雏形", "",
-        "gateway 前端在本地 JS 假后端下第一次跑起来了 —— 不用 Python,纯浏览器。", "", "---", "",
+        "# 9：00", "", "## #生活 记录今天的一件小事", "",
+        "今早做了件让自己满意的事。**意义**:把想法落到了行动上。", "", "---", "",
+        "# 13：00", "", "## #工作 完成一项任务", "",
+        "花了点时间把一件事推进到一个节点，感觉踏实。", "", "---", "",
         "# 21：30", "", "## 纸条", "",
         "（晚间 AI 纸条会落在这里。移动版对话接通后由 AI 写。）", "", "---", "",
       ].join("\n");
@@ -956,78 +955,78 @@
   // ── Tool calling — Group A 7 个 mobile 本机 endpoint 对应 tool ──
   // OpenAI-compatible function calling spec(DeepSeek 同协议)
   var TOOL_SPECS = [
-    { type: "function", function: { name: "patch_journal_block", description: "改某个时间块的内容,替换 H2 + body 一段。改标题时传 allow_h2_rename:true",
+    { type: "function", function: { name: "patch_journal_block", description: "修改某个时间块的内容并替换标题和正文。修改标题时需明确传递 allow_h2_rename 参数为 true",
       parameters: { type: "object", properties: {
-        date: { type: "string", description: "yyyy-mm-dd,不传默认今天" },
-        time: { type: "string", description: "时间块,如 '14:00'" },
-        new_md: { type: "string", description: "新内容,从 ## H2 行开始" },
+        date: { type: "string", description: "日期格式 YYYY-MM-DD,不提供此参数时默认使用今天" },
+        time: { type: "string", description: "日记的时间块,格式为 HH:MM(如 '14:00')" },
+        new_md: { type: "string", description: "新内容,从标题行开始" },
         allow_h2_rename: { type: "boolean", description: "改 H2 标题时传 true,否则会被 guard 拒" },
       }, required: ["time", "new_md"] }}},
-    { type: "function", function: { name: "insert_journal_block", description: "在指定时间块**插入新条目**(写在空 H2 占位上)。已有 entry 用 patch。body 是必填正文,光写标题违反 § H5(test_insert_block_body J-CB3 锁)",
+    { type: "function", function: { name: "insert_journal_block", description: "在指定时间块插入新条目。该操作仅用于空占位符位置。如条目已存在,请使用修改功能。正文内容必填,不能仅提供标题",
       parameters: { type: "object", properties: {
         date: { type: "string" }, time: { type: "string" }, tag: { type: "string" }, title: { type: "string" },
-        body: { type: "string", description: "正文(result + 意义),不是只写标题 — § H5 锁的 Cannot-break" },
+        body: { type: "string", description: "正文内容(需包含结果和意义),不能仅提供标题" },
       }, required: ["time", "tag", "body"] }}},
-    { type: "function", function: { name: "check_daily_task", description: "打卡(吃药/补剂)。优先级 intake > increment > checked > toggle",
+    { type: "function", function: { name: "check_daily_task", description: "记录每日补剂或药物摄取。按优先级处理参数:吃了几粒(intake) > 增加量(increment) > 直接勾选状态(checked) > 切换状态(toggle)",
       parameters: { type: "object", properties: {
         task_name: { type: "string" }, date: { type: "string" },
-        intake: { type: "integer", description: "今天吃了几粒(优先级最高)" },
-        increment: { type: "integer", description: "增量,如 +1" },
+        intake: { type: "integer", description: "今天摄取的数量(粒数),此参数优先级最高" },
+        increment: { type: "integer", description: "摄取数量的增加量(如 +1)" },
         checked: { type: "boolean", description: "直接勾/取消" },
-        daily_dose: { type: "integer", description: "可选 — 显式声明今日 dose 上限(防 fresh meta clamp-to-1,如喝水=8)" },
+        daily_dose: { type: "integer", description: "可选参数。显式声明今日的摄取上限(如喝水=8杯)。用于防止新增条目默认限制为 1" },
       }, required: ["task_name"] }}},
-    { type: "function", function: { name: "set_daily_task_meta", description: "改打卡 meta(每天 N 粒/瓶装颗数)",
+    { type: "function", function: { name: "set_daily_task_meta", description: "改修改记录元数据(如每日摄取量或瓶装颗数)",
       parameters: { type: "object", properties: {
         task_name: { type: "string" }, daily_dose: { type: "integer" }, total_pills: { type: "integer" },
       }, required: ["task_name"] }}},
-    { type: "function", function: { name: "read_today_schedule", description: "读今天的 schedule md 原文",
+    { type: "function", function: { name: "read_today_schedule", description: "读取今天的日程原始文本内容",
       parameters: { type: "object", properties: { date: { type: "string" } }}}},
-    { type: "function", function: { name: "list_recent_days", description: "列最近几天的 schedule 文件名",
+    { type: "function", function: { name: "list_recent_days", description: "列出最近几天的日程",
       parameters: { type: "object", properties: { n: { type: "integer", description: "几天,默认 7" } }}}},
     // ★ Scrapbook — 用户拖图进 chat 后,AI 用此 tool 把图放到对应 entry 附近(浮动贴纸)
     //   对齐 PC server.py:1647 place_scrapbook_image 完整 contract
     { type: "function", function: { name: "place_scrapbook_image",
-      description: "把用户上传的图作为浮动贴纸放到 journal 某个 entry 附近(anchor 到时间块)。返 item",
+      description: "将用户上传的图片作为浮动贴纸放置在日记中的特定条目附近。将贴纸锚定在对应的时间块",
       parameters: { type: "object", properties: {
-        attachment_url: { type: "string", description: "/attachments/YYYY-MM-DD/xxx.png" },
+        attachment_url: { type: "string", description: "附件 URL 格式:/attachments/YYYY-MM-DD/xxx.png" },
         date: { type: "string", description: "YYYY-MM-DD,默认今天" },
-        anchor_time: { type: "string", description: "HH:MM 锚点到对应时间块 entry" },
-        x_pct: { type: "number", description: "横向 % 0-95,默认 75(右侧)" },
-        y_px: { type: "number", description: "纵向 px,默认 0(auto)" },
-        rotation: { type: "number", description: "旋转度数,默认 -2 到 +2" },
+        anchor_time: { type: "string", description: "时间格式 HH:MM,将贴纸锚定到对应的日记条目" },
+        x_pct: { type: "number", description: "水平位置百分比,范围 0-95,默认值 75(靠右放置)" },
+        y_px: { type: "number", description: "竖直位置像素值,默认 0(自动调整)" },
+        rotation: { type: "number", description: "旋转角度(度数),默认随机 -2 到 +2 之间" },
         cutout: { type: "boolean", description: "是否抠图,默认 true" },
       }, required: ["attachment_url", "anchor_time"] }}},
-    { type: "function", function: { name: "set_water_cup_image", description: "换喝水图标(优先用 emoji 字符如 🥤 简洁,不要生成 SVG/dataURL)",
-      parameters: { type: "object", properties: { image: { type: "string", description: "单个 emoji 字符如 🥤(优先),或 png base64 dataURL" } }, required: ["image"] }}},
+    { type: "function", function: { name: "set_water_cup_image", description: "更换喝水图标。优先使用单个 emoji 字符(如 🥤)以保持简洁,避免生成复杂格式",
+      parameters: { type: "object", properties: { image: { type: "string", description: "单个 emoji 字符(如 🥤,优先选择)或 PNG 格式的 Base64 编码 URL" } }, required: ["image"] }}},
     // Group B 新增
-    { type: "function", function: { name: "append_journal_comment", description: "给某个时间块加 AI 评论(authorship 合法旁路,改不了 @user 块时用这个)",
+    { type: "function", function: { name: "append_journal_comment", description: "为日记条目添加 AI 评论。当无法直接修改用户撰写的内容时使用此功能",
       parameters: { type: "object", properties: {
         date: { type: "string" }, time: { type: "string" }, comment: { type: "string" },
       }, required: ["time", "comment"] }}},
-    { type: "function", function: { name: "manage_daily_task", description: "加新打卡 task 到补剂段(每天追踪一项)",
+    { type: "function", function: { name: "manage_daily_task", description: "添加新的每日跟踪项目到补剂栏。用于每天追踪一种补剂或药物",
       parameters: { type: "object", properties: {
-        action: { type: "string", enum: ["add", "delete"], description: "默认 add" },
-        task_name: { type: "string", description: "最短可辨认名(『鱼油』,别写『南非醉茄 KSM-66(Nature Love,90粒新版)』);品牌/规格/剂量进 meta 别进名字 —— 打卡 chip 最多两行,超长截断" },
+        action: { type: "string", enum: ["add", "delete"], description: "默认值为 'add'(添加)" },
+        task_name: { type: "string", description: "项目名称(最短可辨认即可)。品牌、规格、剂量等详细信息请在元数据中指定而非名称中。注:显示名称最多两行,超长内容将被截断" },
       }, required: ["task_name"] }}},
     // Group C
-    { type: "function", function: { name: "search_journal", description: "在本机 vault 全部日记里搜关键词,返匹配的日期 + 时间块 + 片段",
+    { type: "function", function: { name: "search_journal", description: "在本机日记中搜索关键词。返回匹配的日期、时间块和相关文本片段",
       parameters: { type: "object", properties: {
         query: { type: "string", description: "搜索关键词" },
-        days: { type: "integer", description: "回看多少天,默认 30,最大 365" },
+        days: { type: "integer", description: "查询范围(天数),默认 30 天,最大支持 365 天" },
       }, required: ["query"] }}},
-    { type: "function", function: { name: "register_aggregate_tag", description: "把一个项目 #标签 注册进聚合页(横切索引),之后该标签的日记条目聚在一起看。只注册顶层 tag(不带 /子标签)",
+    { type: "function", function: { name: "register_aggregate_tag", description: "注册一个项目标签到聚合页面,便于查看该标签下的所有日记条目。仅支持注册顶层标签(不包含子标签)",
       parameters: { type: "object", properties: {
-        tag: { type: "string", description: "标签名,不带 #,如 yanpai / 配置系统" },
-        description: { type: "string", description: "这个项目一句话说明(可选)" },
+        tag: { type: "string", description: "标签名,无需包含 # 符号(如 '工作' 或 '生活')" },
+        description: { type: "string", description: "对该项目的简短描述(可选,一句话即可)" },
       }, required: ["tag"] }}},
-    { type: "function", function: { name: "refresh_aggregate", description: "扫描所有日记,把带已注册 #标签 的条目补进聚合页(只增不删)",
+    { type: "function", function: { name: "refresh_aggregate", description: "扫描所有日记,将含有已注册标签的条目添加到聚合页面。仅执行追加操作,不删除已有条目",
       parameters: { type: "object", properties: {} } }},
     // ⑥ B widget 体系 — Group W
-    { type: "function", function: { name: "list_widgets", description: "列当前 mobile 端注册的 widget(返 id/title/slot/enabled)",
+    { type: "function", function: { name: "list_widgets", description: "列出当前移动设备注册的所有小组件及其属性(如 ID、标题、位置和启用状态)",
       parameters: { type: "object", properties: {} }}},
-    { type: "function", function: { name: "set_widget_enabled", description: "启用/停用某个 widget(暂时隐藏不删数据)",
+    { type: "function", function: { name: "set_widget_enabled", description: "启用或停用某个小组件。仅隐藏小组件而不删除其数据",
       parameters: { type: "object", properties: {
-        id: { type: "string", description: "widget id" },
+        id: { type: "string", description: "小组件的唯一标识符" },
         enabled: { type: "boolean" },
       }, required: ["id", "enabled"] }}},
     { type: "function", function: { name: "add_widget",
@@ -1036,22 +1035,22 @@
       parameters: { type: "object", properties: {
         id: { type: "string", description: "唯一 id" },
         title: { type: "string" },
-        slot: { type: "string", description: "目前支持 care", enum: ["care"] },
-        template: { type: "string", description: "HTML 模板,如 '<div>今天 {{tasks_done}}/{{tasks_total}} 完成</div>'" },
+        slot: { type: "string", description: "目前仅支持 'care'(护理) 位置", enum: ["care"] },
+        template: { type: "string", description: "HTML 模板字符串,支持变量插值(如 '<div>今天 {{tasks_done}}/{{tasks_total}} 完成</div>')" },
       }, required: ["id", "title", "template"] }}},
     { type: "function", function: { name: "remove_widget",
-      description: "删除一个动态注册的 widget(只能删 AI add 的,不能删核心 cups/tasks/pulse)",
+      description: "删除一个动态添加的小组件。仅支持删除由 AI 添加的小组件,核心小组件不可删除",
       parameters: { type: "object", properties: { id: { type: "string" }}, required: ["id"] }}},
     // web_search + fetch_url 移植 PC 端 web_tools.py 三层降级链(critic 校正)
     { type: "function", function: { name: "web_search",
-      description: "联网搜索 — 找信息+真实来源 URL(返标题/链接/摘要)。先看标题摘要决定要不要 fetch_url 看正文,别只凭摘要答。**每对话最多 2 次**,死循环 narrow 是最大坑。降级链 360→百炼→拒答。",
+      description: "执行联网搜索以获取信息和真实来源 URL。返回搜索结果的标题、链接和摘要。使用建议:先查看标题和摘要,再决定是否获取完整内容,不要仅依赖摘要回答。限制:每次对话最多使用 2 次,避免陷入循环搜索。搜索源优先级:360 搜索 > 阿里云百炼 > 拒绝执行",
       parameters: { type: "object", properties: {
         query: { type: "string", description: "搜索关键词" },
-        max_results: { type: "integer", description: "默认 5,最多 10" },
-        category: { type: "string", enum: ["general"], description: "general=360 搜(wechat/bilibili 暂不支持)" },
+        max_results: { type: "integer", description: "返回数量,默认 5 条,最多 10 条" },
+        category: { type: "string", enum: ["general"], description: "general 为 360 搜索引擎(微信、B站等其他来源暂不支持)" },
       }, required: ["query"] }}},
     { type: "function", function: { name: "fetch_url",
-      description: "拉某 URL 正文(HTML stripped → text,最多 3000 char)。先 web_search 看标题再 fetch,别盲 fetch。同一 URL 不要 fetch 多次。iOS 不接 http://,会自动升 https,失败换链接。",
+      description: "获取指定 URL 的正文内容(HTML 转为纯文本,最多 3000 字符)。使用建议:先通过网络搜索查看标题再获取,不要盲目获取。同一 URL 不要重复获取。iOS 不支持 http 协议,会自动升级到 https,如果升级失败请改用其他链接",
       parameters: { type: "object", properties: {
         url: { type: "string", description: "http(s):// URL" },
       }, required: ["url"] }}},
@@ -1060,36 +1059,36 @@
       description: "看图分类 + 描述。返 {kind, description, ocr_likely, suggested_action, brand?, pill_count?}。" +
         "extra_question 可指定问题(如'里面写了啥')替换默认描述任务。",
       parameters: { type: "object", properties: {
-        attachment_url: { type: "string", description: "/attachments/<date>/<stem> 格式" },
+        attachment_url: { type: "string", description: "附件 URL,格式为:/attachments/日期/文件名" },
         extra_question: { type: "string", description: "可选,问 vision 一个具体问题" },
       }, required: ["attachment_url"] }}},
     { type: "function", function: { name: "ocr_image",
-      description: "把图里所有文字 OCR 出来,返 raw 文本。底层走 vision_classify + extra_question='请把图里所有文字 OCR 出来'。",
+      description: "识别并提取图片中的所有文字,返回纯文本。内部通过图像分析和自定义问题实现",
       parameters: { type: "object", properties: {
         attachment_url: { type: "string" },
       }, required: ["attachment_url"] }}},
     // Group D photo curator — 复刻 PC list_my_uploads / search_my_uploads / ask_photo_curator
     { type: "function", function: { name: "list_my_uploads",
-      description: "列用户最近上传的图(默认 20 张,降序按上传时间)。返 {url, date, description, kind}。",
+      description: "列出用户最近上传的图片(默认 20 张,按上传时间从新到旧排序)。每张图片返回 URL、上传日期、描述和分类",
       parameters: { type: "object", properties: {
-        n: { type: "integer", description: "几张,默认 20,最多 100" },
+        n: { type: "integer", description: "返回数量,默认 20 张,最多 100 张" },
       }} }},
     { type: "function", function: { name: "search_my_uploads",
-      description: "按关键词搜本机已上传的图(匹配 vision_classify cache 的 description / kind / brand)。返 hits 数组。",
+      description: "按关键词搜索本机已上传的图片。基于图片的描述、分类或品牌标签进行匹配。返回匹配结果数组",
       parameters: { type: "object", properties: {
-        query: { type: "string", description: "如 '鱼油' / '猫' / '截图' / 'Life Extension' 等" },
+        query: { type: "string", description: "如 '鱼油'、'猫'、'截图' 等" },
       }, required: ["query"] }},
     },
     { type: "function", function: { name: "ask_photo_curator",
-      description: "让 photo curator 帮用户找图(自然语言描述,内部走 search_my_uploads 精确搜)。如用户问 '上周拍的那张瓶子',你传 query='瓶子'。",
+      description: "请助手帮助用户查找图片(使用自然语言描述)。例如:用户问 '上周拍的那张瓶子',传入 query 参数为 '瓶子'",
       parameters: { type: "object", properties: {
         query: { type: "string" },
       }, required: ["query"] }},
     },
     { type: "function", function: { name: "delete_attachment",
-      description: "删除一张已上传的图(同时删 metadata index)。不可逆,删前跟用户确认。",
+      description: "删除一张已上传的图片及其关联的元数据。该操作不可逆,执行前需确认用户意愿",
       parameters: { type: "object", properties: {
-        attachment_url: { type: "string", description: "/attachments/<date>/<stem>" },
+        attachment_url: { type: "string", description: "附件 URL 格式:/attachments/日期/文件名" },
       }, required: ["attachment_url"] }},
     },
   ];
@@ -1112,7 +1111,7 @@
         if (!args.body || !String(args.body).trim()) {
           return insertOp.then(function (result) {
             if (result && result.ok && !result.warning) {
-              result.warning = "⚠ 缺正文(body)— 只插了标题。补一段说明 result + 意义(§ H5)";
+              result.warning = "⚠ 缺正文 — 只插了标题。请补一段说明发生了什么、为什么重要。";
             }
             return result;
           });
@@ -1145,8 +1144,8 @@
         if (!args.id) return Promise.resolve({ error: "缺 id" });
         // 先读 Store manifest,改 enabled,写回 → in-memory 同步
         return Store.getSetting("widgets/" + args.id).then(function (s) {
-          if (!s) return { error: "widget id=" + args.id + " 不存在(Store 里没找到)" };
-          var m; try { m = JSON.parse(s); } catch (e) { return { error: "manifest 解析失败" }; }
+          if (!s) return { error: "组件 ID " + args.id + " 不存在" };
+          var m; try { m = JSON.parse(s); } catch (e) { return { error: "配置读取失败" }; }
           m.enabled = !!args.enabled;
           return Store.setSetting("widgets/" + args.id, JSON.stringify(m)).then(function () {
             if (typeof window !== "undefined" && window.gwWidgets && window.gwWidgets.setEnabled) {
@@ -1156,9 +1155,9 @@
           });
         });
       case "add_widget":
-        if (!args.id || !args.template) return Promise.resolve({ error: "缺 id 或 template" });
+        if (!args.id || !args.template) return Promise.resolve({ error: "缺少标识或模板" });
         // 核心 widget 名保留,AI 不能覆盖
-        if (["cups", "tasks", "pulse"].indexOf(args.id) >= 0) return Promise.resolve({ error: "id 已被核心 widget 占用" });
+        if (["cups", "tasks", "pulse"].indexOf(args.id) >= 0) return Promise.resolve({ error: "标识已被系统功能占用" });
         var manifest = { id: args.id, title: args.title || args.id, slot: args.slot || "care", template: args.template, source: "ai-added" };
         return Store.setSetting("widgets/" + args.id, JSON.stringify(manifest)).then(function () {
           if (typeof window !== "undefined" && window.gwWidgets && window.gwWidgets.registerDynamic) {
@@ -1168,7 +1167,7 @@
         });
       case "remove_widget":
         if (!args.id) return Promise.resolve({ error: "缺 id" });
-        if (["cups", "tasks", "pulse"].indexOf(args.id) >= 0) return Promise.resolve({ error: "不能删核心 widget" });
+        if (["cups", "tasks", "pulse"].indexOf(args.id) >= 0) return Promise.resolve({ error: "不能删除系统功能" });
         return Store.removeSetting("widgets/" + args.id).then(function () {
           if (typeof window !== "undefined" && window.gwWidgets && window.gwWidgets.unregister) {
             window.gwWidgets.unregister(args.id);
@@ -1331,7 +1330,7 @@
 
       function callRound(round) {
         if (round >= maxRounds) {
-          events.push({ type: "error", text: "已达最大工具调用轮数 (" + maxRounds + "),停止" });
+          events.push({ type: "error", text: "已达最大操作步数 (" + maxRounds + "),停止" });
           events.push({ type: "done", actions: [], model_id: model || "deepseek" });
           return Promise.resolve(events);
         }
@@ -1351,7 +1350,7 @@
         return fetchPromise.then(function (d) {
           var msg = d && d.choices && d.choices[0] && d.choices[0].message;
           if (!msg) {
-            events.push({ type: "error", text: "DeepSeek 返空" });
+            events.push({ type: "error", text: "AI 无响应" });
             events.push({ type: "done", actions: [], model_id: model || "deepseek" });
             return events;
           }
@@ -1399,11 +1398,11 @@
         }).catch(function (err) {
           var emsg = String(err && err.message || err);
           if (emsg.indexOf("Failed to fetch") >= 0 || emsg.indexOf("CORS") >= 0) {
-            events.push({ type: "delta", text: "（浏览器直连 DeepSeek 受 CORS 限制 —— 真机经原生 HTTP 桥即可正常聊。）" });
+            events.push({ type: "delta", text: "（浏览器有限制，用真机 App 即可正常聊。）" });
           } else if (emsg.indexOf("abort") >= 0 || emsg.indexOf("timeout") >= 0) {
-            events.push({ type: "error", text: "DeepSeek 超时(>90s),请重试" });
+            events.push({ type: "error", text: "对话超时，请重试" });
           } else {
-            events.push({ type: "error", text: "DeepSeek 调用失败:" + emsg });
+            events.push({ type: "error", text: "AI 对话失败:" + emsg });
           }
           events.push({ type: "done", actions: [], model_id: model || "deepseek" });
           return events;
@@ -1426,7 +1425,7 @@
     "GET /api/config-status": function () {
       return Store.getSetting("deepseek_key").then(function (k) {
         return k ? jsonResp({ ok: true, model: "deepseek-v4-pro", provider: "deepseek" })
-                 : jsonResp({ ok: false, reason: "尚未填写 DeepSeek key(设置里填)" });
+                 : jsonResp({ ok: false, reason: "未配置 AI 对话——进设置填写 API 密钥" });
       });
     },
     // 关键:必须 configured:true,否则被锁在无法关闭的设置弹窗后面
@@ -1496,8 +1495,8 @@
           if (typeof body.y_px === "number") ex.auto_y = false;
           return Store.writeScrapbook(date, items).then(function () { return jsonResp({ ok: true, item: ex }); });
         }
-        if (!body.attachment_url) return jsonResp({ ok: false, error: "缺 attachment_url" }, 400);
-        if (!body.anchor_time) return jsonResp({ ok: false, error: "缺 anchor_time" }, 400);
+        if (!body.attachment_url) return jsonResp({ ok: false, error: "缺少图片" }, 400);
+        if (!body.anchor_time) return jsonResp({ ok: false, error: "缺少关联时间" }, 400);
         var item = {
           id: id,
           src: body.attachment_url,
@@ -1531,7 +1530,7 @@
     },
     "POST /api/water-cup": function (req, u, body) {
       var url = body && (body.attachment_url || body.image);
-      if (!url) return jsonResp({ ok: false, error: "缺 attachment_url" }, 400);
+      if (!url) return jsonResp({ ok: false, error: "缺少图片" }, 400);
       return Store.setSetting("water_cup_img", url).then(function () { return jsonResp({ ok: true }); });
     },
     "GET /api/journal/tag-stats": function (req, u) {
@@ -1569,7 +1568,7 @@
     // ── 标签聚合(对照 PC GET /api/tag-aggregate + _parse_tag_aggregate)──
     "GET /api/tag-aggregate": function () {
       return Store.readTagAggregate().then(function (text) {
-        if (text === null || text === undefined) return jsonResp({ sections: [], warning: "标签聚合.md 不存在" });
+        if (text === null || text === undefined) return jsonResp({ sections: [], warning: "标签索引不存在" });
         return jsonResp({ sections: _parseTagAggregate(text) });
       });
     },
@@ -1578,9 +1577,9 @@
       var tag = ((body && body.tag) || "").trim().replace(/^#/, "").trim();
       var description = ((body && body.description) || "").trim();
       var withSub = !!(body && body.with_sub);
-      if (!tag) return jsonResp({ ok: false, error: "tag 名不能为空" });
-      if (!/^[\w\-一-鿿/]+$/.test(tag)) return jsonResp({ ok: false, error: "tag 只能用字母/数字/下划线/连字符/中文,得到:" + tag });
-      if (tag.indexOf("/") >= 0) return jsonResp({ ok: false, error: "注册 parent tag(不带 /sub);sub-tag 自动 roll-up" });
+      if (!tag) return jsonResp({ ok: false, error: "标签名不能为空" });
+      if (!/^[\w\-一-鿿/]+$/.test(tag)) return jsonResp({ ok: false, error: "标签只能用字母、数字、连字符或中文" + tag });
+      if (tag.indexOf("/") >= 0) return jsonResp({ ok: false, error: "注册主标签（不包含分类）；分类标签会自动归类" });
       return Store.readTagAggregate().then(function (text) {
         text = (text === null || text === undefined) ? "# 标签聚合\n" : text;
         var esc = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1601,10 +1600,10 @@
     // POST /api/tag-aggregate/refresh(对照 PC journal_routes.py:252 + _refresh_tag_aggregate)— 扫 journal → 只 append 缺失行
     "POST /api/tag-aggregate/refresh": function () {
       return Store.readTagAggregate().then(function (text) {
-        if (text === null || text === undefined) return jsonResp({ ok: false, error: "标签聚合.md 不存在", added: 0 });
+        if (text === null || text === undefined) return jsonResp({ ok: false, error: "标签索引不存在", added: 0 });
         var sections = _parseTagAggregate(text);
         var projectTags = sections.map(function (s) { return s.tag; });
-        if (!projectTags.length) return jsonResp({ ok: false, error: "没找到任何 project tag section", added: 0 });
+        if (!projectTags.length) return jsonResp({ ok: false, error: "没找到任何项目标签", added: 0 });
         return Store.listJournalDates().then(function (dates) {
           return Promise.all((dates || []).map(function (d) { return Store.readJournalMd(d).then(function (md) { return { iso: d, md: md }; }); })).then(function (mds) {
             var scanned = _scanJournalForTags(projectTags, mds);
@@ -1702,7 +1701,7 @@
     },
     // 打卡图标:存抠好的 PNG(端侧抠图后由前端传来),按 task 名持久化
     "POST /api/daily-tasks/set-image": function (req, u, body) {
-      if (!(body && body.task_name)) return jsonResp({ ok: false, error: "缺 task_name" });
+      if (!(body && body.task_name)) return jsonResp({ ok: false, error: "缺少打卡名称" });
       return Store.setSetting("taskimg/" + body.task_name, body.image || "").then(function () { return jsonResp({ ok: true }); });
     },
     // 端到端「抠图 + OCR + 写 image map + meta total_pills」— 对齐桌面 /api/cutout(N2 parity)
@@ -1716,8 +1715,8 @@
       var name = body && body.task_name;
       var url = body && body.attachment_url;
       var inlineImage = body && body.image;  // 兼容:前端可直接传 dataURL(避免 attachment 中转)
-      if (!name) return jsonResp({ ok: false, error: "缺 task_name" }, 400);
-      if (!url && !inlineImage) return jsonResp({ ok: false, error: "缺 attachment_url 或 image" }, 400);
+      if (!name) return jsonResp({ ok: false, error: "缺少打卡名称" }, 400);
+      if (!url && !inlineImage) return jsonResp({ ok: false, error: "缺少图片 或 image" }, 400);
 
       // 拿 dataURL:优先 inline,否则 attachment_url → readAttachment
       var dataUrlP;
@@ -1725,7 +1724,7 @@
         dataUrlP = Promise.resolve(inlineImage);
       } else {
         var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(url);
-        if (!m) return jsonResp({ ok: false, error: "attachment_url 格式错" }, 400);
+        if (!m) return jsonResp({ ok: false, error: "图片链接格式错误" }, 400);
         dataUrlP = Store.readAttachment(m[1], m[2]);
       }
 
@@ -1774,7 +1773,7 @@
     // 改 meta:total_pills(瓶装颗数)/ daily_dose(每天 N 粒),对齐 PC 端 /meta
     "POST /api/daily-tasks/meta": function (req, u, body) {
       var name = (body && body.task_name) || "";
-      if (!name) return jsonResp({ ok: false, error: "缺 task_name" }, 400);
+      if (!name) return jsonResp({ ok: false, error: "缺少打卡名称" }, 400);
       // D4 test_meta_update_total_pills_daily_dose_and_clear:非 int → 400
       // total_pills="" / null / 0 → pop;"abc" → 400;daily_dose "x" → 400
       function isBadInt(v) {
@@ -1808,7 +1807,7 @@
     // Group B:加新 task(写补剂段 - [ ] 名字)— AI 在 mobile session 用嘴加 task
     "POST /api/daily-tasks/add": function (req, u, body) {
       var name = body && body.task_name;
-      if (!name) return jsonResp({ ok: false, error: "缺 task_name" }, 400);
+      if (!name) return jsonResp({ ok: false, error: "缺少打卡名称" }, 400);
       var today = todayIso();
       return Store.readJournalMd(today).then(function (md) {
         var lines = (md || "").split(/\r?\n/);
@@ -1832,7 +1831,7 @@
       // 删 task → cascade 清 md + image + meta + intake_log,返 image_removed
       var date = (body && body.date) || todayIso();
       var name = (body && body.task_name) || "";
-      if (!name) return jsonResp({ ok: false, error: "缺 task_name" }, 400);
+      if (!name) return jsonResp({ ok: false, error: "缺少打卡名称" }, 400);
       return Promise.all([
         Store.readJournalMd(date),
         Store.getSetting("taskimg/" + name),  // 先看 image 是否存在
@@ -1915,7 +1914,7 @@
         var next;
         if ("intake" in body) {
           var iv = parseInt(body.intake, 10);
-          if (isNaN(iv)) return jsonResp({ ok: false, error: "intake 必须是整数" }, 500);
+          if (isNaN(iv)) return jsonResp({ ok: false, error: "数量必须是整数" }, 500);
           next = Math.max(0, Math.min(dose, iv));
         } else if ("increment" in body) {
           var inc = parseInt(body.increment, 10) | 0;
@@ -1969,7 +1968,7 @@
             return jsonResp({
               status: "corrupt", history: [], mtime: 0,
               baks: baks, raw_bytes: r.raw_bytes,
-              message: "thread-history 解析失败,选 bak.N 恢复或从空开始",
+              message: "对话历史读取失败，选择备份恢复或重新开始",
             });
           });
         }
@@ -1979,12 +1978,12 @@
     // 复刻桌面 /api/thread/restore-from-bak(test_restore_from_bak_roundtrip + bad_index 400 + missing 404)
     "POST /api/thread/restore-from-bak": function (req, u, body) {
       var idx = parseInt(body && body.bak_index, 10);
-      if (isNaN(idx) || idx < 1 || idx > 5) return jsonResp({ ok: false, error: "bak_index 必须 1..5" }, 400);
+      if (isNaN(idx) || idx < 1 || idx > 5) return jsonResp({ ok: false, error: "备份编号必须在 1 到 5 之间" }, 400);
       return Store.readThreadBakAt(idx).then(function (raw) {
         if (raw == null) return jsonResp({ ok: false, error: "bak." + idx + " 不存在" }, 404);
         var hist;
         try { hist = JSON.parse(raw); }
-        catch (e) { return jsonResp({ ok: false, error: "bak." + idx + " 内容也损坏了" }, 500); }
+        catch (e) { return jsonResp({ ok: false, error: "bak." + idx + " 内容已损坏" }, 500); }
         // 先把原损坏内容存档(若有),再写回
         return Backend.getText("thread").then(function (cur) {
           var archive = cur ? Store.archiveCorruptedThread(cur) : Promise.resolve(null);
@@ -2072,14 +2071,14 @@
     },
     // ── vision/OCR 移植 — 复刻桌面 /api/chat/upload-image + /api/vision/classify
     //    mobile 端 attachment 走 Capacitor Filesystem dataURL inline 存(浏览器对应
-    //    localStorage),sha256 短 hash 去重 + logical url /attachments/<date>/<stem>
+    //    localStorage),sha256 短 hash 去重 + logical url 附件 URL 格式:/attachments/日期/文件名
     "POST /api/chat/upload-image": function (req, u, body) {
       var dataUrl = body && body.dataUrl;
       if (!dataUrl || typeof dataUrl !== "string" || dataUrl.indexOf("data:") !== 0) {
         return jsonResp({ ok: false, error: "缺 dataUrl 或格式错(必须 data:...;base64,...)" }, 400);
       }
       var parsed = _dataUrlToBuf(dataUrl);
-      if (!parsed) return jsonResp({ ok: false, error: "dataUrl 解析失败" }, 400);
+      if (!parsed) return jsonResp({ ok: false, error: "图片格式错误" }, 400);
       var ext = ({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" })[parsed.mime] || "bin";
       var date = todayIso();
       return _sha256Hex(parsed.buf).then(function (hash) {
@@ -2098,13 +2097,13 @@
     "POST /api/vision/classify": function (req, u, body) {
       var attUrl = body && body.attachment_url;
       var q = body && body.extra_question;
-      if (!attUrl) return jsonResp({ ok: false, error: "缺 attachment_url" }, 400);
+      if (!attUrl) return jsonResp({ ok: false, error: "缺少图片" }, 400);
       var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(attUrl);
-      if (!m) return jsonResp({ ok: false, error: "attachment_url 格式错" }, 400);
+      if (!m) return jsonResp({ ok: false, error: "图片链接格式错误" }, 400);
       var date = m[1], stem = m[2];
       return Promise.all([Store.readAttachment(date, stem), Store.getSetting("dashscope_key"), Store.readUploadMeta(date, stem)]).then(function (rs) {
         var dataUrl = rs[0], key = rs[1], meta = rs[2] || {};
-        if (!dataUrl) return jsonResp({ ok: false, error: "attachment 不存在: " + attUrl }, 404);
+        if (!dataUrl) return jsonResp({ ok: false, error: "图片不存在: " + attUrl }, 404);
         // cache 命中:不带 extra_question 的默认描述 + 已 cache → 直接返(critic 标的钱包/latency leak 修)
         if (!q && meta.vision_result) {
           return jsonResp({ ok: true, attachment_url: attUrl, result: meta.vision_result, cached: true });
@@ -2142,7 +2141,7 @@
     },
     "POST /api/uploads/search": function (req, u, body) {
       var q = (body && body.query || "").trim().toLowerCase();
-      if (!q) return jsonResp({ ok: false, error: "缺 query" }, 400);
+      if (!q) return jsonResp({ ok: false, error: "缺少查询内容" }, 400);
       return Store.listAllUploadMetas().then(function (metas) {
         var hits = metas.filter(function (m) {
           if (!m.vision_result) return false;
@@ -2156,9 +2155,9 @@
     },
     "POST /api/uploads/delete": function (req, u, body) {
       var attUrl = body && body.attachment_url;
-      if (!attUrl) return jsonResp({ ok: false, error: "缺 attachment_url" }, 400);
+      if (!attUrl) return jsonResp({ ok: false, error: "缺少图片" }, 400);
       var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(attUrl);
-      if (!m) return jsonResp({ ok: false, error: "url 格式错" }, 400);
+      if (!m) return jsonResp({ ok: false, error: "链接格式错误" }, 400);
       var date = m[1], stem = m[2];
       return Promise.all([
         Backend.remove("attachments/" + date + "/" + stem),
@@ -2168,11 +2167,11 @@
       });
     },
     "GET /api/attachments/get": function (req, u) {
-      // 前端给 <img> 拿 dataURL 用;url=/attachments/<date>/<stem>(logical)
+      // 前端给 <img> 拿 dataURL 用;url=附件 URL 格式:/attachments/日期/文件名(logical)
       var qs = new URL(u, "http://x").searchParams;
       var attUrl = qs.get("url") || "";
       var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(attUrl);
-      if (!m) return jsonResp({ ok: false, error: "url 格式错" }, 400);
+      if (!m) return jsonResp({ ok: false, error: "链接格式错误" }, 400);
       return Store.readAttachment(m[1], m[2]).then(function (dataUrl) {
         if (!dataUrl) return jsonResp({ ok: false, error: "not found" }, 404);
         return jsonResp({ ok: true, dataUrl: dataUrl });
@@ -2182,7 +2181,7 @@
     "POST /api/web/search": function (req, u, body) {
       var query = (body && body.query || "").trim();
       var max = Math.max(1, Math.min(parseInt(body && body.max_results || "5", 10), 10));
-      if (!query) return jsonResp({ ok: false, error: "缺 query" }, 400);
+      if (!query) return jsonResp({ ok: false, error: "缺少查询内容" }, 400);
       return _mobileWebSearch360(query, max).then(function (r360) {
         if (r360 && r360.indexOf("[360") !== 0) {
           return jsonResp({ ok: true, query: query, category: "general", source: "360", results: r360 });
@@ -2201,7 +2200,7 @@
     },
     "POST /api/web/fetch": function (req, u, body) {
       var rawUrl = (body && body.url || "").trim();
-      if (!rawUrl || !/^https?:\/\//i.test(rawUrl)) return jsonResp({ ok: false, error: "url 必须 http(s)://" }, 400);
+      if (!rawUrl || !/^https?:\/\//i.test(rawUrl)) return jsonResp({ ok: false, error: "链接必须以 http:// 或 https:// 开头" }, 400);
       var url = _httpsUpgrade(rawUrl);  // critic ATS 修:http → https
       var CapHttp = _getCapHttp();
       var headers = { "User-Agent": "Mozilla/5.0 (gateway-fetch)" };
@@ -2222,9 +2221,9 @@
         var msg = String(e && e.message || e);
         // ATS / 网络异常 → 给 LLM 可解释 hint
         if (msg.indexOf("cleartext") >= 0) {
-          return jsonResp({ ok: false, error: "iOS 拒 http 协议,该 URL 升级 https 也失败,换条链接", url: url });
+          return jsonResp({ ok: false, error: "此链接不支持，请尝试其他链接", url: url });
         }
-        return jsonResp({ ok: false, error: "fetch_url 异常:" + msg.slice(0, 200), url: url });
+        return jsonResp({ ok: false, error: "链接读取异常:" + msg.slice(0, 200), url: url });
       });
     },
     // ⑥ B Turn 5:列 AI 动态注册的 widget manifest(从 setting/widgets/* 持久化读)
@@ -2291,7 +2290,7 @@
       var url = new URL(u, "http://x");
       var q = (url.searchParams.get("query") || "").trim();
       var days = Math.max(1, Math.min(parseInt(url.searchParams.get("days") || "30", 10), 365));
-      if (!q) return jsonResp({ ok: false, error: "缺 query" }, 400);
+      if (!q) return jsonResp({ ok: false, error: "缺少查询内容" }, 400);
       var qLc = q.toLowerCase();
       return Store.listJournalDates().then(function (dates) {
         var sorted = (dates || []).sort().reverse().slice(0, days);
@@ -2342,7 +2341,7 @@
       // 双读 comment_md(PC tool 用)+ comment(mobile spec 用),兼容两端 AI emit
       var comment = body && (body.comment_md || body.comment);
       var author = (body && body.author) || "ai";
-      if (!time || !comment) return jsonResp({ error: "缺 time 或 comment" }, 400);
+      if (!time || !comment) return jsonResp({ error: "缺少时间或批注" }, 400);
       return Store.readJournalMd(date).then(function (md) {
         if (md === null) return jsonResp({ error: "no file" }, 404);
         var lines = md.split(/\r?\n/);
@@ -2379,7 +2378,7 @@
       var date = (body && body.date) || todayIso();
       var time = body && body.time;
       // J12 test_patch_missing_new_md_400:new_md 必传(空串拒,旧 fallback ""静默通过)
-      if (body && body.new_md == null) return jsonResp({ ok: false, error: "缺 new_md" }, 400);
+      if (body && body.new_md == null) return jsonResp({ ok: false, error: "缺少新内容" }, 400);
       var newMd = (body && body.new_md) || "";
       var author = (body && body.author) || "user";
       var allowRename = !!(body && body.allow_h2_rename);
@@ -2406,7 +2405,7 @@
         // 3. authorship boundary:AI 不能 patch @user 块(test_patch_block_ai_refuses_user_block)
         //    占位 H2 "##" 不算任何人所有,AI 可以填入(③ C lazy 纸条写入 21:30 占位块用)
         if (author !== "user" && existingH2 && existingH2.trim() !== "##" && checkAuthor(existingH2) === "user") {
-          return jsonResp({ error: "block @ " + time + " 是 @user 所有,AI 不能 patch。想加评论用 append_journal_comment;想新加 entry 用 insert_journal_block。" }, 403);
+          return jsonResp({ error: "这个时间段（" + time + " 这部分是你写的，AI 无法修改。要添加批注请用批注功能；要新增内容请用新增功能。" }, 403);
         }
         // 4. H2 mismatch guard(test_patch_rejects_h2_mismatch_by_default + test_patch_allows_h2_rename_with_flag)
         var newH2 = null;
@@ -2419,7 +2418,7 @@
             stripAuthorMarker(existingH2) !== stripAuthorMarker(newH2) &&
             !allowRename) {
           return jsonResp({
-            error: "block @ " + time + " 已有 H2:`" + existingH2.trim() + "`。new_md 第一个 H2 是:`" + newH2.trim() + "` — 不一样。patch 会整段替换,原 H2 会被吃掉。想加新 H2 用 insert;改标题重传 allow_h2_rename=true。",
+            error: "这个时间段（" + time + " 已有标题:`" + existingH2.trim() + "`。新内容第一个标题是:`" + newH2.trim() + "` — 不一样。修改会整段替换原标题。要新增标题请用新增功能；要改标题请勾选允许重命名。",
             conflict: true,
           }, 409);
         }
@@ -2457,7 +2456,7 @@
     // 对话:有 key 就真连 DeepSeek(读今天日记当 context);没 key 提示去设置填
     "POST /api/chat": function (req, u, body) {
       return Store.getSetting("deepseek_key").then(function (key) {
-        if (!key) return sseResp([{ type: "delta", text: "（还没填 DeepSeek key —— 点报头 ⚙ 进设置填了,AI 就能读今天的日记跟你聊。）" }, { type: "done", actions: [], model_id: "deepseek" }]);
+        if (!key) return sseResp([{ type: "delta", text: "（还没填 AI 密钥—— 点设置图标进去填了，AI 就能读今天的日记跟你聊。）" }, { type: "done", actions: [], model_id: "deepseek" }]);
         return Store.getSetting("deepseek_model").then(function (m) { return chatViaDeepseek(body, key, m || "deepseek-chat"); });
       });
     },
@@ -2580,7 +2579,7 @@
     var fn = handlers[key];
     if (!fn) {
       // 未实现的端点:良性占位,不让脚本崩
-      return Promise.resolve(jsonResp({ ok: false, mobile_stub: true, error: "桌面版功能,移动 MVP 未实现" }));
+      return Promise.resolve(jsonResp({ ok: false, mobile_stub: true, error: "此功能仅在桌面版可用" }));
     }
     // 解析 body(POST JSON)
     var bodyP = Promise.resolve(null);
@@ -2905,7 +2904,7 @@
           // ★ T13 daily-task 写簇:manage / set_daily_task_meta / set_water_cup_image
           return fetch("/api/chat", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: "请依次:① manage_daily_task 新增日打卡『维生素 C』 ② set_daily_task_meta 给 鱼油（Swisse） 设 total_pills=60 daily_dose=2", history: [] }),
+            body: JSON.stringify({ message: "请依次:① manage_daily_task 新增日打卡『维生素 C』 ② set_daily_task_meta 给 维生素 设 total_pills=60 daily_dose=2", history: [] }),
           }).then(function (r) { return r.text(); });
         }).then(function (sse) {
           var events = sse.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; }).map(function (l) { try { return JSON.parse(l.slice(6)); } catch(e) { return null; } }).filter(Boolean);
@@ -2985,7 +2984,7 @@
           ctx.fillText("鱼油 60 粒", 50, 100);
           ctx.font = "32px -apple-system, sans-serif";
           ctx.fillStyle = "#666";
-          ctx.fillText("Swisse fish oil", 50, 180);
+          ctx.fillText("Fish Oil", 50, 180);
           ctx.fillText("Omega-3 1000mg", 50, 230);
           var realDataUrl = canvas.toDataURL("image/png");
           return Store.writeAttachment("2026-06-27", "test.png", realDataUrl)
@@ -3054,14 +3053,14 @@
           ctx.textBaseline = "middle";
           ctx.fillText("鱼油 60 粒", 50, 100);
           ctx.font = "32px -apple-system, sans-serif"; ctx.fillStyle = "#666";
-          ctx.fillText("Swisse fish oil", 50, 180);
+          ctx.fillText("Fish Oil", 50, 180);
           ctx.fillText("Omega-3 1000mg", 50, 230);
           var imgDataUrl = canvas.toDataURL("image/png");
 
           // ★ T24 /api/cutout 端到端(真图 inline → native OCR / 云端兜底 → extractPillCount → meta total_pills)
           return fetch("/api/cutout", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ task_name: "鱼油（Swisse）", image: imgDataUrl }),
+            body: JSON.stringify({ task_name: "维生素", image: imgDataUrl }),
           }).then(function (r) { return r.json(); }).then(function (j) {
             log("T24 /api/cutout ok=" + j.ok + " engine=" + j.engine + " ocr_pill_count=" + j.ocr_pill_count + " ocr_text=" + String(j.ocr_text || "").slice(0, 60));
           });
@@ -3097,7 +3096,7 @@
             { tool: "append_journal_comment", msg: "立即 call append_journal_comment:time='16:30',body='strict comment'。无其他动作。" },
             { tool: "search_journal", msg: "立即 call search_journal:query='strict'。无其他动作。" },
             { tool: "list_recent_days", msg: "立即 call list_recent_days:n=5。无其他动作。" },
-            { tool: "check_daily_task", msg: "立即 call check_daily_task:task_name='鱼油（Swisse）',intake=1。无其他动作。" },
+            { tool: "check_daily_task", msg: "立即 call check_daily_task:task_name='维生素',intake=1。无其他动作。" },
             { tool: "manage_daily_task", msg: "立即 call manage_daily_task:action='add',task_name='strict-test-task'。无其他动作。" },
             { tool: "set_daily_task_meta", msg: "立即 call set_daily_task_meta:task_name='strict-test-task',total_pills=30,daily_dose=1。无其他动作。" },
             { tool: "set_water_cup_image", msg: "立即 call set_water_cup_image:image='🥛'。直接 emoji,不要 SVG/dataURL。无其他动作。" },
@@ -3172,13 +3171,13 @@
                 ctx.fillStyle="#fff"; ctx.fillRect(0,0,400,300);
                 ctx.fillStyle="#222"; ctx.font="bold 56px sans-serif"; ctx.fillText("鱼油 60 粒", 50, 100);
                 ctx.font="28px sans-serif"; ctx.fillStyle="#666";
-                ctx.fillText("Swisse fish oil", 50, 170); ctx.fillText("Omega-3 1000mg", 50, 220);
+                ctx.fillText("Fish Oil", 50, 170); ctx.fillText("Omega-3 1000mg", 50, 220);
                 var imgUrl = canvas.toDataURL("image/png");
                 return fetch("/api/cutout", {
                   method: "POST", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ task_name: "鱼油（Swisse）", image: imgUrl }),
+                  body: JSON.stringify({ task_name: "维生素", image: imgUrl }),
                 }).then(function (r) { return r.json(); }).then(function (j) {
-                  return Store.getSetting("taskmeta/鱼油（Swisse）").then(function (m) {
+                  return Store.getSetting("taskmeta/维生素").then(function (m) {
                     var meta = {}; try { meta = JSON.parse(m); } catch(e) {}
                     var pass = j.ok && j.ocr_pill_count === 60 && j.engine === "VNRecognizeText" && meta.total_pills === 60;
                     srPush("S2", "药瓶 cutout + iOS Vision OCR + total_pills auto", pass, "pill=" + j.ocr_pill_count + " engine=" + j.engine + " meta.total_pills=" + meta.total_pills);

@@ -48,7 +48,7 @@
       if (data.error) { renderError(data); return; }
       render(data);
     } catch (e) {
-      renderError({ error: "server 未起 · " + e.message });
+      renderError({ error: "无法连接服务 · " + e.message });
     }
   }
 
@@ -89,7 +89,7 @@
         // 真起不来 server / 其他错才显示旧 hint
         stream.innerHTML = `
           <div style="padding:32px 0; color:var(--ink-4); font:13px var(--sans); letter-spacing:.04em;">
-            server 没起来?重启 Gateway 再刷新本页。
+            连接出了问题，请重启应用后重新刷新。
           </div>`;
       }
     }
@@ -204,13 +204,13 @@
     const timeEl = document.createElement("div");
     timeEl.className = "entry-time";
     timeEl.textContent = b.time;
-    timeEl.title = "右键 → 插块 / 指给 AI";
+    timeEl.title = "右键插入条目 · 点数字指给 AI 看";
     art.appendChild(timeEl);
 
     // right-click on entry → context menu
     art.addEventListener("contextmenu", (e) => {
       window.gateway.menu?.show(e, [
-        { label: "✚ 加新条目 (tag + 时间)",
+        { label: "✚ 新增条目 (tag + 时间)",
           action: () => showTagInsertModal() },
         { label: "💬 指给 AI 看这一段",
           action: () => {
@@ -257,12 +257,12 @@
     for (const t of (h.tags || [])) {
       tagsEl.appendChild(makeTagSpan(t, b, h));
     }
-    // 末尾"+ tag" inline 添加
+    // 末尾"+ 标签" inline 添加
     const addTag = document.createElement("span");
     addTag.className = "tag-add";
     addTag.contentEditable = "true";
     addTag.spellcheck = false;
-    addTag.dataset.placeholder = "+ tag";
+    addTag.dataset.placeholder = "+ 标签";
     addTag.addEventListener("keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); addTag.blur(); }
       if (e.key === "Escape") { addTag.textContent = ""; addTag.blur(); }
@@ -287,7 +287,7 @@
     tEl.spellcheck = false;
     tEl.textContent = h.title || "";
     tEl.dataset.original = h.title || "";
-    if (!h.title) tEl.dataset.placeholder = "+ 标题(可空)";
+    if (!h.title) tEl.dataset.placeholder = "+ 添加标题（可选）";
     bindFieldEdit(tEl, b, h, "title");
     col.appendChild(tEl);
 
@@ -303,7 +303,7 @@
       const bEl = document.createElement("div");
       bEl.className = "entry-text empty-body";
       bEl.dataset.raw = "";
-      bEl.dataset.placeholder = "+ 加正文";
+      bEl.dataset.placeholder = "+ 添加内容";
       bEl.textContent = "";
       bindBodyEdit(bEl, b, h);
       col.appendChild(bEl);
@@ -446,7 +446,7 @@
     const tg = document.createElement("span");
     tg.className = "tag" + (t.startsWith("协作") || t === "ai" ? " collab" : "");
     tg.textContent = "#" + t;
-    tg.title = "click 指给 AI · 右键编辑/删";
+    tg.title = "点击指给 AI 看 · 右键编辑、删除";
     tg.addEventListener("click", () => {
       window.gateway.thread?.addRef({
         kind: "tag",
@@ -459,8 +459,8 @@
       e.preventDefault();
       e.stopPropagation();
       window.gateway.menu?.show(e, [
-        { label: "✎ 改 tag", action: async () => {
-          const cur = await gatewayPrompt("改 tag (不带 #):", t);
+        { label: "✎ 修改标签", action: async () => {
+          const cur = await gatewayPrompt("修改标签（无需输入 # 符号）：", t);
           if (cur == null) return;
           const cleaned = cur.trim().replace(/^#+/, "");
           if (!cleaned || cleaned === t) return;
@@ -471,7 +471,7 @@
             window.gateway.journal?.refresh?.();
           }
         } },
-        { label: "✕ 删 tag", action: async () => {
+        { label: "✕ 删除标签", action: async () => {
           h.tags = (h.tags || []).filter(x => x !== t);
           await saveBlock(b);
           window.gateway.journal?.refresh?.();
@@ -492,12 +492,12 @@
       });
       const result = await r.json();
       if (result.error) {
-        window.gateway.whisper?.("没存上 — " + result.error);
+        window.gateway.whisper?.("保存失败 — " + result.error);
       } else {
-        window.gateway.whisper?.("✓ " + b.time + " 已存回 md", 2200);
+        window.gateway.whisper?.("✓ " + b.time + " 已保存", 2200);
       }
     } catch (e) {
-      window.gateway.whisper?.("没存上 — " + e.message);
+      window.gateway.whisper?.("保存失败 — " + e.message);
     }
   }
 
@@ -557,7 +557,7 @@
         });
         const data = await r.json();
         if (!data.ok) {
-          gatewayAlert("生成失败: " + (data.error || data.stdout || "unknown"));
+          gatewayAlert("创建失败：" + (data.error || data.stdout || "unknown"));
           return;
         }
         // 刷新 days 列表 + 跳到补建的那天
@@ -567,7 +567,7 @@
         fetchJournal(target);
         if (data.created) bumpYahaha(btn);
       } catch (e) {
-        gatewayAlert("server 不通: " + e.message);
+        gatewayAlert("连接失败：" + e.message);
       } finally {
         btn.disabled = false;
         btn.textContent = orig;
@@ -575,7 +575,7 @@
     });
   }
 
-  // ── 加新条目 modal: tag 必填 + 时间默认当前半小时 ────
+  // ── 新增条目 modal: 标签不能为空 + 时间默认当前半小时 ────
   function showTagInsertModal() {
     // 默认当前半小时(向下 floor)
     const now = new Date();
@@ -586,11 +586,11 @@
     overlay.className = "mini-modal-overlay";
     overlay.innerHTML = `
       <div class="mini-modal mini-modal-wide">
-        <div class="mini-modal-title">加新条目</div>
+        <div class="mini-modal-title">新增条目</div>
         <div class="mini-modal-tag-chips" id="mmChips" data-loading="1">⋯</div>
         <div class="mini-modal-row">
           <label>tag</label>
-          <input class="mini-modal-input wide" id="mmTag" type="text" placeholder="工作 / 投资 / 探索⋯ (不带 #)" autofocus>
+          <input class="mini-modal-input wide" id="mmTag" type="text" placeholder="工作 / 投资 / 探索⋯ （无需输入 # 符号）" autofocus>
         </div>
         <div class="mini-modal-row">
           <label>标题</label>
@@ -602,7 +602,7 @@
             <input class="mini-modal-input" id="mmHH" type="text" maxlength="2" inputmode="numeric" value="${defH.toString().padStart(2,'0')}">
             <span class="mini-modal-colon">：</span>
             <input class="mini-modal-input" id="mmMM" type="text" maxlength="2" inputmode="numeric" value="${defM.toString().padStart(2,'0')}">
-            <span class="mini-modal-time-hint">默认当前半小时,可改</span>
+            <span class="mini-modal-time-hint">默认为当前半小时，可修改</span>
           </div>
         </div>
         <div class="mini-modal-msg" id="mmMsg"></div>
@@ -654,18 +654,18 @@
     function submit() {
       const t = tag.value.trim().replace(/^#+/, "");
       if (!t) {
-        msg.textContent = "tag 必填";
+        msg.textContent = "标签不能为空";
         tag.focus();
         return;
       }
       const h = parseInt(hh.value, 10);
       const m = parseInt(mm.value, 10);
       if (isNaN(h) || isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) {
-        msg.textContent = "时间不合法 (0-23 : 0-59)";
+        msg.textContent = "时间格式有误（小时 0-23，分钟 0-59）";
         return;
       }
       okBtn.disabled = true;
-      msg.textContent = "加中⋯";
+      msg.textContent = "处理中⋯";
       const date = window.gateway.journal?.current?.date;
       fetch("/api/journal/insert-block", {
         method: "POST",
@@ -712,7 +712,7 @@
 
   // ── daily task add modal (顶部补剂打卡式) ──────────────
   async function showTaskAddModal() {
-    const text = await gatewayPrompt("加新每日任务 (写文本即可,不用带 - [ ] 前缀):");
+    const text = await gatewayPrompt("新增每日任务（只需输入任务文字，无需手动添加符号）：");
     if (!text || !text.trim()) return;
     fetch("/api/template/task", {
       method: "POST",
@@ -725,7 +725,7 @@
   }
 
   async function showTaskEditModal(oldText) {
-    const text = await gatewayPrompt("改这一项:", oldText);
+    const text = await gatewayPrompt("编辑任务：", oldText);
     if (text === null || text.trim() === oldText) return;
     fetch("/api/template/task", {
       method: "POST",
@@ -739,7 +739,7 @@
 
   function showTaskDelConfirm(oldText) {
     // 撤回式:不弹确认,5s 撤回窗口过后才真删(低频配置操作,defer-only,不乐观隐藏)
-    gatewayUndo(`已删除任务项「${oldText}」`, {
+    gatewayUndo(`已删除任务「${oldText}」`, {
       onCommit: () => {
         fetch("/api/template/task", {
           method: "POST",
@@ -776,7 +776,7 @@
         { label: "📅 创建明天", disabled: hasTomorrow,
           action: () => triggerNewDay(tomorrowISO) },
         { divider: true },
-        { label: "✚ 加新条目 (tag + 时间)",
+        { label: "✚ 新增条目 (tag + 时间)",
           action: () => showTagInsertModal() },
         { label: "➕ 加一项每日任务",
           action: () => showTaskAddModal() },
@@ -793,7 +793,7 @@
       });
       const data = await r.json();
       if (!data.ok) {
-        gatewayAlert("生成失败: " + (data.error || data.stdout || "unknown"));
+        gatewayAlert("创建失败：" + (data.error || data.stdout || "unknown"));
         return;
       }
       await fetchDays();
@@ -802,7 +802,7 @@
       currentDate = goto;
       fetchJournal(goto);
     } catch (e) {
-      gatewayAlert("server 不通: " + e.message);
+      gatewayAlert("连接失败：" + e.message);
     }
   }
 

@@ -137,8 +137,8 @@
 
     body.innerHTML = `
       <div class="market-hint">
-        vault 自动 git commit 出的 markdown 是这个产品的"训练语料"——
-        人和 AI 在日记里写的每一笔都是带作者签名的 jsonl,可以喂回模型做 DPO,也可以纯当备份。
+        你的日记笔记是这个产品的"训练数据",存在你的电脑里,用来持续改进 AI 回复——
+        每一条笔记都记录了作者信息,可用于训练改进,可用于 AI 训练,也是你的备份。
         训练语料全部在你机器上,不传第三方。
       </div>
 
@@ -146,7 +146,7 @@
         <h3>① 训练语料浏览 / 导出</h3>
         <div class="setup-howto">
           时间线 + 标签 + 作者(@user / @ai / @system)三个维度拆。
-          一键 rebuild 全部 jsonl(all / by-tag / by-author / 含 reasoning_content)。
+          一键重新生成所有训练数据(all / by-tag / by-author / 含 reasoning_content)。
           <br><br>
           <button class="key-add-btn" id="corpusOpenHistory">打开训练语料浏览</button>
         </div>
@@ -155,8 +155,8 @@
       <section class="setup-section">
         <h3>② 训练授权</h3>
         <div class="setup-howto setup-howto-secondary">
-          按 source / tag / author 筛选,预览匹配 commit 数,定一份"哪些段允许导出"的 license 配置。
-          默认全部允许,改了之后语料导出按这份白名单走。
+          按来源、标签、作者筛选,预览匹配的条目数,定一份"哪些段允许导出"的 license 配置。
+          默认全部允许。修改后导出时会遵循这份授权配置。
           <br><br>
           <button class="key-add-btn" id="corpusOpenConsent">打开授权配置</button>
         </div>
@@ -165,7 +165,7 @@
       <section class="setup-section">
         <h3>③ 云端数据收集</h3>
         <div class="setup-howto setup-howto-secondary">
-          同意隐私协议时默认开启两类匿名诊断(错误诊断 + 每日心跳),帮我们改进软件。完整说明见 <a href="/PRIVACY.md" target="_blank" rel="noopener">PRIVACY.md</a>。
+          同意隐私协议时默认开启两类匿名诊断(错误诊断 + 每日检测),帮我们改进软件。完整说明见 <a href="/PRIVACY.md" target="_blank" rel="noopener">PRIVACY.md</a>。
           <br><br>
 
           <div class="consent-meta" style="margin:12px 0;">
@@ -256,11 +256,11 @@
     const themeNow = (window.gatewayTheme && window.gatewayTheme.get()) || "system";
     const skinNow = (window.gatewaySkin && window.gatewaySkin.get()) || "classic";
     body.innerHTML = `
-      <div class="market-hint">本地服务,key 仅落本机 config.json,不传任何第三方。任何输入框 paste 完点旁边按钮即可保存/测试。</div>
+      <div class="market-hint">本地服务,密钥只存储在你的电脑上,不会发送给第三方。任何输入框 paste 完点旁边按钮即可保存/测试。</div>
 
       <section class="setup-section" id="skinSection">
         <h3>皮肤</h3>
-        <div class="setup-howto setup-howto-secondary">两套前端整体切换。新版还在逐页组装:组好的页面进新版,没组好的自动留在现版。</div>
+        <div class="setup-howto setup-howto-secondary">两套前端整体切换。新版正在逐页完善:完成的页面使用新版,未完成的仍使用当前版。</div>
         <div class="skin-row" role="radiogroup" aria-label="皮肤">
           ${[["classic","现版 · 私印小报"],["paper","新版 · 纸与灯"]].map(([v,label]) => `
             <label class="skin-opt" style="margin-right:14px;cursor:pointer;">
@@ -291,11 +291,11 @@
           </ol>
         </div>
         <div id="keysModels"></div>
-        <button class="key-add-btn" id="keysAddModel">+ 加 provider</button>
+        <button class="key-add-btn" id="keysAddModel">+ 添加模型</button>
       </section>
 
       <section class="setup-section">
-        <h3>② 眼睛 · <span class="setup-role">阿里云百炼(给 DeepSeek 装视觉)</span></h3>
+        <h3>② 眼睛 · <span class="setup-role">阿里云百炼（提供图片识别）</span></h3>
         <div class="setup-howto setup-howto-secondary">
           根据指引获取阿里云百炼 API,为你的 DeepSeek 装上眼睛。
           <ol>
@@ -306,7 +306,7 @@
             <li>免费额度用完后 → <a href="https://expense.console.aliyun.com/finance/recharge" target="_blank" rel="noopener">阿里云充值入口</a></li>
           </ol>
         </div>
-        ${keyRow("百炼 · API key", "dashscope_api_key", cfg.dashscope_api_key, "sk-... · bailian.console.aliyun.com")}
+        ${keyRow("百炼 · API 密钥", "dashscope_api_key", cfg.dashscope_api_key, "sk-... · bailian.console.aliyun.com")}
       </section>
 
       <details class="setup-details setup-section">
@@ -372,7 +372,7 @@
     if (!wrap) return;
     wrap.innerHTML = "";
     if (!editingModels.length) {
-      wrap.innerHTML = `<div class="market-empty">还没配 LLM,点下面 + 加 provider</div>`;
+      wrap.innerHTML = `<div class="market-empty">还没添加模型，点下面 + 添加</div>`;
       return;
     }
     editingModels.forEach((m, i) => {

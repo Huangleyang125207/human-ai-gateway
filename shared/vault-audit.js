@@ -31,13 +31,13 @@
     const summaryParts = [];
     if (recoverable) summaryParts.push(`<b>${recoverable}</b> 张图被挪了`);
     if (orphans) summaryParts.push(`<b>${orphans}</b> 张图找不到`);
-    if (metaOrphans) summaryParts.push(`<b>${metaOrphans}</b> 条历史失联(task 改名?)`);
+    if (metaOrphans) summaryParts.push(`<b>${metaOrphans}</b> 条记录无法找到(可能标题改过)`);
     if (aggBroken) summaryParts.push(`<b>${aggBroken}</b> 条聚合 link 失效`);
 
     banner.innerHTML = `
       <div class="vab-icon">⚠</div>
       <div class="vab-msg">
-        <div class="vab-title">文件映射检测到 ${report.total_drift} 处漂移</div>
+        <div class="vab-title">发现 ${report.total_drift} 处文件异常</div>
         <div class="vab-summary">${summaryParts.join(" · ")}</div>
       </div>
       <div class="vab-actions">
@@ -80,7 +80,7 @@
   function showDetail(report) {
     const lines = [];
     if (report.image_recoverable?.length) {
-      lines.push("【图片被挪 — 可自动 re-link】");
+      lines.push("【图片位置改变 — 可自动恢复链接】");
       report.image_recoverable.slice(0, 20).forEach(it => {
         lines.push(`  · ${it.task}:${it.old_path} → ${it.new_path}`);
       });
@@ -92,13 +92,13 @@
       });
     }
     if (report.meta_orphans?.length) {
-      lines.push("\n【meta 历史失联 — task 可能被改名 / 删了】");
+      lines.push("\n【记录元数据无法匹配 — 对应内容可能被改名或删除】");
       report.meta_orphans.slice(0, 20).forEach(it => {
         lines.push(`  · ${it.task}(${it.intake_log_days} 天历史)`);
       });
     }
     if (report.aggregate_broken_links?.length) {
-      lines.push("\n【聚合页 link 失效 — 源 md 被移走 / 重命名了】");
+      lines.push("\n【汇总页链接失效 — 原始文档被移除或改名】");
       report.aggregate_broken_links.slice(0, 20).forEach(it => {
         lines.push(`  · #${it.tag} ${it.row_date} ${it.row_time}:${it.link}`);
       });

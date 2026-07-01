@@ -195,7 +195,7 @@
       <div style="background:#f8f5ec;color:#1d1c1a;max-width:520px;width:90%;padding:24px;border-radius:8px;font-family:inherit;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
         <h3 style="margin:0 0 12px;">聊天历史读取失败</h3>
         <p style="margin:0 0 12px;font-size:14px;line-height:1.6;">
-          server 的 <code>thread-history.json</code> 损坏(可能是上次写盘中断)。
+          聊天记录文件损坏（可能是上次保存中断）。
           选一份 bak 恢复,或新开一段。
         </p>
         <p style="margin:0 0 12px;font-size:12px;color:#666;">${d.error || ''}</p>
@@ -204,7 +204,7 @@
           : `<p style="font-size:13px;color:#a33;">无 bak 可用 — 只能新开。</p>`}
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
           <button class="thread-corrupt-fresh" style="padding:8px 16px;border:1px solid #999;background:#fff;border-radius:4px;cursor:pointer;">新开一段</button>
-          ${baks.length > 0 ? `<button class="thread-corrupt-restore" style="padding:8px 16px;border:0;background:#3b6f4a;color:#f5efe0;border-radius:4px;cursor:pointer;font-weight:600;">从 bak 恢复</button>` : ''}
+          ${baks.length > 0 ? `<button class="thread-corrupt-restore" style="padding:8px 16px;border:0;background:#3b6f4a;color:#f5efe0;border-radius:4px;cursor:pointer;font-weight:600;">从备份恢复</button>` : ''}
         </div>
       </div>
     `;
@@ -237,7 +237,7 @@
             const err = await r.text();
             alert(`恢复失败: ${err}`);
             restoreBtn.disabled = false;
-            restoreBtn.textContent = "从 bak 恢复";
+            restoreBtn.textContent = "从备份恢复";
             return;
           }
           overlay.remove();
@@ -247,7 +247,7 @@
         } catch (e) {
           alert(`恢复失败: ${e}`);
           restoreBtn.disabled = false;
-          restoreBtn.textContent = "从 bak 恢复";
+          restoreBtn.textContent = "从备份恢复";
         }
       });
     }
@@ -324,7 +324,7 @@
       chip.className = r.kind === "image" ? "pending-ref pending-image" : "pending-ref";
       const cutOn = (r.payload?.cutout !== false);  // image 默认 true,非 image 没此选项
       if (r.kind === "image" && r.payload?.url) {
-        chip.innerHTML = `<img class="pending-thumb" alt=""><span class="ref-label"></span><button class="cut-toggle" title="抠图开关(默认抠 — 切换后 AI 落原图)"></button><span class="x">×</span>`;
+        chip.innerHTML = `<img class="pending-thumb" alt=""><span class="ref-label"></span><button class="cut-toggle" title="抠图开关（默认抠图 — 切换后用原图）"></button><span class="x">×</span>`;
         chip.querySelector(".pending-thumb").src = r.payload.url;
         const btn = chip.querySelector(".cut-toggle");
         const paint = () => {
@@ -658,7 +658,7 @@
 
     if (state.apiOk === false) {
       removeProcessing();
-      const aiMsg = { role: "assistant", content: "（AI 没接上 — 起 server / 设 api key 后再来）", ts: nowISO() };
+      const aiMsg = { role: "assistant", content: "（AI 没接上 — 请先启动服务或填好密钥再试）", ts: nowISO() };
       state.history.push(aiMsg);
       appendMsg(aiMsg);
       saveHistory();
@@ -798,7 +798,7 @@
               });
             }
             if (/^(add|patch)_widget$/.test(data.name) && !data.result?.error) {
-              appendAction("widget 已落盘 · 刷新页面看效果");
+              appendAction("扩展已保存 · 刷新页面查看效果");
             }
             if (TASK_MUTATING.test(data.name) && !data.result?.error) needTaskRefresh = true;
             if (SCHEDULE_MUTATING.test(data.name) && !data.result?.error) needScheduleRefresh = true;
@@ -810,7 +810,7 @@
             // USE WHEN: stream 中断,model 没出完文 → 下次 turn model 看不到"上次崩了"会失忆
             // COPY THIS: 改 reason 字符串
             // 占位也进 history,让 model 下次能看见上次 turn 的状态
-            const errMsg = { role: "assistant", content: `(上次回复出错: ${data.text} — 可重新问)`, ts: nowISO() };
+            const errMsg = { role: "assistant", content: `(上次回复出错 — 可重新提问)`, ts: nowISO() };
             state.history.push(errMsg);
             saveHistory();
           } else if (data.type === "done") {
@@ -821,7 +821,7 @@
             } else if (!streamMsgEl) {
               // 没文本(纯工具调用 / 全失败)— 提示一下
               if ((data.actions || []).length > 0) {
-                appendAction("（已执行工具,模型未补充文字）");
+                appendAction("（已执行操作，没有额外说明）");
               }
             }
             // server done payload 可能带 reasoning_content + model_id — 都存,给 post-train 用
@@ -837,7 +837,7 @@
               const names = turnActions.length
                 ? turnActions.map(a => a.name).join(", ")
                 : data.actions.map(a => a.name).join(", ");
-              const summary = `(上轮执行了 ${names},未出文字)`;
+              const summary = `(上轮执行了操作,但没有文字说明)`;
               state.history.push({ role: "assistant", content: summary, ...meta });
               saveHistory();
             }
@@ -851,11 +851,11 @@
     } catch (e) {
       removeProcessing();
       const reason = e.name === "AbortError"
-        ? "90s 没新字 — 可能 server 卡 / 网慢 / API down。打开 /reset.html 重置或刷新重试。"
+        ? "90 秒无新内容 — 可能服务器繁忙、网络缓慢或服务中断。请刷新页面重试或访问重置页面。"
         : e.message;
       appendAction(`请求失败 · ${reason}`);
       // 网络层 / abort 错误也进 history(同 error event 兜底)
-      const errMsg = { role: "assistant", content: `(请求失败: ${reason})`, ts: nowISO() };
+      const errMsg = { role: "assistant", content: `(请求失败 — 请检查网络连接后重试)`, ts: nowISO() };
       state.history.push(errMsg);
       saveHistory();
     } finally {

@@ -103,7 +103,7 @@ def attachments_reindex():
 async def cutout_image(req: Request):
     from server import ATTACHMENTS_DIR, DAILY_TASK_IMAGES_DIR, _get_or_create_processed_attachment, _load_task_image_map, _load_task_meta_map, _ocr_text, _parse_pill_count_from_ocr, _pretty_rel, _sanitize_task_filename, _save_task_image_map, _save_task_meta_map, load_config, log
     """对一张已经上传的图(/attachments/...)做去背,存为某 task 的 image。
-    body: {attachment_url: "/attachments/YYYY-MM-DD/xxx.jpg", task_name: "鱼油（Swisse）"}
+    body: {attachment_url: "/attachments/YYYY-MM-DD/xxx.jpg", task_name: "维生素"}
     成功返 {ok, task_name, image_url}
     """
     body = await req.json()

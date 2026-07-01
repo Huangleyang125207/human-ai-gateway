@@ -118,14 +118,14 @@
     var editable = STATE.writable;
     var html = '<article class="piece" data-bi="' + bi + '" data-pi="' + pi + '">';
     // 拖图贴纸暂缓:走 AI 中介(对话流接好后,文档级拖图→thread→place_scrapbook_image),不在此另造直连。
-    // tags:每个 chip 可改(空=删),末尾「＋」加 tag
+    // tags:每个 chip 可改(空=删),末尾「＋」添加标签
     if (tags.length || editable) {
       html += '<p class="piece-tags">' +
         tags.map(function (t, ti) {
           return '<span class="tag-chip' + (editable ? " editable" : "") + '"' +
             (editable ? ' data-field="tag" data-ti="' + ti + '" data-placeholder="tag"' : "") + ">#" + esc(t) + "</span>";
         }).join("") +
-        (editable ? '<button class="tag-add" type="button" title="加 tag" style="background:none;border:none;cursor:pointer;color:var(--cinnabar-soft);font:inherit;">＋</button>' : "") + "</p>";
+        (editable ? '<button class="tag-add" type="button" title="添加标签" style="background:none;border:none;cursor:pointer;color:var(--cinnabar-soft);font:inherit;">＋</button>' : "") + "</p>";
     }
     if (a.title || editable) {
       html += '<h3 class="piece-title"><span class="title-text' + (editable ? " editable" : "") + '"' +
@@ -140,7 +140,7 @@
       var pc = parseCommit(c);
       html += '<aside class="annot ink-in"><p class="annot-head"><span class="seal">批</span>' +
         esc(pc.author || "ai") + ' · #commit</p><p class="annot-body' + (editable ? " editable" : "") + '"' +
-        (editable ? ' data-field="commit" data-ci="' + ci + '" data-author="' + esc(pc.author || "ai") + '" data-placeholder="空=删去这条批"' : "") +
+        (editable ? ' data-field="commit" data-ci="' + ci + '" data-author="' + esc(pc.author || "ai") + '" data-placeholder="留空即删除此批注"' : "") +
         ">" + esc(pc.text) + "</p></aside>";
     });
     if (editable) {
@@ -218,7 +218,7 @@
       body: JSON.stringify(payload),
     }).then(function (r) { return r.json(); }).then(function (d) {
       if (d && d.error) { whisper("没存上 — " + d.error); return false; }
-      whisper("已写回 " + b.time + " 的纸");
+      whisper("已保存 " + b.time + " 的纸");
       return true;
     }).catch(function (e) { whisper("没存上 — " + e.message); return false; });
   }
@@ -288,8 +288,8 @@
     note.innerHTML =
       '<p style="font-weight:600;letter-spacing:.08em;margin-bottom:1rem;">落一笔 · 加一条</p>' +
       '<div id="addChips" style="display:flex;flex-wrap:wrap;gap:0.45em;margin-bottom:0.8rem;font-size:13px;color:var(--ink-faint);"></div>' +
-      '<div style="margin-bottom:0.7rem;"><input id="addTag" placeholder="tag(不带 #),如 探索 / 工作" style="' + inS + 'width:100%;"></div>' +
-      '<div style="margin-bottom:0.7rem;"><input id="addTitle" placeholder="标题(可空,之后点正文写)" style="' + inS + 'width:100%;"></div>' +
+      '<div style="margin-bottom:0.7rem;"><input id="addTag" placeholder="标签（如：探索、工作）" style="' + inS + 'width:100%;"></div>' +
+      '<div style="margin-bottom:0.7rem;"><input id="addTitle" placeholder="标题（可选，点正文处添加）" style="' + inS + 'width:100%;"></div>' +
       '<div style="margin-bottom:0.4rem;">时间 <input id="addHH" value="' + hh + '" maxlength="2" inputmode="numeric" style="' + inS + 'width:2em;text-align:center;">：' +
       '<input id="addMM" value="' + mm + '" maxlength="2" inputmode="numeric" style="' + inS + 'width:2em;text-align:center;"></div>' +
       '<p id="addMsg" style="min-height:1.1em;font-size:12.5px;color:var(--cinnabar-soft);"></p>' +
@@ -331,7 +331,7 @@
         body: JSON.stringify(payload),
       }).then(function (r) { return r.json(); }).then(function (d) {
         if (d && d.ok) { close(); whisper("落了一笔 · " + time); location.reload(); }
-        else msg.textContent = (d && d.error) ? d.error : "没落上,换个时间试试";
+        else msg.textContent = (d && d.error) ? d.error : "添加失败，请重试或检查时间格式";
       }).catch(function (e) { msg.textContent = "没落上 — " + e.message; });
     };
   }
@@ -405,7 +405,7 @@
       return h.body || "";
     }
     main.addEventListener("click", function (e) {
-      if (e.target.closest(".tag-add")) {       // 加 tag:push 空 tag → 重渲染 → 聚焦新 chip
+      if (e.target.closest(".tag-add")) {       // 添加标签:push 空 tag → 重渲染 → 聚焦新 chip
         var art0 = e.target.closest(".piece"), h0 = hOf(art0);
         if (!h0) return;
         h0.tags = h0.tags || []; h0.tags.push("");
@@ -507,13 +507,13 @@
         body: JSON.stringify({ time: "21:30", tag: "回鲸", body: text }),
       }).then(function (r) { return r.json(); }).then(function (d) {
         if (d && d.ok) {
-          note.textContent = "已夹进今天的 md。明早它会读到。";
+          note.textContent = "已记进今天的日记，明早它会读到。";
           composer.textContent = "";
           composer.blur();
         } else {
-          note.textContent = (d && d.error) ? "没写进去:" + d.error : "没写进去,稍后再试。";
+          note.textContent = (d && d.error) ? "发送失败：" + d.error : "发送失败，请稍后重试。";
         }
-      }).catch(function () { note.textContent = "没写进去,网络似乎不通。"; });
+      }).catch(function () { note.textContent = "网络连接失败，请检查后重试。"; });
     });
   }
 
@@ -638,8 +638,8 @@
             body: JSON.stringify({ task_name: medBtn.dataset.task, daily_dose: n }),
           }).then(function (r) { return r.json(); }).then(function (d) {
             if (d && !d.error && !d.detail) { whisper("每天 " + n + " 了 · " + medBtn.dataset.task); location.reload(); }
-            else whisper("没改上 — " + (d.error || d.detail || ""));
-          }).catch(function (err) { whisper("没改上 — " + err.message); });
+            else whisper("修改失败 — " + (d.error || d.detail || ""));
+          }).catch(function (err) { whisper("修改失败 — " + err.message); });
           return;
         }
         var dose = +medBtn.dataset.dose || 1;
@@ -670,8 +670,8 @@
           body: JSON.stringify({ task_name: name }),
         }).then(function (r) { return r.json(); }).then(function (d) {
           if (d && !d.error && !d.detail) { whisper("划掉了 · " + name); setTimeout(function () { location.reload(); }, 550); }
-          else { row.classList.remove("struck"); whisper("没删掉 — " + (d.error || d.detail || "")); }
-        }).catch(function (e) { row.classList.remove("struck"); whisper("没删掉 — " + e.message); });
+          else { row.classList.remove("struck"); whisper("删除失败 — " + (d.error || d.detail || "")); }
+        }).catch(function (e) { row.classList.remove("struck"); whisper("删除失败 — " + e.message); });
       });
     });
     var addLine = document.querySelector(".med-add-line");
@@ -687,8 +687,8 @@
           body: JSON.stringify({ action: "add", text: text }),
         }).then(function (r) { return r.json(); }).then(function (d) {
           if (d && !d.error && !d.detail) { whisper("添了一项 · " + text); location.reload(); }
-          else { addLine.textContent = text; whisper("没添上 — " + (d.error || d.detail || "")); }
-        }).catch(function (e) { addLine.textContent = text; whisper("没添上 — " + e.message); });
+          else { addLine.textContent = text; whisper("添加失败 — " + (d.error || d.detail || "")); }
+        }).catch(function (e) { addLine.textContent = text; whisper("添加失败 — " + e.message); });
       });
     }
   }
@@ -867,7 +867,7 @@
           newBtn.hidden = true;
         } else {
           newBtn.hidden = false;
-          newBtn.textContent = target === today ? "+ 起今天一页" : "+ 补建 " + cnDate(target);
+          newBtn.textContent = target === today ? "+ 起今天一页" : "+ 补充 " + cnDate(target);
           newBtn.onclick = function (e) { e.preventDefault(); createDay(target); };
         }
       }

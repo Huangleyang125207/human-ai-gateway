@@ -274,7 +274,7 @@ def _get_or_create_processed_attachment(attachment_url: str, cutout: bool = True
     # 1) 端侧:macOS Subject Lift → rembg(跨平台 ONNX)— 不联网,无 quota
     #    端侧出来的 PNG 是原 aspect ratio,过 normalize_subject_frame 才能跟百度路径
     #    一样:主体居中 1024 方形,视觉长边统一。少这一步 → 瘦长瓶 / 矮胖罐显示大小不一致
-    #    (5.28 南非醉茄实测的 bug)。
+    #    (实测发现的显示尺寸 bug)。
     local_failed = False
     try:
         from cutout_local import cutout_local

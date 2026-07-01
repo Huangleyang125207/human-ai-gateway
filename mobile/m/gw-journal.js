@@ -138,7 +138,7 @@
         else if (act === 'strike') { entry.struck = !entry.struck; GW.bus.emit('reloadDay'); GW.whisper(entry.struck ? '已划掉收纸 · 痕迹留着' : '划痕已抹去'); }
         else if (act === 'point') { GW.bus.emit('point', entry); }
         else if (act === 'append') GW.openCard({ entry: entry, st: st, append: true });
-        else if (act === 'sticker') GW.whisper('选张图贴上来…（端侧抠图）', true);
+        else if (act === 'sticker') GW.whisper('选张图贴上来…', true);
       }, 320);
     });
   };
@@ -263,7 +263,7 @@
   GW.setTaskIcon = async function (task) {
     const dataUrl = await GW.pickPhoto();
     if (!dataUrl) return;                       // 用户取消
-    GW.whisper('磨墨抠图中…', true);            // 等待禁 spinner,用文字
+    GW.whisper('处理中…', true);            // 等待禁 spinner,用文字
     let icon = dataUrl;
     try {
       const C = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Cutout;

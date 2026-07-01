@@ -747,16 +747,16 @@
         <span class="seq">起 · I</span>
       </div>
       <h2>
-        <span class="tagrow"><span class="tag">yanpai</span><span class="tag">协作</span></span>
-        fetcher DB 命中判太松 + skip-existing 反向坑
+        <span class="tagrow"><span class="tag">工作</span></span>
+        排查一个数据没按预期更新的问题
       </h2>
       <div class="body">
-        <p>worker 重 build 完，森马仍然"4♠ 单张"。trace 到 fetcher <code>_load_annual_from_db</code> 的 DB 命中判定只看 end_year 那行在不在就 return —— prod 的 price_daily.db 历史只回填了 2024+2025，所有股都只能拿到 2 年 close，validator 拿到 n=2 走 <code>confidence=insufficient</code> 分支。改成"start_year 也得在 OR 已有 ≥5 年深度"否则回源 baostock 自愈。</p>
-        <p>kick 了 backfill_annual_history 全量，带 <code>--skip-existing</code> —— 95 秒就跑完，<b>ok=0  skip=5176</b>，完全没补。判据只看 end_year 的 pe_ttm，refresh_stock_annual 已经把 2024+2025 写过了 → 全跳。这个 flag 的语义跟我想要的反向。</p>
+        <p>一早发现某条数据该更新的没更新。一路 trace 下去，原因是命中判定写得太松 —— 只要最新一条在就直接返回，识别不出"历史深度不够"的情况。改成更严格的判据，缺了就回源自愈。</p>
+        <p>顺手跑了一遍全量补数，结果带的那个"跳过已有"开关语义跟我想要的正好反向 —— 全跳了，一条没补。记一笔，这个开关下次得重新设计。</p>
       </div>
       <div class="commit">
-        <div class="commit-prose">真根因是<b>部署 checklist 漏了"首次 backfill"这一步</b>。celery 的 refresh_stock_annual 设计上只刷最近 2 年（老数据写一次就不变假设），但 prod 部署文档没注明"上线前必须先跑一次 backfill_annual_history"。下次新项目上云，<b>数据 cold-start 必须列进 cloud-deploy skill</b>。<code>--skip-existing</code> 的判据也要重新设计，目前只能识别"完全没数据"vs"有最新一年"，识别不出"历史深度不足"。</div>
-        <div class="commit-sig"><span class="seal">印</span>claude-opus-4-7 · 子时记</div>
+        <div class="commit-prose">真根因是<b>流程漏了"首次初始化"这一步</b>。常规刷新只管最近的增量（写一次就不变的假设），但上线文档没写明"首次要先跑一遍全量铺底"。下次新项目上线，<b>数据冷启动这步必须列进部署清单</b>。</div>
+        <div class="commit-sig"><span class="seal">印</span>claude · 子时记</div>
       </div>
     </article>
 
@@ -772,11 +772,11 @@
         上班
       </h2>
       <div class="body">
-        <p>晨发，路上无事。地铁人不多，靠门站着，把昨晚没排清的 backfill 想了一遍。</p>
+        <p>晨发，路上无事。地铁人不多，靠门站着，把昨晚没想清的一件事又过了一遍。</p>
       </div>
     </article>
 
-    <!-- ── 08:00 黑森投资 ── -->
+    <!-- ── 08:00 晨会 ── -->
     <article class="entry no-cap">
       <div class="when">
         <span class="num">08<span class="colon">：</span>00</span>
@@ -785,10 +785,10 @@
       </div>
       <h2>
         <span class="tagrow"><span class="tag">晨会</span><span class="tag">产品</span><span class="tag">投资</span></span>
-        石璟岩分享黑森投资
+        团队成员分享某投资基金
       </h2>
       <div class="body">
-        <p>一家叫黑森的主管多头私募，2014 年北京海淀注册，自主发行九号 / 六号 / 三号三只产品（策略复制）。代表产品<b>黑森九号</b>成立以来：</p>
+        <p>一家主观多头私募，自主发行多只产品（策略复制）。代表产品成立以来：</p>
         <ul>
           <li>年化 <b>20.52%</b></li>
           <li>最大回撤 <b>13.23%</b></li>
@@ -806,7 +806,7 @@
           <li><b>估值</b>：3–5 年后值多少？安全边际 + 市场先生 + 不熟不做</li>
           <li><b>风险</b>：股价操纵、ESG、下跌原因（估值 / 业绩 / 逻辑）</li>
         </ol>
-        <p><b>意义</b>：和 yanpai investment-dashboard 自己的因子打分思路高度同源 —— 可作为 dashboard 因子体系的对照样本。"价值因子 70% 权重"这条尤其要记，dashboard 当前因子加权还没明确这个层级。</p>
+        <p><b>意义</b>：这套清单和我平时的判断思路高度同源 —— 可以作为一个对照样本。"价值因子 70% 权重"这条尤其要记。</p>
       </div>
     </article>
 
@@ -818,12 +818,12 @@
         <span class="seq">IV</span>
       </div>
       <h2>
-        <span class="tagrow"><span class="tag">yanpai</span><span class="tag">协作</span></span>
-        重新审 DB，backfill 二刷
+        <span class="tagrow"><span class="tag">工作</span></span>
+        重新把数据层捋了一遍
       </h2>
       <div class="body">
-        <p>把整个 prod 数据层捋了一遍。price_daily.db <b>96% 股只有 2 年 close</b> —— 真因不是上市时间问题（新奥 1994 也只 2 年），是首次 backfill 从没在 prod 跑过。financial.db 4.2 GB 健康，sector.db 健康，sector_stats 表空但 grep 一遍没生产代码读它，假信号。</p>
-        <p>kick 第二次 backfill，<em>不带</em> <code>--skip-existing</code>，UPSERT 幂等会覆盖 2024+2025 同时补 2015–2023。约 7 小时跑完（下午 4 点）。</p>
+        <p>把整个数据层从头捋了一遍，确认<b>大部分历史数据都缺</b> —— 真因不是来源问题，是首次铺底从没正经跑过。其它几块数据都健康，有个空表 grep 一遍没人读，是假信号。</p>
+        <p>重跑一次全量补数，这次不带"跳过已有"，幂等覆盖最新的同时把历史补齐。约几个小时跑完。</p>
       </div>
     </article>
 
@@ -835,16 +835,16 @@
         <span class="seq">V</span>
       </div>
       <h2>
-        <span class="tagrow"><span class="tag">yanpai</span><span class="tag">协作</span></span>
-        启动页样例改东财人气榜 + 后端推送架构
+        <span class="tagrow"><span class="tag">工作</span></span>
+        把首页示例改成实时榜 + 后端推送架构
       </h2>
       <div class="body">
-        <p><code>/analyze</code> 之前硬编码三只样例（茅台 / 长江电力 / 宁德）。先想用本地 analyses 表 top-N，被否 —— 我们样本量太小，选股偏单一。改东财源，踩第一个坑：盘前（&lt;9:30）用 push2 clist by 成交额返字段全 "-"，启动页 9 点前就崩。切到 <code>stockrank/getAllCurrentList</code> 实时人气榜，24 h 都有数据。</p>
-        <p>第二轮架构演化更关键：第一版让 API 层 in-process 5 min 缓存，葱鸭提议"后端统一刷"。改成 celery beat 每 5 分钟拉一次写 Redis，<code>/stocks/hot</code> 直接读 Redis 三层兜底（Redis → memcache → live fetch）。收益是用户响应永远 <b>&lt;50 ms</b>，东财接口压固定不随用户量上升。</p>
+        <p>首页之前硬编码了几个样例。先想用本地表取 top-N，被否 —— 样本太小，结果偏单一。改用实时数据源，踩第一个坑：某时段接口返回字段全空，首页直接崩。切到另一个实时榜接口，全天都有数据。</p>
+        <p>第二轮架构演化更关键：第一版在接口层做内存缓存，后来改成后端统一定时刷一份写缓存，接口直接读，三层兜底。收益是用户响应永远 <b>&lt;50 ms</b>，上游接口压力固定，不随用户量上升。</p>
       </div>
       <div class="commit">
-        <div class="commit-prose">pull-based caching → push-based scheduled refresh 是个<b>通用模式</b>，以后任何"轻数据 + 高读频"的接口（行情榜单 / 热搜 / 推荐位）都该走这路子。本来准备直接部署，backfill 在抢 SSH 资源（<code>scp</code> 一直断），决定等 backfill 4 点跑完再统一推。挂了 monitor 持久任务等通知。</div>
-        <div class="commit-sig"><span class="seal">印</span>claude-opus-4-7 · 辰时记</div>
+        <div class="commit-prose">拉取式缓存 → 推送式定时刷新是个<b>通用模式</b>，以后任何"轻数据 + 高读频"的接口（榜单 / 热搜 / 推荐位）都该走这路子。本来准备直接部署，但有个长任务在抢资源，决定等它跑完再统一推。挂了个持久任务等通知。</div>
+        <div class="commit-sig"><span class="seal">印</span>claude · 辰时记</div>
       </div>
     </article>
 
@@ -856,15 +856,15 @@
         <span class="seq">VI</span>
       </div>
       <h2>
-        <span class="tagrow"><span class="tag">yanpai</span><span class="tag">协作</span></span>
-        backfill 把整台机打爆
+        <span class="tagrow"><span class="tag">工作</span></span>
+        长任务把整台机打爆
       </h2>
       <div class="body">
-        <p>葱鸭午饭后发现 <code>dash.yanpaidb.cn</code> 打不开，SSH banner exchange timeout —— sshd 自己抢不到 CPU 调度。证据链：早上 10 点 load 21，11 点 backfill 才跑到 6%（sh.600316），12 点 SSH 整个挂掉。<b>2C2G 机器同时扛 8 容器 + sentence-transformers + 长跑 backfill 进程是没头空间的</b>，OOM 把所有进程一起拖入 swap thrashing。腾讯云控制台重启实例救回。</p>
+        <p>午饭后发现服务连不上，SSH 都进不去 —— sshd 自己抢不到 CPU。证据链：上午负载飙到 21，那个全量任务才跑到 6%，到中午 SSH 整个挂掉。<b>小内存机器同时扛一堆容器 + 模型 + 长跑任务是没余量的</b>，OOM 把所有进程一起拖进 swap thrashing。云控制台重启实例救回。</p>
       </div>
       <div class="commit">
-        <div class="commit-prose">真正的教训是 <b>ETL 不该跟 web 服务塞同一台机</b>。celery 的 refresh_stock_annual 是季频小刷（只 2 年），但 backfill_annual_history 是 11 年全量 ETL，这种活生产 server 不该承担。<b>后续要么独立 ETL 机，要么 backfill 写成分片小任务靠 celery beat 分散触发，而不是一个 7 小时的长进程</b>。</div>
-        <div class="commit-sig"><span class="seal">印</span>claude-opus-4-7 · 午时记</div>
+        <div class="commit-prose">真正的教训是 <b>重 ETL 不该跟在线服务塞同一台机</b>。常规小刷没问题，但全量铺底是个重活，生产机不该承担。<b>后续要么独立一台跑 ETL，要么把全量写成分片小任务分散触发，而不是一个几小时的长进程</b>。</div>
+        <div class="commit-sig"><span class="seal">印</span>claude · 午时记</div>
       </div>
     </article>
 
@@ -876,16 +876,16 @@
         <span class="seq">VII</span>
       </div>
       <h2>
-        <span class="tagrow"><span class="tag">yanpai</span><span class="tag">协作</span></span>
-        本地并发跑 backfill 撞 Clash TUN
+        <span class="tagrow"><span class="tag">工作</span></span>
+        本地并发跑任务撞代理 TUN
       </h2>
       <div class="body">
-        <p>葱鸭说"本地跑并发再 scp 上去"。本地 Mac 8 核 16 G，理论 30 分钟搞完云端 7 h 的活，稳赢策略。写了 <code>backfill_annual_parallel.py</code> 用 ProcessPoolExecutor 8 进程并发，smoke test 50 只 4 进程 —— <b>卡死</b>，<code>bs.login()</code> 25 秒不回。</p>
-        <p>排错 2 小时：网络通（<code>nc baostock.com 10030</code> succeeded），import baostock 通，但 login 协议层不回。<code>route get www.baostock.com</code> 显示 <code>gateway 198.18.0.1 / interface utun4</code> —— Clash TUN 模式接管所有 TCP 出向流量，baostock 用的私有二进制协议被 Clash 当 HTTP 解析失败 → 永久挂起。</p>
+        <p>想着本地跑并发再传上去 —— 本地机器配置高，理论上半小时搞完云端几小时的活，稳赢。写了个多进程并发脚本，smoke test 一跑 —— <b>卡死</b>，登录调用 25 秒不回。</p>
+        <p>排错两小时：网络通、import 通，但登录协议层不回。<code>route get</code> 一查，出向流量全走了代理的 TUN 虚拟网卡 —— 代理 TUN 模式接管所有 TCP，那个库用的私有二进制协议被当 HTTP 解析失败 → 永久挂起。</p>
       </div>
       <div class="commit">
-        <div class="commit-prose">这是个<b>通用 Mac 开发陷阱</b> —— Clash TUN 对纯 socket 协议（baostock / 自研 TCP 服务 / 任何非 HTTP/SOCKS 的二进制协议）都会挂。葱鸭说"我没法修改规则"，试图绕 Clash 不成，2 小时换不来一个 fix，接受沉没成本。<b>以后任何"本地跑"涉及金融数据 API 或私有协议的，先 <code>route get</code> 一下确认不走 utun</b>。</div>
-        <div class="commit-sig"><span class="seal">印</span>claude-opus-4-7 · 未时记</div>
+        <div class="commit-prose">这是个<b>通用开发陷阱</b> —— 代理 TUN 对纯 socket 协议（任何非 HTTP/SOCKS 的二进制协议）都会挂。试图绕过没成，两小时换不来一个 fix，接受沉没成本。<b>以后任何"本地跑"涉及私有协议的，先 <code>route get</code> 确认不走 utun</b>。</div>
+        <div class="commit-sig"><span class="seal">印</span>claude · 未时记</div>
       </div>
     </article>
 
@@ -897,16 +897,16 @@
         <span class="seq">VIII · 终</span>
       </div>
       <h2>
-        <span class="tagrow"><span class="tag">yanpai</span><span class="tag">协作</span></span>
-        hot-stocks 上线 + 分片 backfill 抢救
+        <span class="tagrow"><span class="tag">工作</span></span>
+        实时榜上线 + 分片任务抢救
       </h2>
       <div class="body">
-        <p>放弃本地，回 2C2G 云端。先用 <code>docker cp</code> 把 hot-stocks（东财人气榜 → Redis 推送）和 fetcher 修复 hot-patch 进 worker / api / beat，省掉 web rebuild 的内存峰值 —— <code>/stocks/hot</code> 返大唐发电 / 中际旭创等真热门股，启动页样例不再硬编码茅台 / 长江电力 / 宁德。</p>
-        <p>backfill 改<b>分片</b>：200 只一片，每片 python 进程独立生命周期，跑完退出释放内存。这样 idle 1.4 GB + 单片 ~300 MB 不会再压崩。挂 monitor 等第一片（~17 min）完成，稳了再循环跑剩下 25 片（~6 小时全量铺底）。</p>
+        <p>放弃本地，回云端。先用热补丁把实时榜推送和修复逻辑直接打进运行中的进程，省掉重新构建的内存峰值 —— 首页示例改成真实时热门项，不再硬编码。</p>
+        <p>全量任务改<b>分片</b>：每片独立进程生命周期，跑完退出释放内存。这样空载 + 单片峰值不会再压崩。挂个持久任务等第一片完成，稳了再循环跑剩下的，几小时全量铺底。</p>
       </div>
       <div class="commit">
-        <div class="commit-prose">2C2G 跑大 ETL 的姿势 = <b>进程式分片 + 每片独立内存生命周期</b>，等同人为 OOM-prevention。葱鸭说"现在 2C2G 跑着，要迁移再升 8 G"，这条策略可以撑到迁移。<b>但每次部署或运维都得这么小心翼翼，长期看 8 G 升级值的（每 GB 内存换回 30 min 排查时间）</b>。</div>
-        <div class="commit-sig"><span class="seal">印</span>claude-opus-4-7 · 申时记</div>
+        <div class="commit-prose">小机器跑大 ETL 的姿势 = <b>进程式分片 + 每片独立内存生命周期</b>，等同人为 OOM-prevention，这条策略可以撑到迁移。<b>但每次部署运维都得这么小心翼翼，长期看升级内存是值的（每 GB 内存换回半小时排查时间）</b>。</div>
+        <div class="commit-sig"><span class="seal">印</span>claude · 申时记</div>
       </div>
       <div class="ornament">❦ &nbsp; ❦ &nbsp; ❦</div>
     </article>
@@ -920,7 +920,7 @@
     <div class="marg-block">
       <div class="hd">今日</div>
       <div class="lead">六段已写</div>
-      <div class="sub">含一段晨会笔记 + 五段 yanpai #协作</div>
+      <div class="sub">含一段晨会笔记 + 五段工作记录</div>
       <svg class="spark-svg" viewBox="0 0 200 38" preserveAspectRatio="none">
         <!-- 6 段写作的时间分布 sparkline：0,7.5,8,8.5,9,12.5,13,16.5 → 8 个 entry -->
         <path class="line" d="M 4,30 Q 14,18 26,25 T 60,12 T 100,10 T 145,18 T 196,22"
@@ -966,10 +966,10 @@
     <div class="marg-block">
       <div class="hd">项目脉搏</div>
       <div class="pulses">
-        <div class="pulse y"><span class="pip"></span><span class="name">investment-dashboard</span><span class="meta">yellow</span></div>
-        <div class="pulse y"><span class="pip"></span><span class="name">esp-claude</span><span class="meta">yellow</span></div>
-        <div class="pulse g"><span class="pip"></span><span class="name">social-media</span><span class="meta">green</span></div>
-        <div class="pulse y"><span class="pip"></span><span class="name">meta</span><span class="meta">yellow</span></div>
+        <div class="pulse y"><span class="pip"></span><span class="name">项目 A</span><span class="meta">yellow</span></div>
+        <div class="pulse y"><span class="pip"></span><span class="name">项目 B</span><span class="meta">yellow</span></div>
+        <div class="pulse g"><span class="pip"></span><span class="name">项目 C</span><span class="meta">green</span></div>
+        <div class="pulse y"><span class="pip"></span><span class="name">项目 D</span><span class="meta">yellow</span></div>
       </div>
     </div>
 

@@ -241,7 +241,7 @@
       scroll.appendChild(top);
       if (st.subPage === 'settings') scroll.appendChild(settings());
       else if (st.subPage === 'aggregate') scroll.appendChild(aggregate());
-      else { const e = document.createElement('div'); e.className = 'gw-empty'; e.innerHTML = `<b>${meta.label}</b>${meta.desc || ''}。<br>桌面已有，移动端按路线图往上加。`; scroll.appendChild(e); }
+      else { const e = document.createElement('div'); e.className = 'gw-empty'; e.innerHTML = `<b>${meta.label}</b>${meta.desc || ''}。<br>此功能在开发中。`; scroll.appendChild(e); }
     }
 
     // 聚合页(对照 PC shared/aggregate.js)— GET /api/tag-aggregate → tab/行 + tap-跳 + 注册/刷新
@@ -264,7 +264,7 @@
         if (!sec) { bodyEl.innerHTML = '<div class="gw-empty">还没有聚合标签</div>'; return; }
         if (!sec.rows.length) {
           bodyEl.innerHTML = (sec.description ? `<div class="gw-agg-desc">${GW.esc(sec.description)}</div>` : '') +
-            `<div class="gw-empty">这个标签还没有条目。点「⟳ 刷新」扫日记收进来，或写日记时给条目带 #${GW.esc(sec.tag)}。</div>`;
+            `<div class="gw-empty">这个标签还没有条目。点「⟳ 刷新」，或写日记时带上 #${GW.esc(sec.tag)}。</div>`;
           return;
         }
         const rows = sec.rows.slice().reverse();  // 新在上(对照 PC iso_date DESC)
@@ -285,7 +285,7 @@
       function reload(focusTag) {
         return window.fetch('/api/tag-aggregate').then((r) => r.json()).then((d) => {
           sections = (d && d.sections) || [];
-          if (!sections.length) { tabsEl.innerHTML = ''; bodyEl.innerHTML = '<div class="gw-empty">还没有聚合标签。点「注册标签」或跟 AI 说「把 #X 收进聚合页」。</div>'; return; }
+          if (!sections.length) { tabsEl.innerHTML = ''; bodyEl.innerHTML = '<div class="gw-empty">还没有聚合标签。点「新增标签」或在对话中告诉AI。</div>'; return; }
           if (focusTag) { const idx = sections.findIndex((s) => s.tag === focusTag); if (idx >= 0) active = idx; }
           if (active >= sections.length) active = 0;
           renderTabs(); renderActive();
@@ -295,7 +295,7 @@
       wrap.querySelector('[data-act="refresh"]').addEventListener('click', () => {
         GW.whisper('扫描日记中…', false);
         window.fetch('/api/tag-aggregate/refresh', { method: 'POST' }).then((r) => r.json()).then((d) => {
-          GW.whisper(d && d.ok ? (d.added ? '补了 ' + d.added + ' 行' : '没有新条目') : ((d && d.error) || '刷新失败'), false);
+          GW.whisper(d && d.ok ? (d.added ? '新增了 ' + d.added + ' 条' : '没有新条目') : ((d && d.error) || '刷新失败'), false);
           if (d && d.ok && d.added) reload();
         });
       });
@@ -303,7 +303,7 @@
       wrap.querySelector('[data-act="register"]').addEventListener('click', () => {
         if (bodyEl.querySelector('.gw-agg-reg')) return;
         const form = document.createElement('div'); form.className = 'gw-agg-reg';
-        form.innerHTML = `<input class="gw-agg-reg-in" placeholder="标签名(不带 #),如 yanpai" maxlength="40"><button class="gw-agg-reg-ok">注册</button><button class="gw-agg-reg-x">×</button>`;
+        form.innerHTML = `<input class="gw-agg-reg-in" placeholder="标签名称（如：健身）" maxlength="40"><button class="gw-agg-reg-ok">注册</button><button class="gw-agg-reg-x">×</button>`;
         bodyEl.prepend(form);
         const inp = form.querySelector('.gw-agg-reg-in'); setTimeout(() => inp.focus(), 50);
         form.querySelector('.gw-agg-reg-x').addEventListener('click', () => form.remove());
@@ -312,8 +312,8 @@
           if (!tag) return;
           window.fetch('/api/tag-aggregate/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tag: tag }) })
             .then((r) => r.json()).then((d) => {
-              if (d && d.ok) { GW.whisper('已注册 #' + d.tag, false); form.remove(); reload(d.tag); }
-              else GW.whisper((d && d.error) || '注册失败', false);
+              if (d && d.ok) { GW.whisper('已添加 #' + d.tag, false); form.remove(); reload(d.tag); }
+              else GW.whisper((d && d.error) || '添加失败', false);
             });
         };
         form.querySelector('.gw-agg-reg-ok').addEventListener('click', submit);
@@ -530,7 +530,7 @@
       compactRunning = false;
       if (!summary) {  // 摘要失败:不动历史(防失忆),auto 计失败 2 次自关
         if (opts.auto) { st.compactFails = (st.compactFails || 0) + 1; if (st.compactFails >= 2) st.compactAuto = false; }
-        GW.whisper('整理没成(摘要失败),历史没动。' + (opts.auto && st.compactAuto === false ? ' 自动整理先关,下次手动点圆环。' : ''), false);
+        GW.whisper('整理没成(摘要失败),历史没动。' + (opts.auto && st.compactAuto === false ? ' 自动压缩已禁用，可手动操作。' : ''), false);
         updateCompactRing(); return;
       }
       st.compactFails = 0;

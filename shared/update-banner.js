@@ -71,10 +71,10 @@
   function stepLabel(step) {
     return {
       found: "检测到新版",
-      download: "Step 1 · 下载",
-      install: "Step 2 · 安装",
+      download: "步骤 1 · 下载",
+      install: "步骤 2 · 安装",
       ready_restart: "下载完成,等重启",
-      migrating: "Step 3 · MD 迁移",
+      migrating: "步骤 3 · 日记迁移",
       migrated: "全部完成",
       error: "出错了",
     }[step] || step || "";
@@ -160,11 +160,11 @@
           </span>
         </div>`;
     } else if (state.step === "install") {
-      stepDetailHtml = `<div style="opacity:0.85;">下载完毕,正在安装到 /Applications…</div>`;
+      stepDetailHtml = `<div style="opacity:0.85;">下载完毕,正在安装…</div>`;
     } else if (state.step === "ready_restart") {
       stepDetailHtml = `
         <div style="display:flex; align-items:center; gap:12px;">
-          <span style="opacity:0.9;">Gateway v${state.version} 已下载,重启 app 生效</span>
+          <span style="opacity:0.9;">Gateway v${state.version} 已下载,重启应用生效</span>
           <span data-action="restart" style="background:#f5efe0; color:#3b6f4a; padding:6px 14px; border-radius:4px; cursor:pointer; font-weight:600;">立即重启</span>
           <span data-action="postpone" style="background:transparent; color:#f5efe0; border:1px solid rgba(245,239,224,0.5); padding:6px 14px; border-radius:4px; cursor:pointer;">稍后</span>
         </div>`;
@@ -177,7 +177,7 @@
       stepDetailHtml = `
         <div style="display:flex; flex-direction:column; gap:6px;">
           <div style="display:flex; align-items:center; gap:10px;">
-            <span style="opacity:0.9;">AI 正在按新版重写日记模板…</span>
+            <span style="opacity:0.9;">系统正在按新版重写日记模板…</span>
             ${curr}
           </div>
           <div style="display:flex; align-items:center; gap:12px;">
@@ -192,7 +192,7 @@
     } else if (state.step === "migrated") {
       const m = state.migration;
       const hasErr = m.filesError > 0;
-      const tail = hasErr ? `,${m.filesError} 个跳过(留 .bak 兜底)` : "";
+      const tail = hasErr ? `,${m.filesError} 个跳过(备份已保存)` : "";
       const errDetails = (hasErr && state.expandedErrors)
         ? `<div style="margin-top:8px; padding:8px 10px; background:rgba(0,0,0,0.15); border-radius:4px; font-size:12px; font-family:monospace; max-height:120px; overflow-y:auto;">
             ${m.errors.slice(0, 5).map((e) => `
@@ -259,7 +259,7 @@
     const tauri = window.__TAURI__;
     const inTauri = !!(tauri && (tauri.core?.invoke || tauri.process?.relaunch));
     if (!inTauri) {
-      state.errorMessage = "请在 Gateway 桌面壳里点重启(浏览器无法控制壳)";
+      state.errorMessage = "请在 Gateway 应用中点击重启按钮(浏览器无法控制壳)";
       render();
       return;
     }
@@ -269,7 +269,7 @@
     } catch (e) {
       console.warn("[update-banner] Tauri relaunch 失败,走 fallback", e);
     }
-    // fallback:让 sidecar 退出,Tauri 检测 sidecar 死 → Tauri 退,user 手动重开
+    // fallback:应用已关闭,请手动重新启动
     try { await fetch("/api/quit", { method: "POST" }); } catch (e) {}
     state.errorMessage = "Gateway 已关闭,请手动重开";
     render();

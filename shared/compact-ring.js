@@ -50,7 +50,7 @@
     ring.className = "compact-ring";
     ring.setAttribute("role", "button");
     ring.setAttribute("tabindex", "0");
-    ring.setAttribute("aria-label", "整理对话(更新 3 份 md + 重置历史)");
+    ring.setAttribute("aria-label", "整理对话历史");
     ring.style.cursor = "pointer";
     ring.addEventListener("click", runCompact);
     ring.addEventListener("keydown", (e) => {
@@ -98,18 +98,18 @@
       // 改用项目自实现的 gatewayConfirm(同 aggregate.js:98 用法,返 Promise<boolean>)
       const ok = await window.gatewayConfirm(
         `整理对话历史(${kChars}K 字符)?\n\n` +
-        `LLM 会重写 3 份 md:\n` +
-        `  · USER_PULSE — 你的当下快照\n` +
-        `  · 项目 PULSE — 项目状态\n` +
-        `  · AGENT_CONTEXT — vault 协作约定\n\n` +
-        `完成后对话历史会重置,3 份 md 自动 backup + git。`
+        `系统会自动生成 3 份摘要:\n` +
+        `  · 个人快照 — 你的当下状态\n` +
+        `  · 项目快照 — 项目进展\n` +
+        `  · 协作约定 — 团队规则\n\n` +
+        `完成后对话历史会重置，旧摘要会自动备份。`
       );
       if (!ok) return;
     }
 
     running = true;
     ring.classList.add("compact-ring-running");
-    window.gatewayToast?.("整理中...3 份 md 同时跑,大约 30-90 秒。");
+    window.gatewayToast?.("整理中…大约 30-90 秒。");
 
     const targets = [
       { ep: "/api/pulse/user-update",          name: "USER_PULSE" },
@@ -185,7 +185,7 @@
       } catch {}
       writeFailCount(0);
       update();
-      window.gatewayToast?.(`整理完成 — 3 份 md 已更新,旧对话压成摘要 + 保留最后 5 轮。`);
+      window.gatewayToast?.(`整理完成 — 已生成摘要并保留最近 5 轮对话。`);
     } else if (ok_count > 0) {
       const failed = results.filter(r => !r.ok).map(r => `${r.name}(${r.status || r.error || "?"})`);
       if (opts.auto) {
@@ -222,7 +222,7 @@
     const kChars = (chars / 1000).toFixed(1);
     const remaining = Math.max(0, 100 - pct);
     const autoOn = localStorage.getItem(AUTO_COMPACT_KEY) !== "off";  // 默认 on,显式 "off" 才关
-    ring.title = `对话 ${kChars}K / 150K · ${pct}% · 距离整理 ${remaining}%${autoOn ? " · 自动整理: 开" : ""}`;
+    ring.title = `对话 ${kChars}K / 150K · ${pct}% · 还能写 ${remaining}%${autoOn ? " · 自动整理已启用" : ""}`;
     // 超过 100% 加 pulse 微动画 (CSS)
     ring.classList.toggle("compact-ring-over", pct >= 100);
     // 自动 compact:阈 ≥ 100% + 当前没在 streaming + cooldown 过 + 开关 on
@@ -259,7 +259,7 @@
     if (now - last < cooldown) return;
     if (isStreaming()) return;  // 等 stream 完
     writeLastAutoFireAt(now);
-    window.gatewayToast?.("对话超阈值,自动整理中…");
+    window.gatewayToast?.("对话过长,自动整理中…");
     runCompact({ skipConfirm: true, auto: true });
   }
 
