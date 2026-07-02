@@ -36,6 +36,11 @@
 .gw-thread, .gw-thread *, .gw a {
   -webkit-user-select: text; user-select: text; -webkit-touch-callout: default;
 }
+/* markdown 表格(AI 输出 + 日记 entry)—— 移动端此前无表格样式:窄屏自适应,过宽则容器横向滚 */
+.gw-msg-text, .gw-note-body, .gw-entry-body { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.gw table { border-collapse: collapse; margin: 8px 0; font: 13.5px/1.6 var(--font-sans); }
+.gw th, .gw td { border: 1px solid var(--line-medium); padding: 5px 9px; text-align: left; vertical-align: top; }
+.gw th { background: var(--paper-sunken); font-weight: 600; }
 
 /* 纸纹 + 呼吸暖光(安静,不是 dashboard) */
 .gw-grain {

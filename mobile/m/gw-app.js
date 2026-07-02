@@ -99,6 +99,20 @@
       }, true);
     }
 
+    // 键盘弹起时输入框被盖住看不到最新输入(无 @capacitor/keyboard + contentInset:never)。
+    // 用 visualViewport 把 app 收到可见区 → chatbar 顶到键盘上方,输入随打随可见。
+    if (window.visualViewport && !GW._vvBound) {
+      GW._vvBound = true;
+      const vv = window.visualViewport;
+      const applyVV = function () {
+        if (!GW.root) return;
+        const kb = window.innerHeight - vv.height;        // 键盘遮住的高度
+        GW.root.style.height = kb > 80 ? vv.height + 'px' : '';  // 弹起→收缩;收起→还给 CSS 100%
+      };
+      vv.addEventListener('resize', applyVV);
+      vv.addEventListener('scroll', applyVV);
+    }
+
     function dayState(k) { const d = st.days.find((x) => x.key === k); return d ? d.state : 'today'; }
 
     function render() {
@@ -215,7 +229,7 @@
       const send = bottom.querySelector('.gw-chat-send');
       const chips = bottom.querySelector('.gw-attach-chips');
       let pending = [];
-      function refresh() { send.disabled = !(ta.value.trim() || pending.length); ta.style.height = 'auto'; ta.style.height = Math.min(96, ta.scrollHeight) + 'px'; }
+      function refresh() { send.disabled = !(ta.value.trim() || pending.length); ta.style.height = 'auto'; ta.style.height = Math.min(96, ta.scrollHeight) + 'px'; ta.scrollTop = ta.scrollHeight; /* 高度封顶(96px)后顶到最新行,防看不到当前输入 */ }
       ta.addEventListener('input', refresh);
       ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); } });
       function renderChips() {
