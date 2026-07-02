@@ -530,6 +530,12 @@
       return { mime: m[1], buf: u.buffer };
     } catch (e) { return null; }
   }
+  // 失败哨兵判定 — 降级链靠它识别"这串不是搜索结果"。
+  // 文案可以改,形状不能破:失败返回必须匹配这里(1361deb 把 "[360 …" 前缀改成
+  // 产品化文案后,消费方的 indexOf("[360") 判定失明,错误串被当结果喂给 LLM)。
+  function _searchFailed(s) {
+    return !s || /^\[(?:360 )?搜索(无结果|无响应|失败|出错|异常|返空)/.test(s) || s.indexOf("[未配置") === 0;
+  }
   function _mobileWebSearch360(query, max) {
     var CapHttp = _getCapHttp();
     var url = "https://www.so.com/s";
@@ -553,7 +559,7 @@
       try {
         var doc = new DOMParser().parseFromString(html, "text/html");
         var items = doc.querySelectorAll('li[class*="res-list"]');
-        if (!items.length) return "[360 搜索无结果]";
+        if (!items.length) return "[搜索无结果]";
         var out = [];
         for (var i = 0; i < items.length && out.length < (max || 5); i++) {
           var node = items[i];
@@ -565,7 +571,7 @@
           var dt = desc ? (desc.textContent || "").trim() : "";
           if (title) out.push("【" + title + "】 " + (href ? href + " — " : "") + dt);
         }
-        return out.length ? out.join("\n\n") : "[360 搜索无结果]";
+        return out.length ? out.join("\n\n") : "[搜索无结果]";
       } catch (e) { return "[搜索出错:" + (e.message || "") + "]"; }
     }).catch(function (e) { return "[搜索异常:" + (e && e.message || e) + "]"; });
   }
@@ -2183,13 +2189,13 @@
       var max = Math.max(1, Math.min(parseInt(body && body.max_results || "5", 10), 10));
       if (!query) return jsonResp({ ok: false, error: "缺少查询内容" }, 400);
       return _mobileWebSearch360(query, max).then(function (r360) {
-        if (r360 && r360.indexOf("[360") !== 0) {
+        if (!_searchFailed(r360)) {
           return jsonResp({ ok: true, query: query, category: "general", source: "360", results: r360 });
         }
         // 360 降级 → 试百炼
         return Store.getSetting("dashscope_key").then(function (key) {
           return _mobileWebSearchBailian(query, key).then(function (rB) {
-            if (rB && rB.indexOf("[百炼") !== 0 && rB.indexOf("[未配置") !== 0) {
+            if (!_searchFailed(rB)) {
               return jsonResp({ ok: true, query: query, category: "general", source: "bailian", results: rB, _degraded_from: "360" });
             }
             // 双降级
