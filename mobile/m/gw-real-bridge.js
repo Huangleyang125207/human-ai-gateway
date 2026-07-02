@@ -502,8 +502,9 @@
             if (firstChunkSeen) {
               var msg = st.thread.find(function (x) { return x.id === aiId; });
               if (msg) msg.streaming = false;
-              var mn = container.querySelector('.gw-msg[data-id="' + aiId + '"]');
-              if (mn) mn.classList.remove('streaming');
+              // 终稿必须全量重渲:流式期间正文是 textContent 纯文本,
+              // 不重渲 = 刚收到的回复里链接/加粗永远不过 gatewayMd,链接点不了
+              GW.renderThread(container, st);
             } else {
               grindEl.remove();
             }
