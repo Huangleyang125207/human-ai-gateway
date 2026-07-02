@@ -557,6 +557,8 @@ body { transition: padding-right 0.45s cubic-bezier(0.2, 0.7, 0.2, 1); }
   transition: right 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 .thread.on { right: 0; }
+/* 对话框内容自由复制:保证会话文本在 WKWebView 里可选中 + Cmd/右键复制(app 别处仍可 user-select:none) */
+.thread .body, .thread .body *, .thread .ref-text { -webkit-user-select: text; user-select: text; }
 /* 左边缘抓手 — IDE 式拖拽改宽度 */
 .thread-resizer {
   position: absolute; left: -3px; top: 0; bottom: 0;
