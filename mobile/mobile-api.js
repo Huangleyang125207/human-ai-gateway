@@ -601,6 +601,9 @@
 
   // ── 工具:日期 ───────────────────────────────────────
   function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  // 全角冒号归一:H1 canonical 是全角(# 21：30),AI 工具/UI 常把读到的时间原样回传,
+  // 半角 split(":") 会得到 undefined → 查找 404 / 写入损坏。所有 time 入参先过这里。
+  function normTime(t) { return String(t == null ? "" : t).trim().replace(/：/g, ":"); }
   function todayIso() { var d = new Date(); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
   // 复刻桌面 _writable_dates_set:闭集 {today, yesterday-if-hour<12}。
   // 6.24 抽 daily_tasks_routes 时抓出 mobile L454 是 date>=today 正好反向(放未来/拒昨天)。
@@ -2030,13 +2033,18 @@
       //  · 显式传 author='ai' 用于 lazy 21:30 纸条 / AI tool 写入路径
       //  · J6 missing time → 400 + J7 no journal file → 404(test_insert_block_*)
       var date = (body && body.date) || todayIso();
-      var time = body && body.time;
+      var time = normTime(body && body.time);
       if (!time) return jsonResp({ ok: false, error: "缺 time" }, 400);
+      var tmatch = /^(\d{1,2}):(\d{2})$/.exec(time);
+      if (!tmatch || parseInt(tmatch[1], 10) > 23 || parseInt(tmatch[2], 10) > 59) {
+        return jsonResp({ ok: false, error: "time 格式应为 HH:MM" }, 400);  // 原实现 mm=undefined 会写出损坏 H1 '# 21：undefined'
+      }
       return Store.readJournalMd(date).then(function (md) {
         if (md === null) return jsonResp({ ok: false, error: "no journal file for " + date }, 404);
-        var h = parseInt((time || "0:0").split(":")[0], 10), mm = (time || "0:00").split(":")[1];
+        var h = parseInt(tmatch[1], 10), mm = tmatch[2];
         var author = (body && body.author) || "user";
-        var titlePart = (body.tag ? "#" + body.tag + " " : "") + (body.title || "");
+        var tag = String((body && body.tag) || "").replace(/^#+/, "");  // 对齐桌面 lstrip('#'):UI 传 '#杂',不剥会落成 '## ##杂'
+        var titlePart = (tag ? "#" + tag + " " : "") + (body.title || "");
         var h2 = "## " + titlePart + " @" + author;
         var newH2Block = h2 + "\n\n" + (body.body || "") + "\n";  // H2 跟 body 间空行(对齐 PC golden 字节)
         // ★ dedup:找现有 # h:mm H1,若存在 append H2 到块内(在 --- 前)而不是新建
@@ -2343,7 +2351,7 @@
     },
     "POST /api/journal/append-comment": function (req, u, body) {
       var date = (body && body.date) || todayIso();
-      var time = body && body.time;
+      var time = normTime(body && body.time);
       // 双读 comment_md(PC tool 用)+ comment(mobile spec 用),兼容两端 AI emit
       var comment = body && (body.comment_md || body.comment);
       var author = (body && body.author) || "ai";
@@ -2382,7 +2390,7 @@
       //  · AI tool 调用走 dispatchTool 注入 author='ai',撞 @user 仍拒(fail-safe 桌面 T5
       //    pure-function 等价 = dispatchTool 路径模拟)
       var date = (body && body.date) || todayIso();
-      var time = body && body.time;
+      var time = normTime(body && body.time);
       // J12 test_patch_missing_new_md_400:new_md 必传(空串拒,旧 fallback ""静默通过)
       if (body && body.new_md == null) return jsonResp({ ok: false, error: "缺少新内容" }, 400);
       var newMd = (body && body.new_md) || "";
@@ -2437,7 +2445,7 @@
       });
     },
     "POST /api/journal/delete-block": function (req, u, body) {
-      var date = (body && body.date) || todayIso(), time = body && body.time;
+      var date = (body && body.date) || todayIso(), time = normTime(body && body.time);
       return Store.readJournalMd(date).then(function (md) {
         if (md === null) return jsonResp({ error: "no file" }, 404);
         var pad = pad2(parseInt((time || "0:0").split(":")[0], 10)) + ":" + (time || "0:00").split(":")[1];
