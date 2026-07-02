@@ -103,13 +103,19 @@
       }
       if (mode === 'swipe') { dx = Math.max(-96, Math.min(0, adx)); row.style.transform = `translateX(${dx}px)`; }
     });
-    function up() {
+    function up(e) {
       clearLp(); row.classList.remove('lp-arming');
       if (mode === 'swipe') {
         dragging = false; row.classList.remove('dragging');
         if (dx < -SWIPE_TRIG) { row.style.transform = `translateX(-110%)`; setTimeout(() => GW.deleteEntry(entry, st), 220); }
         else { row.style.transform = ''; }
-      } else if (mode === null) { /* tap */ if (!st.readonly) GW.openCard({ entry: entry, st: st }); }
+      } else if (mode === null) { /* tap */
+        // 正文里的外链归外链 handler(开系统浏览器);tap 手势走 pointer 事件,
+        // click 上的 preventDefault 拦不住这里 — 不让点链接同时弹编辑卡
+        const a = e && e.target && e.target.closest && e.target.closest('a[href]');
+        if (a && /^https?:\/\//i.test(a.getAttribute('href') || '')) return;
+        if (!st.readonly) GW.openCard({ entry: entry, st: st });
+      }
     }
     row.addEventListener('pointerup', up); row.addEventListener('pointercancel', up);
     row.addEventListener('contextmenu', (e) => e.preventDefault());

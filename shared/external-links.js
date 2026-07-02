@@ -14,6 +14,9 @@
       const href = a.href || "";
       if (!/^https?:\/\//i.test(href)) return; // 非 http(s) 不接管
       e.preventDefault();
+      // 接管即独占:不 stopPropagation 的话,正文里的链接点击会同时触发
+      // 行内编辑等 bubble handler(开浏览器 + 整块翻编辑态双动作)
+      e.stopPropagation();
       try {
         const r = await fetch("/api/open-external", {
           method: "POST",
