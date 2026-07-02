@@ -1560,7 +1560,8 @@
       // J3 test_tag_stats_top_and_default_for_new_user:
       //   空 vault → 兜底 5 default tag + default:true
       //   有 day file → 扫 md 统计 ## #tag 出现次数,top limit
-      var DEFAULT_TAGS = ["思考", "探索", "工作", "饮食", "运动"];
+      // 与桌面 journal_routes.py tag-stats 兜底 + 移动 UI 建议列表同一套(改一处必须同步三处)
+      var DEFAULT_TAGS = ["工作", "生活", "健康", "心情", "运动"];
       var limit = parseInt(new URL(u, location.origin).searchParams.get("limit"), 10) || 10;
       return Store.listJournalDates().then(function (dates) {
         if (!dates.length) {

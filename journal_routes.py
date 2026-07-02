@@ -63,7 +63,8 @@ def journal_tag_stats(limit: int = 5):
     没用过任何 tag(新装用户) → 兜底返 5 个默认 tag,带 default=True 标记。
     """
     from server import JOURNAL_DIR
-    DEFAULT_TAGS = ["工作", "饮食", "运动", "探索", "投资"]
+    # 与移动 shim tag-stats 兜底 + 移动 UI 建议列表同一套(改一处必须同步三处)
+    DEFAULT_TAGS = ["工作", "生活", "健康", "心情", "运动"]
     counts = {}
     if JOURNAL_DIR.exists():
         for f in JOURNAL_DIR.glob("*.md"):
