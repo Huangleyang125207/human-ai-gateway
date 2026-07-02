@@ -1099,7 +1099,7 @@
     { type: "function", function: { name: "search_my_uploads",
       description: "按关键词搜索本机已上传的图片。基于图片的描述、分类或品牌标签进行匹配。返回匹配结果数组",
       parameters: { type: "object", properties: {
-        query: { type: "string", description: "如 '鱼油'、'猫'、'截图' 等" },
+        query: { type: "string", description: "如 '维生素'、'猫'、'截图' 等" },
       }, required: ["query"] }},
     },
     { type: "function", function: { name: "ask_photo_curator",

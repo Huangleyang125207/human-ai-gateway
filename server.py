@@ -1221,7 +1221,7 @@ def build_system_prompt(context: dict = None, model_id: str = None) -> str:
         "list_my_uploads / search_my_uploads / ask_photo_curator / web_search / vision_classify / "
         "load_protocol / load_tool_group\n"
         "  · **找照片硬规则**:用户要'回顾/找/汇总/带上 X 的照片' → 先 ask_photo_curator(单 call 返完整集),**别凭记忆/凭训练数据 cite filename**。\n"
-        "    精确 OCR 关键词(发票号/截图文字)才走 search_my_uploads。跨称呼(狗=哈士奇=茅茅) / 模糊语义 / 长期回顾都走 curator。\n"
+        "    精确 OCR 关键词(发票号/截图文字)才走 search_my_uploads。跨称呼(狗=哈士奇=用户起的昵称) / 模糊语义 / 长期回顾都走 curator。\n"
         "    cite filename 前必须经过 list_my_uploads 或 ask_photo_curator 返回 — 没出现在结果里就不存在,不能脑补。\n"
         "  · **找照片回复硬规则**:拿到 items 后每条都要 `![描述](url)` inline 贴出来,文字叙事里可以引用描述,但照片本身必须在 reply 里看得到。光写文字不贴图 = 失败。\n"
         "\n要写 / 改东西,先 load_tool_group(group_name=...):\n"
@@ -2632,7 +2632,7 @@ def _rebuild_curator_system_prompt():
         "结果 > 15 时按时间倒序截到 15,note 写 'truncated, total=N'。无匹配返 matches=[]。",
         "不解释。不复述描述。不评论。**仅 JSON**。",
         "",
-        "跨 terminology 推理: '狗'='哈士奇'='茅茅' (用户家狗) 等需要从 description 推出来。",
+        "跨 terminology 推理: 用户可能用自起的昵称指宠物/物品(比如把自家狗叫'豆豆'),'狗'='豆豆'这类等价要从 description 推出来。",
         "",
     ]
     for month in sorted(by_month.keys()):  # 老在前 = cache 友好

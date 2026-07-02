@@ -417,7 +417,7 @@
     var who = 'me', text = raw.replace(/^[\s-]*#commit\s*/, '').trim();
     if (m) {
       text = m[2].trim();
-      // 模型名 → ai;用户手柄(如 葱鸭)→ me(失败安全默认 me)
+      // 模型名 → ai;用户手柄 → me(失败安全默认 me)
       if (/claude|gpt|opus|sonnet|deepseek|minimax|gemini|\bai\b/i.test(m[1])) who = 'ai';
     }
     return { who: who, text: text, raw: raw };
