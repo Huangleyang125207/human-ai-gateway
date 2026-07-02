@@ -55,6 +55,106 @@
     });
   }
 
+  // ──────────── 0+. thread 持久层守护:损坏 modal + CAS(桌面 5.17/5.26 两条铁律的移动镜像)────────────
+  var threadMtime = null;      // CAS 基线:GET/save 返回的 mtime
+  var threadCorrupt = null;    // 损坏未处理 = {baks};期间禁止 save 覆盖
+
+  function mapThreadMsg(m, i) {
+    // cd 原 schema 已带 kind/who → 直接用;旧 {role, content} → 转 cd
+    if (m && m.kind && m.who) return m;
+    return {
+      kind: 'msg',
+      who: (m.role === 'assistant' || m.who === 'ai') ? 'ai' : 'me',
+      text: m.content || m.text || '',
+      id: m.id || ('t' + (m.ts || (Date.now() + i)))
+    };
+  }
+  function applyThreadHistory(hist) {
+    // 原地替换:st.thread === GW.thread 同一引用,reassign 会断链(gw-app 教训)
+    var arr = (GW.state && GW.state.thread) || GW.thread || [];
+    arr.length = 0;
+    Array.prototype.push.apply(arr, (hist || []).map(mapThreadMsg));
+    GW.thread = arr;
+    return arr;
+  }
+  function reloadThreadFromStore() {
+    return window.fetch('/api/thread/history').then(function (r) { return r.json(); }).then(function (h) {
+      if (h && h.status === 'corrupt') {
+        if (!threadCorrupt) { threadCorrupt = { baks: h.baks || [] }; showThreadCorruptSheet(); }
+        return null;
+      }
+      if (h && h.mtime != null) threadMtime = h.mtime;
+      return applyThreadHistory((h && h.history) || []);
+    });
+  }
+  function saveThread(st, container) {
+    if (threadCorrupt) { try { GW.whisper('对话记录损坏还没处理 · 先不写入'); } catch (e) {} return Promise.resolve(); }
+    return window.fetch('/api/thread/save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ history: st.thread, base_mtime: threadMtime })
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (r.status === 409) {
+          // 陈旧基线 → 放弃本地覆盖,改拉 server(对齐桌面 CAS 行为)
+          console.warn('[bridge] thread save 409 — 放弃覆盖,拉 server 最新');
+          return reloadThreadFromStore().then(function (arr) {
+            if (arr && container && GW.state) { try { GW.renderThread(container, GW.state); } catch (e) {} }
+            try { GW.whisper('对话在别处更新过 · 已同步最新'); } catch (e2) {}
+          });
+        }
+        if (!r.ok) {
+          console.warn('[bridge] thread save 失败', r.status, d);
+          try { GW.whisper('对话没存上 · 稍后再试'); } catch (e) {}
+          return;
+        }
+        if (d && d.mtime != null) threadMtime = d.mtime;
+      });
+    }).catch(function (e) {
+      console.warn('[bridge] thread save 网络失败', e);
+      try { GW.whisper('对话没存上 · 稍后再试'); } catch (e2) {}
+    });
+  }
+  function showThreadCorruptSheet() {
+    if (!GW.root) { setTimeout(showThreadCorruptSheet, 600); return; }  // boot 早于 mount 时等挂载
+    if (typeof GW.mountModal !== 'function') { try { GW.whisper('对话记录损坏 · 已暂停写入保护现场'); } catch (e) {} return; }
+    var baks = (threadCorrupt && threadCorrupt.baks) || [];
+    var sheet = document.createElement('div'); sheet.className = 'gw-sheet';
+    sheet.innerHTML = '<div class="gw-grip"></div>' +
+      '<div class="gw-sheet-head">对话记录文件损坏了<span class="sub">选个处理方式 · 处理前不会写入覆盖</span></div>' +
+      (baks.length ? '<button class="gw-sheet-item" data-act="restore">从最近的备份恢复</button>' : '') +
+      '<button class="gw-sheet-item" data-act="fresh">不要旧记录 · 空白重来</button>';
+    var m = GW.mountModal(sheet);
+    sheet.addEventListener('click', function (e) {
+      var b = e.target.closest('.gw-sheet-item'); if (!b) return;
+      if (b.dataset.act === 'restore') {
+        var idx = (baks[0] && baks[0].index) || 1;
+        window.fetch('/api/thread/restore-from-bak', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bak_index: idx })
+        }).then(function (r) { return r.json(); }).then(function (j) {
+          if (!j || !j.ok) { try { GW.whisper((j && j.error) || '恢复失败 · 试试空白重来'); } catch (e2) {} return; }
+          threadCorrupt = null;
+          if (j.mtime != null) threadMtime = j.mtime;
+          return reloadThreadFromStore().then(function () {
+            try { GW.whisper('已从备份恢复对话'); } catch (e3) {}
+            m.close();
+          });
+        }).catch(function () { try { GW.whisper('恢复失败 · 存储出问题了'); } catch (e4) {} });
+      } else if (b.dataset.act === 'fresh') {
+        threadCorrupt = null;
+        applyThreadHistory([]);
+        // base_mtime=null 首写放行 → 覆盖损坏文件,重建 CAS 基线
+        window.fetch('/api/thread/save', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ history: [], base_mtime: null })
+        }).then(function (r) { return r.json(); }).then(function (j) {
+          if (j && j.mtime != null) threadMtime = j.mtime;
+        }).catch(function () {});
+        m.close();
+      }
+    });
+  }
+
   // ──────────── 1. 真 markdown(替 cd stub)────────────
   if (typeof window.gatewayMd === 'function') {
     GW.gatewayMd = function (s) { return window.gatewayMd(s || ''); };
@@ -187,22 +287,19 @@
     // 旧版本可能存的是 {role, content} 老格式,做 backward compat。
     try {
       var threadData = await safeJson('/api/thread/history');
-      var hist = threadData.history || [];
       if (threadData.status === 'corrupt') {
-        console.warn('[bridge] thread corrupt,cd 端 modal 兜底');
-        hist = [];
+        // 5.17 铁律的移动镜像:损坏绝不能静默当空(原来 hist=[] 无 modal,下一条消息就覆盖全部旧对话)
+        console.warn('[bridge] thread corrupt — 弹恢复选择,期间禁写');
+        if (!threadCorrupt) {
+          threadCorrupt = { baks: threadData.baks || [] };
+          if (!GW.state) GW.thread = [];   // boot:别把 mock 样例当历史;运行中:内存对话保留不动
+          showThreadCorruptSheet();
+        }
+      } else {
+        threadCorrupt = null;
+        if (threadData.mtime != null) threadMtime = threadData.mtime;
+        GW.thread = (threadData.history || []).map(mapThreadMsg);
       }
-      GW.thread = hist.map(function (m, i) {
-        // cd 原 schema 已带 kind/who → 直接用
-        if (m && m.kind && m.who) return m;
-        // 旧 schema {role, content} → 转 cd
-        return {
-          kind: 'msg',
-          who: (m.role === 'assistant' || m.who === 'ai') ? 'ai' : 'me',
-          text: m.content || m.text || '',
-          id: m.id || ('t' + (m.ts || (Date.now() + i)))
-        };
-      });
     } catch (e) { console.warn('[bridge] /api/thread/history 失败,沿用 mock', e); }
 
     // 3e. bind 写操作 bus hook(必须在 prefetch 完才挂,免得 mount 早期误触)
@@ -410,9 +507,9 @@
             } else {
               grindEl.remove();
             }
-            // 保存 thread 到后端 — 直接传 cd 原 schema(含 tool/ref/note 三个 kind)
-            // mobile-api JSON.stringify 存 / parse 读,save 啥 read 啥(L131)
-            postJson('/api/thread/save', { history: st.thread });
+            // 保存 thread 到后端 — 带 base_mtime 走 CAS,409 放弃覆盖改拉 server;
+            // 损坏未处理时 saveThread 拒写(cd 原 schema 含 tool/ref/note 三个 kind,save 啥 read 啥)
+            saveThread(st, container);
             return;
           }
           buffer += decoder.decode(r.value, { stream: true });
