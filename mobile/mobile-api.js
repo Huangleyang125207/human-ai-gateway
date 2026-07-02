@@ -626,11 +626,24 @@
     if (isNaN(b) || isNaN(c)) return false;                          // T5 垃圾值/异类型不误拒
     return b !== c;                                                  // T3/T4/T6: 严格不等 = stale
   }
-  // 第N天:距 2026-05-03(第1天)的日历天数,与桌面 vault 命名同源(实测对齐 6.12=41/6.13=42/6.15=44)。
+  // 第N天:对齐桌面 _get_day_one 语义 — 显式设置 vault_day_one > 最早日记日 > 今天(装机日=第1天)。
+  // 旧实现硬编码 2026-05-03(开发者 vault 起始日):同步过桌面 vault 的设备结果不变(最早文件就是 5.3),
+  // 但全新用户首日会直接"第61天",与桌面同日不同文件名,双端 git 同步必然分叉。
   // 按日历天算,跳过的天也占号(6.14 缺也让 6.15=44),与 file-count 无关。
+  var _dayOneIso = null;   // boot 时(seedPromise 链上)算好缓存;seed 之后算 → 新装用户 = 今天
+  function _initDayOne() {
+    return Store.getSetting("vault_day_one").then(function (explicit) {
+      if (explicit && /^\d{4}-\d{2}-\d{2}$/.test(String(explicit).trim())) { _dayOneIso = String(explicit).trim(); return; }
+      return Store.listJournalDates().then(function (dates) {
+        var ds = (dates || []).filter(function (d) { return /^\d{4}-\d{2}-\d{2}$/.test(d); }).sort();
+        _dayOneIso = ds.length ? ds[0] : todayIso();
+      });
+    }).catch(function () { _dayOneIso = todayIso(); });
+  }
   function dayNum(iso) {
     var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso); if (!m) return null;
-    var anchor = Date.UTC(2026, 4, 3); // 5.3 = 第1天
+    var a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(_dayOneIso || todayIso());
+    var anchor = Date.UTC(+a[1], +a[2] - 1, +a[3]);
     return Math.round((Date.UTC(+m[1], +m[2] - 1, +m[3]) - anchor) / 86400000) + 1;
   }
   // 2026-06-15 → 26.6.15(第44天)(桌面 canonical 文件名,字节一致)
@@ -2609,7 +2622,7 @@
   // ── 启动:seed 后放行(其它脚本 defer,会在 seed 完成后才真正 fetch?
   //    不保证 —— 故 seed 同步触发,fetch 处理是 async 的,首个 today 请求
   //    会 await seed) ──────────────────────────────────
-  var seedPromise = seedIfEmpty();
+  var seedPromise = seedIfEmpty().then(_initDayOne);
   // 让 journal/today 等到 seed 完成
   var _origToday = handlers["GET /api/journal/today"];
   handlers["GET /api/journal/today"] = function (req, u) { return seedPromise.then(function () { return _origToday(req, u); }); };
