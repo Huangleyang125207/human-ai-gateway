@@ -1149,8 +1149,10 @@
       // Group B
       case "append_journal_comment": return fch("/api/journal/append-comment", H).then(function (r) { return r.json(); });
       case "manage_daily_task":
-        var act = (args.action || "add");
-        return fch("/api/daily-tasks/" + (act === "delete" ? "delete" : "add"), H).then(function (r) { return r.json(); });
+        var act = String(args.action || "add").toLowerCase();
+        if (act === "del") act = "delete";   // 桌面同名工具的枚举是 add/edit/del,别把删除意图静默映射成新增
+        if (act !== "add" && act !== "delete") return Promise.resolve({ ok: false, error: "不支持的 action: " + act + "(移动端可用 add / delete)" });
+        return fch("/api/daily-tasks/" + act, H).then(function (r) { return r.json(); });
       case "search_journal":
         return fch("/api/journal/search?query=" + encodeURIComponent(args.query || "") + "&days=" + (args.days || 30))
           .then(function (r) { return r.json(); });
@@ -1602,7 +1604,7 @@
       var description = ((body && body.description) || "").trim();
       var withSub = !!(body && body.with_sub);
       if (!tag) return jsonResp({ ok: false, error: "标签名不能为空" });
-      if (!/^[\w\-一-鿿/]+$/.test(tag)) return jsonResp({ ok: false, error: "标签只能用字母、数字、连字符或中文" + tag });
+      if (!/^[\w\-一-鿿/]+$/.test(tag)) return jsonResp({ ok: false, error: "标签只能用字母、数字、连字符或中文，收到的是: " + tag });
       if (tag.indexOf("/") >= 0) return jsonResp({ ok: false, error: "注册主标签（不包含分类）；分类标签会自动归类" });
       return Store.readTagAggregate().then(function (text) {
         text = (text === null || text === undefined) ? "# 标签聚合\n" : text;
@@ -1972,6 +1974,8 @@
     // 八杯水:落进当天 md 的"喝水"子杯勾选(序号<=filled 勾上),持久化八杯水进度
     "POST /api/daily-tasks/water": function (req, u, body) {
       var date = (body && body.date) || todayIso();
+      // 与 /check 同一道补卡窗口(闭集 {今天, 次日中午前的昨天}):UI readonly 已挡,这里是纵深
+      if (!isWritableDate(date)) return jsonResp({ ok: false, error: "只能记今天的喝水(次日中午前可补昨天)" }, 403);
       var filled = Math.max(0, Math.min(8, (body && body.filled) | 0));
       return Store.readJournalMd(date).then(function (md) {
         if (md === null) return jsonResp({ ok: false, error: "no file" }, 404);
@@ -2434,7 +2438,7 @@
         // 3. authorship boundary:AI 不能 patch @user 块(test_patch_block_ai_refuses_user_block)
         //    占位 H2 "##" 不算任何人所有,AI 可以填入(③ C lazy 纸条写入 21:30 占位块用)
         if (author !== "user" && existingH2 && existingH2.trim() !== "##" && checkAuthor(existingH2) === "user") {
-          return jsonResp({ error: "这个时间段（" + time + " 这部分是你写的，AI 无法修改。要添加批注请用批注功能；要新增内容请用新增功能。" }, 403);
+          return jsonResp({ error: "这个时间段（" + time + "）是你写的，AI 无法修改。要添加批注请用批注功能；要新增内容请用新增功能。" }, 403);
         }
         // 4. H2 mismatch guard(test_patch_rejects_h2_mismatch_by_default + test_patch_allows_h2_rename_with_flag)
         var newH2 = null;
@@ -2447,7 +2451,7 @@
             stripAuthorMarker(existingH2) !== stripAuthorMarker(newH2) &&
             !allowRename) {
           return jsonResp({
-            error: "这个时间段（" + time + " 已有标题:`" + existingH2.trim() + "`。新内容第一个标题是:`" + newH2.trim() + "` — 不一样。修改会整段替换原标题。要新增标题请用新增功能；要改标题请勾选允许重命名。",
+            error: "这个时间段（" + time + "）已有标题:`" + existingH2.trim() + "`。新内容第一个标题是:`" + newH2.trim() + "` — 不一样。修改会整段替换原标题。要新增标题请用新增功能；要改标题请勾选允许重命名。",
             conflict: true,
           }, 409);
         }

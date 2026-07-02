@@ -339,7 +339,7 @@
       function reload(focusTag) {
         return window.fetch('/api/tag-aggregate').then((r) => r.json()).then((d) => {
           sections = (d && d.sections) || [];
-          if (!sections.length) { tabsEl.innerHTML = ''; bodyEl.innerHTML = '<div class="gw-empty">还没有聚合标签。点「新增标签」或在对话中告诉AI。</div>'; return; }
+          if (!sections.length) { tabsEl.innerHTML = ''; bodyEl.innerHTML = '<div class="gw-empty">还没有聚合标签。点「＋ 注册标签」或在对话中告诉AI。</div>'; return; }
           if (focusTag) { const idx = sections.findIndex((s) => s.tag === focusTag); if (idx >= 0) active = idx; }
           if (active >= sections.length) active = 0;
           renderTabs(); renderActive();
