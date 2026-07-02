@@ -398,7 +398,7 @@
 .gw-attach-x { position: absolute; right: 2px; top: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--ink-strong); color: var(--paper-bright); border: 0; cursor: pointer; font: 12px/1 var(--font-sans); display: grid; place-items: center; }
 .gw-chatbar { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: end; background: var(--paper-bright); border: 1px solid var(--line-medium); border-radius: 22px; padding: 6px 7px 6px 12px; }
 .gw-chat-attach { width: 38px; height: 38px; display: grid; place-items: center; background: none; border: 0; cursor: pointer; color: var(--ink-soft); }
-.gw-chat-input { border: 0; outline: none; background: none; resize: none; font: 15px/1.5 var(--font-serif); color: var(--ink-strong); max-height: 96px; min-height: 24px; padding: 7px 0; }
+.gw-chat-input { border: 0; outline: none; background: none; resize: none; font: 15px/1.5 var(--font-serif); color: var(--ink-strong); max-height: 120px; min-height: 24px; padding: 7px 0; }
 .gw-chat-input::placeholder { color: var(--ink-faint); font-style: italic; }
 .gw-chat-send { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--umber); color: var(--paper-bright); border: 0; cursor: pointer; transition: background var(--t-fast); }
 .gw-chat-send:disabled { background: var(--paper-sunken); color: var(--ink-faint); cursor: default; } /* 禁用必须明显,不能只是淡一点 */
