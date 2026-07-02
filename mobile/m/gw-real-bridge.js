@@ -38,11 +38,21 @@
     });
   }
   function postJson(url, body) {
+    // 失败必须可见:静默吞错让「界面显示写上了、盘上没有」成为可能(C1 教训)
     return fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {})
-    }).catch(function () { /* fire-and-forget */ });
+    }).then(function (r) {
+      if (r && !r.ok) {
+        console.warn('[bridge] 写失败', url, r.status);
+        try { GW.whisper('刚才没写进去 · 再试一次'); } catch (e) {}
+      }
+      return r;
+    }).catch(function (e) {
+      console.warn('[bridge] 写失败(网络)', url, e);
+      try { GW.whisper('刚才没写进去 · 再试一次'); } catch (e2) {}
+    });
   }
 
   // ──────────── 1. 真 markdown(替 cd stub)────────────
@@ -85,10 +95,28 @@
       if (!realDays.find(function (x) { return x.iso === realToday; })) {
         realDays.push({ key: isoToKey(realToday), iso: realToday, dow: dowOf(realToday), num: parseInt(realToday.split('-')[2], 10), state: 'today' });
       }
+      // 明天的"+"位:真日期带原本从不产出 creatable(只有 mock 有),pickDay 的创建交互
+      // 在真机永远不可达 — 补上,与 new-day 的「最多建到明天」上限同权
+      var tmD = new Date(); tmD.setDate(tmD.getDate() + 1);
+      var tmIso = tmD.getFullYear() + '-' + pad2(tmD.getMonth() + 1) + '-' + pad2(tmD.getDate());
+      if (!realDays.find(function (x) { return x.iso === tmIso; })) {
+        realDays.push({ key: isoToKey(tmIso), iso: tmIso, dow: dowOf(tmIso), num: parseInt(tmIso.split('-')[2], 10), state: 'creatable' });
+      }
       // 排序:从早到晚
       realDays.sort(function (a, b) { return a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0; });
       GW.days = function () { return realDays; };
     } catch (e) { console.warn('[bridge] /api/journal/days 失败,沿用 mock', e); }
+
+    // 3a+. 当天骨架幂等确保:seed 只在首装跑一次,种子日之后没人建当天 md,
+    //      写操作(落笔/打卡/喝水)会一路 404 且被静默吞掉 → 重启全丢。
+    //      开机建一次,已存在就是 no-op(new-day 幂等)。
+    try {
+      var ndr = await window.fetch('/api/journal/new-day', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: todayIso() })
+      }).then(function (r) { return r.json(); });
+      if (ndr && ndr.created) console.log('[bridge] 今天的日记骨架已创建');
+    } catch (e) { console.warn('[bridge] new-day 确保失败', e); }
 
     // 3b. tasks + water(同一 endpoint 返)
     try {

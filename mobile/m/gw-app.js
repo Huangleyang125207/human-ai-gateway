@@ -179,9 +179,24 @@
     function pickDay(d) {
       if (d.state === 'locked') { GW.whisper('最多只能建到明天（+1）'); return; }
       if (d.state === 'creatable') {
-        GW.journal[d.key] = []; d.state = 'sel'; d._born = true; st.dayKey = d.key; st.tab = 'journal';
-        GW.whisper('明天已创建 · 落了张空骨架'); render();
-        setTimeout(() => { d._born = false; }, 1300);
+        // 先真建 md 再改界面 — 原来只改内存就说「已创建」,盘上没有,之后的写全 404
+        const iso = d.iso || (new Date().getFullYear() + '-' + d.key);
+        window.fetch('/api/journal/new-day', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: iso }) })
+          .then((r) => r.json())
+          .then((j) => {
+            if (!j || j.ok === false) { GW.whisper((j && j.error) || '没建成 · 再点一次'); return; }
+            GW.journal[d.key] = []; d.state = 'sel'; d._born = true; st.dayKey = d.key; st.tab = 'journal';
+            st.dayCatalog = null;
+            GW.whisper('明天已创建 · 落了张空骨架'); render();
+            setTimeout(() => { d._born = false; }, 1300);
+            window.fetch('/api/daily-tasks?date=' + iso).then((r2) => r2.json()).then((j2) => {
+              st.dayCatalog = j2;
+              if (Array.isArray(j2.tasks)) st.tasks = j2.tasks;
+              if (typeof j2.water_filled === 'number') st.water = j2.water_filled;
+              render();
+            }).catch(() => {});
+          })
+          .catch(() => GW.whisper('没建成 · 网络不通'));
         return;
       }
       // FIX D — 同步 render 前清空 dayCatalog,让 readonly 计算回退到 ds==='past' 默认值
@@ -229,7 +244,18 @@
       const send = bottom.querySelector('.gw-chat-send');
       const chips = bottom.querySelector('.gw-attach-chips');
       let pending = [];
-      function refresh() { send.disabled = !(ta.value.trim() || pending.length); ta.style.height = 'auto'; ta.style.height = Math.min(96, ta.scrollHeight) + 'px'; ta.scrollTop = ta.scrollHeight; /* 高度封顶(96px)后顶到最新行,防看不到当前输入 */ }
+      function refresh() {
+        send.disabled = !(ta.value.trim() || pending.length);
+        // ★rAF:iOS WKWebView 逐字输入时,input 事件里同步读 scrollHeight 会拿到布局前的旧值
+        //   → 输入框不随打长高 / 最新一行看不到。推到下一帧量,拿到真实内容高度再设。
+        requestAnimationFrame(function () {
+          ta.style.height = 'auto';
+          var h = Math.min(120, ta.scrollHeight);
+          ta.style.height = h + 'px';
+          ta.style.overflowY = ta.scrollHeight > h ? 'auto' : 'hidden'; // 封顶后内部滚动
+          ta.scrollTop = ta.scrollHeight;                               // 顶到最新行(锁定最下方文字)
+        });
+      }
       ta.addEventListener('input', refresh);
       ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); } });
       function renderChips() {
