@@ -747,24 +747,24 @@
     return lines.join("\n");
   }
 
-  // ── 补剂打卡 + 八杯水:内嵌在当天 md 顶部(# 每日补剂打卡 段,首个时间块前),与桌面 vault 同构 ──
-  // 桌面真源:喝水(8 子杯) + 补剂若干,顶层 - [ ] 名、多粒项带缩进子项。喝水归"八杯水"widget,不进打卡行。
+  // ── 每日打卡 + 八杯水:内嵌在当天 md 顶部(首个时间块前),与桌面 vault 同构 ──
+  // 桌面真源:喝水(8 子杯) + 打卡项若干,顶层 - [ ] 名、多粒项带缩进子项。喝水归"八杯水"widget,不进打卡行。
   var SUPP_TOP = /^(- \[)([ xX])(\]\s+)(.+?)(\s*)$/;    // 顶层项 - [ ] 名
   var SUPP_SUB = /^(\s+- \[)([ xX])(\]\s+)(.+?)(\s*)$/; // 缩进子项 - [ ] N
   function suppRegionEnd(lines) { // 补剂段下界 = 首个时间块行号
     for (var i = 0; i < lines.length; i++) if (TIME_H1_RE.test(lines[i])) return i;
     return lines.length;
   }
-  function suppTemplate() { // 与桌面 SCHEDULE_TEMPLATE 同源(本 vault 定制)
+  function suppTemplate() {
+    // 与桌面 server.py _new_day_create 的 fallback top_section 字节同源 —
+    // 两端全新安装长出同一份初始 md(改一边必须同步另一边)。
+    // 注意:不带尾部 ---/换行,分隔符由 emptyDayMd/seed 按桌面 join 语义补。
     return [
-      "# 每日补剂打卡", "",
+      "# 每日打卡", "",
+      "<!-- 想加打卡项(运动 / 阅读 / 冥想 / 补剂...)?跟 AI 说一声就行 -->", "",
       "- [ ] 喝水",
       "  - [ ] 1", "  - [ ] 2", "  - [ ] 3", "  - [ ] 4", "  - [ ] 5", "  - [ ] 6", "  - [ ] 7", "  - [ ] 8",
-      "- [ ] 维生素", "  - [ ] 1", "  - [ ] 2",
-      "- [ ] 矿物质",
-      "- [ ] 蛋白质补剂",
-      "- [ ] 草本补充",
-      "", "---", "", "",
+      "- [ ] (添加你的第一个打卡项)",
     ].join("\n");
   }
   function parseSupplements(dayMd) { // 顶层补剂项(排除"喝水")→ 打卡行
@@ -896,17 +896,18 @@
     }).catch(function () { return ""; });
   }
 
-  // ── 空白一天模板(补剂段 + 半小时格) ───────────────────
+  // ── 空白一天模板(打卡段 + 半小时格)— 复刻桌面 _new_day_create 生成算法,输出字节一致 ──
   function emptyDayMd() {
-    var out = [], h, mm, mins = ["00", "30"];
-    for (h = 7; h <= 23; h++) {
-      for (var k = 0; k < mins.length; k++) {
-        mm = mins[k];
-        if (h === 23 && mm === "30") continue;
-        out.push("# " + h + "：" + mm, "", "##", "", "---", "");
+    var parts = [suppTemplate(), "\n---"];
+    for (var h = 7; h <= 22; h++) {
+      for (var k = 0; k < 2; k++) {
+        var mm = k === 0 ? "00" : "30";
+        if (h === 7 && mm === "00") continue;   // 桌面同源:7:00 没有,7:30 起
+        parts.push("\n# " + h + "：" + mm + "\n\n##\n\n---");
       }
     }
-    return suppTemplate() + out.join("\n");
+    parts.push("\n# 23：00\n\n##\n");
+    return parts.join("\n");
   }
 
   // ── 首次启动:seed 示例数据(合成,非真日记) ───────────
@@ -914,7 +915,7 @@
     return Store.listJournalDates().then(function (dates) {
       if (dates.length) return;
       var today = todayIso();
-      var sample = suppTemplate() + [
+      var sample = suppTemplate() + "\n\n---\n\n" + [
         "# 9：00", "", "## #生活 记录今天的一件小事", "",
         "今早做了件让自己满意的事。**意义**:把想法落到了行动上。", "", "---", "",
         "# 13：00", "", "## #工作 完成一项任务", "",
