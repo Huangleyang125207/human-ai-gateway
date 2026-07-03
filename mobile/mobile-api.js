@@ -1010,11 +1010,13 @@
   // 授权后才解锁的工具 schema(不进常驻 TOOL_SPECS)
   var CAP_TOOL_SPECS = {
     read_steps: { type: "function", function: { name: "read_steps",
-      description: "读取用户今日步数(手机计步传感器)。返回 {steps, since, approximate};approximate=true 表示首日/重启后从当下起算的近似值,回答时说明「大约」",
-      parameters: { type: "object", properties: {} } } },
+      description: "当用户提到与步数、走路、跑步、运动量相关的话题时调用。返回 {today: 当天累计步数, recent: 最近数小时分时步数(旧→新)} — recent 可用来判断用户开始某项运动的时间点或做当天统计。iOS 分时按整点精确;Android 是使用时打点的采样区间,可能稀疏或为空。approximate=true 时数值是近似的,回答带「大约」",
+      parameters: { type: "object", properties: {
+        hours: { type: "integer", description: "回看最近几小时的分时数据,默认 6,最大 12" },
+      } } } },
   };
   var REQUEST_CAP_SPEC = { type: "function", function: { name: "request_capability",
-    description: "为你解锁一项手机能力。调用会【直接弹出系统授权框】打断用户 — 只在用户明确想用该能力、且你已在对话里说了一句之后调用。granted 后对应工具下一轮可用;denied 则不要重复申请,告诉用户可去系统设置手动开启",
+    description: "当用户提到与某项手机能力相关的话题(如问步数/运动量)、而该能力尚未接入时使用:先在对话里说一句,再调用 — 会【直接弹出系统授权框】。granted 后对应工具下一轮可用;denied 则不要重复申请,告诉用户可去 设置→能力 或系统设置手动开启",
     parameters: { type: "object", properties: {
       capability: { type: "string", "enum": ["health.steps"], description: "能力 id" },
     }, required: ["capability"] } } };
@@ -1260,9 +1262,15 @@
         for (var _sc = 0; _sc < CAPS.length; _sc++) if (CAPS[_sc].id === "health.steps") _stepCap = CAPS[_sc];
         return capProbe(_stepCap).then(function (s) {
           if (s !== "granted") return { ok: false, error: "步数未授权(" + s + ")" };
-          return _capPlugin(_stepCap).today()
-            .then(function (r) { return { ok: true, steps: r.steps, since: r.since, source: r.source, approximate: !!r.approximate }; })
-            .catch(function (e) { return { ok: false, error: String((e && e.message) || e) }; });
+          var _pl = _capPlugin(_stepCap);
+          var _hours = Math.max(1, Math.min(12, parseInt(args && args.hours, 10) || 6));
+          var _p = _pl.stats ? _pl.stats({ hours: _hours }) : _pl.today();  // 旧原生包无 stats → 退化为仅当日
+          return _p.then(function (r) {
+            var out = { ok: true, today: (r.today != null ? r.today : r.steps), since: r.since,
+                        source: r.source, approximate: !!r.approximate, recent: r.recent || [] };
+            if (!out.recent.length) out.note = "分时数据暂无(Android 依赖 app 使用中打点采样,刚接入时为空)";
+            return out;
+          }).catch(function (e) { return { ok: false, error: String((e && e.message) || e) }; });
         });
       }
       case "vision_classify": return fch("/api/vision/classify", H).then(function (r) { return r.json(); });
