@@ -280,19 +280,26 @@
       const send = bottom.querySelector('.gw-chat-send');
       const chips = bottom.querySelector('.gw-attach-chips');
       let pending = [];
+      function autosize() {
+        ta.style.height = 'auto';
+        var h = Math.min(120, ta.scrollHeight);
+        ta.style.height = h + 'px';
+        ta.style.overflowY = ta.scrollHeight > h ? 'auto' : 'hidden'; // 封顶后内部滚动
+        ta.scrollTop = ta.scrollHeight;                               // 顶到最新行(锁定最下方文字)
+      }
       function refresh() {
         send.disabled = !(ta.value.trim() || pending.length);
-        // ★rAF:iOS WKWebView 逐字输入时,input 事件里同步读 scrollHeight 会拿到布局前的旧值
-        //   → 输入框不随打长高 / 最新一行看不到。推到下一帧量,拿到真实内容高度再设。
-        requestAnimationFrame(function () {
-          ta.style.height = 'auto';
-          var h = Math.min(120, ta.scrollHeight);
-          ta.style.height = h + 'px';
-          ta.style.overflowY = ta.scrollHeight > h ? 'auto' : 'hidden'; // 封顶后内部滚动
-          ta.scrollTop = ta.scrollHeight;                               // 顶到最新行(锁定最下方文字)
-        });
+        // 双通道量高:同步一次(Android 立即生效),下一帧再校正一次
+        // (iOS WKWebView 逐字输入时 input 事件里同步读 scrollHeight 是布局前旧值)
+        autosize();
+        requestAnimationFrame(autosize);
       }
       ta.addEventListener('input', refresh);
+      // Android 中文输入法组字期间不发 input(只发 composition*)→ 打长了不扩展、
+      // 删字(组字外,input 正常)才突然追平 — vivo 真机实测。三个事件都接,refresh 幂等无害。
+      ta.addEventListener('compositionupdate', refresh);
+      ta.addEventListener('compositionend', refresh);
+      ta.addEventListener('keyup', refresh);
       ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); } });
       function renderChips() {
         chips.hidden = !pending.length;
