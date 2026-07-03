@@ -181,18 +181,23 @@
       if (st.tab === 'journal') buildDateband(top.querySelector('.gw-dateband'));
       // 左右滑切最上方菜单:左滑→日记,右滑→对话。手势只认顶栏区,
       // 起点落在日期带上不接(它自己要横向滚动)
+      // 用 touch 事件而非 pointer:WebView 会把横滑判给滚动发 pointercancel,
+      // pointerup 永远不来(logcat 实锤);touchend 照发。配合 CSS touch-action:pan-y
+      // (顶栏横向手势归我们,纵向仍归滚动)。
       let swx = null, swy = null;
-      top.addEventListener('pointerdown', (e) => {
-        swx = e.clientX; swy = e.clientY;
+      top.addEventListener('touchstart', (e) => {
+        const t0 = e.touches[0]; if (!t0) return;
+        swx = t0.clientX; swy = t0.clientY;
         if (e.target.closest('.gw-dateband')) swx = null;
-      });
-      top.addEventListener('pointerup', (e) => {
+      }, { passive: true });
+      top.addEventListener('touchend', (e) => {
         if (swx == null) return;
-        const dx = e.clientX - swx, dy = e.clientY - swy; swx = null;
-        if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+        const t0 = e.changedTouches[0]; if (!t0) { swx = null; return; }
+        const dx = t0.clientX - swx, dy = t0.clientY - swy; swx = null;
+        if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
         const want = dx < 0 ? 'journal' : 'chat';
         if (want !== st.tab) { st.tab = want; render(); }
-      });
+      }, { passive: true });
       return top;
     }
 
@@ -295,11 +300,19 @@
         requestAnimationFrame(autosize);
       }
       ta.addEventListener('input', refresh);
-      // Android 中文输入法组字期间不发 input(只发 composition*)→ 打长了不扩展、
-      // 删字(组字外,input 正常)才突然追平 — vivo 真机实测。三个事件都接,refresh 幂等无害。
-      ta.addEventListener('compositionupdate', refresh);
       ta.addEventListener('compositionend', refresh);
-      ta.addEventListener('keyup', refresh);
+      // ★vivo(等 OEM)输入法组字期间对 JS 零事件:预览文字直接画进 textarea,
+      //   整句上屏才发唯一一个 input(logcat 实锤:len=28 一次跳出,期间无任何事件)。
+      //   没有事件可听 → 聚焦期间轻量轮询,只在"内容高于框且未到上限"时校正
+      //   (到上限后内部滚动,不再动高度,免得跟用户往回翻的滚动打架)。
+      let growT = null;
+      ta.addEventListener('focus', () => {
+        if (growT) clearInterval(growT);
+        growT = setInterval(() => {
+          if (ta.clientHeight < 120 && ta.scrollHeight > ta.clientHeight) autosize();
+        }, 160);
+      });
+      ta.addEventListener('blur', () => { if (growT) { clearInterval(growT); growT = null; } });
       ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); } });
       function renderChips() {
         chips.hidden = !pending.length;

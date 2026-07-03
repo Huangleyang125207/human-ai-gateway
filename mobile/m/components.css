@@ -85,6 +85,9 @@
 /* ═══ 2 · 顶栏 + 日期带 ═══ */
 .gw-top {
   position: sticky; top: 0; z-index: 5; flex: none;
+  /* 横向手势归我们(左右滑切 tab),纵向仍归页面滚动 — 不设的话 WebView 把横滑判给滚动,
+     发 pointercancel 吞掉手势(vivo 真机 logcat 实锤) */
+  touch-action: pan-y;
   /* 顶栏 nav 推到 iOS 真状态栏下方(替删掉的 cd .gw-statusbar 假状态栏占位)*/
   padding: calc(var(--safe-top) + 6px) 0 10px;
   background: linear-gradient(to bottom, var(--paper-base) 78%, transparent);
