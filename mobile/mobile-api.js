@@ -53,16 +53,53 @@
   // ★ catch 不吞 write 错 — 之前 .catch(()=>{}) 让 setText 在 plugin fail 时假装 success,
   //   导致 saveKey 返 ok:true 但 storage 空。现在 reject 让 caller 看到真错。
   var CapacitorBackend = {
+    // ── 日记文件名迁移守护:文件名内嵌"第N天",dayNum 锚点改变(硬编码→动态)后,
+    //    同一 iso 的 canonical 文件名会变 → 旧文件读不到、写入开叉文件(iOS 真机实锤:
+    //    26.7.3(第62天).md 与 26.7.3(第1天).md 并存)。读写前按 iso 语义解析,
+    //    命中旧名就惰性 rename 到 canonical。 ──
+    _findJournalAlt: function (iso) {
+      var fs = _getFs(); if (!fs) return Promise.resolve(null);
+      return fs.readdir({ path: "gw/journal", directory: DIR }).then(function (r) {
+        var files = (r && r.files) || [];
+        for (var i = 0; i < files.length; i++) {
+          var n = typeof files[i] === "string" ? files[i] : files[i].name;
+          if (!/\.md$/.test(n)) continue;
+          if (stemToIso(n.replace(/\.md$/, "")) === iso) return "gw/journal/" + n;
+        }
+        return null;
+      }).catch(function () { return null; });
+    },
+    _canonJournal: function (iso) {
+      var fs = _getFs(); var want = capPath("journal/" + iso);
+      return fs.stat({ path: want, directory: DIR }).then(function () { return want; }).catch(function () {
+        return CapacitorBackend._findJournalAlt(iso).then(function (alt) {
+          if (!alt) return want;   // 没有旧命名文件 → canonical 即目标(可能尚不存在)
+          return fs.rename({ from: alt, to: want, directory: DIR, toDirectory: DIR })
+            .then(function () { return want; })
+            .catch(function () { return alt; });  // rename 失败原地用旧名,不丢数据
+        });
+      });
+    },
     getText: function (k) {
       var prefs = _getPrefs(), fs = _getFs();
       if (k.indexOf("setting/") === 0 && prefs) return prefs.get({ key: k.slice(8) }).then(function (r) { return r && r.value != null ? r.value : null; }).catch(function () { return null; });
       if (!fs) return Promise.resolve(null);
+      if (k.indexOf("journal/") === 0) {
+        return CapacitorBackend._canonJournal(k.slice(8)).then(function (p) {
+          return fs.readFile({ path: p, directory: DIR, encoding: "utf8" }).then(function (r) { return r.data; }).catch(function () { return null; });
+        });
+      }
       return fs.readFile({ path: capPath(k), directory: DIR, encoding: "utf8" }).then(function (r) { return r.data; }).catch(function () { return null; });
     },
     setText: function (k, v) {
       var prefs = _getPrefs(), fs = _getFs();
       if (k.indexOf("setting/") === 0 && prefs) return prefs.set({ key: k.slice(8), value: v });
       if (!fs) return Promise.reject(new Error("存储不可用"));
+      if (k.indexOf("journal/") === 0) {
+        return CapacitorBackend._canonJournal(k.slice(8)).then(function (p) {
+          return fs.writeFile({ path: p, data: v, directory: DIR, encoding: "utf8", recursive: true });
+        });
+      }
       return fs.writeFile({ path: capPath(k), data: v, directory: DIR, encoding: "utf8", recursive: true });
     },
     remove: function (k) {
@@ -77,7 +114,16 @@
       if (prefix.indexOf("journal/") === 0) {
         return fs.readdir({ path: "gw/journal", directory: DIR }).then(function (r) {
           var files = (r && r.files) || [];
-          return files.map(function (f) { var n = typeof f === "string" ? f : f.name; return "journal/" + stemToIso(n.replace(/\.md$/, "")); });
+          var seen = {}, out = [];
+          for (var i = 0; i < files.length; i++) {
+            var n = typeof files[i] === "string" ? files[i] : files[i].name;
+            if (!/\.md$/.test(n)) continue;                     // 迁移残留/非日记不进列表
+            var iso = stemToIso(n.replace(/\.md$/, ""));
+            if (seen[iso]) continue;                            // 同 iso 双文件(锚点迁移孤儿)去重
+            seen[iso] = true;
+            out.push("journal/" + iso);
+          }
+          return out;
         }).catch(function () { return []; });
       }
       return Promise.resolve([]);
