@@ -33,7 +33,7 @@
 
   /* ════ DAY · 米黄纸(默认)════ */
   /* 纸面(从最底到最亮) */
-  --paper-base:   #f3e9d6;   /* 页面最底 */
+  --paper-base:   #f4ede2;   /* 页面最底 —— 对齐 PC 端 style.css --bg(#f4ede2)+ 原生壳 backgroundColor */
   --paper-raised: #f9f2e5;   /* 微微浮起(widget / entry 呼吸) */
   --paper-bright: #fefaf2;   /* 最亮纸(信笺 / sheet / 纸条) */
   --paper-sunken: #ebe0ca;   /* 凹陷(输入底 / 占位) */
