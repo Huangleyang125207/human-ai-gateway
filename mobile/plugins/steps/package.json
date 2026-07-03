@@ -1,0 +1,21 @@
+{
+  "name": "capacitor-steps",
+  "version": "0.0.1",
+  "description": "步数 · iOS CoreMotion CMPedometer(精确当日) + Android TYPE_STEP_COUNTER 传感器(基线近似,不依赖 Google 服务/Health Connect,国行 ROM 可用)。能力注册表(health.steps)的原生底座:probe/request/today 三方法。",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "types": "src/index.d.ts",
+  "files": [
+    "src/",
+    "ios/",
+    "android/",
+    "CapacitorSteps.podspec"
+  ],
+  "capacitor": {
+    "ios": { "src": "ios" },
+    "android": { "src": "android" }
+  },
+  "peerDependencies": {
+    "@capacitor/core": "^6.0.0"
+  }
+}

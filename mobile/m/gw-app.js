@@ -419,6 +419,10 @@
           <div class="gw-row"><div><div class="gw-row-title">呼吸暖光</div><div class="gw-row-desc">页面背后那束慢慢起伏的光。</div></div><div class="gw-toggle on"></div></div>
           <div class="gw-row"><div><div class="gw-row-title">减少动效</div><div class="gw-row-desc">关掉呼吸、墨迹、纸页翻动。</div></div><div class="gw-toggle"></div></div>
         </div>
+        <div class="gw-set-sec"><div class="gw-set-sec-lab">能力 · 手机上它能看到什么</div>
+          <div class="gw-row"><div><div class="gw-row-title">步数 <span class="gw-cap-status" data-cap="health.steps" style="opacity:.55;font-size:.82em">查询中…</span></div><div class="gw-row-desc">让 AI 看到你今天走了多少步。点「开启」弹系统授权；AI 也可在对话里替你申请。</div></div>
+            <button class="gw-key-test gw-cap-btn" data-cap="health.steps">开启</button></div>
+        </div>
         <div class="gw-set-sec"><div class="gw-set-sec-lab">告诉我们你想要</div>
           <button class="gw-want">${GW.ICON.nib} 我想要新功能 / 新视觉</button>
           <div class="gw-want-sub">跳进对话告诉 AI，我们一起想。</div>
@@ -427,6 +431,30 @@
       s.querySelector('#skin').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; st.theme = b.dataset.t; render(); });
       s.querySelectorAll('.gw-toggle').forEach((t) => t.addEventListener('click', () => t.classList.toggle('on')));
       s.querySelector('.gw-want').addEventListener('click', () => { st.subPage = null; st.tab = 'chat'; render(); setTimeout(() => { const ta = gw.querySelector('.gw-chat-input'); if (ta) { ta.value = '我想要'; ta.focus(); ta.dispatchEvent(new Event('input')); } }, 60); });
+
+      // ── 能力注册表:probe → 状态;点「开启」→ 系统授权框(与 AI 的 request_capability 同一入口)──
+      const capText = { granted: '已接入', denied: '被拒 · 去系统设置开', undetermined: '未接入', unavailable: '本机不可用' };
+      function capRefresh() {
+        const P = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Steps;
+        const stEl = s.querySelector('.gw-cap-status[data-cap="health.steps"]');
+        const btn = s.querySelector('.gw-cap-btn[data-cap="health.steps"]');
+        if (!P) { if (stEl) stEl.textContent = capText.unavailable; if (btn) btn.disabled = true; return; }
+        P.probe().then((r) => {
+          const state = (r && r.state) || 'unavailable';
+          if (stEl) stEl.textContent = capText[state] || state;
+          if (btn) { btn.disabled = state === 'granted' || state === 'unavailable'; btn.textContent = state === 'granted' ? '已开启' : '开启'; }
+        }).catch(() => { if (stEl) stEl.textContent = capText.unavailable; });
+      }
+      const capBtn = s.querySelector('.gw-cap-btn[data-cap="health.steps"]');
+      if (capBtn) capBtn.addEventListener('click', () => {
+        const P = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Steps;
+        if (!P) return;
+        P.request().then((r) => {
+          capRefresh();
+          GW.whisper((r && r.state) === 'granted' ? '步数已接入' : '没开成 · ' + (capText[r && r.state] || '出了点问题'));
+        }).catch(() => GW.whisper('没开成 · 出了点问题'));
+      });
+      capRefresh();
 
       // ── key state hydrate + bind(新增)──
       function maskKey(k) { if (!k) return ''; const s = String(k); if (s.length < 8) return '••••'; return s.slice(0, 3) + '••••' + s.slice(-4); }

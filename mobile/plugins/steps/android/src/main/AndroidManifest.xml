@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 身体活动(计步传感器)运行时权限,Android 10(Q)+ 需要;merge 进 app manifest -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
+</manifest>

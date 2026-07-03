@@ -977,6 +977,48 @@
   }
   // ── Tool calling — Group A 7 个 mobile 本机 endpoint 对应 tool ──
   // OpenAI-compatible function calling spec(DeepSeek 同协议)
+  // ── 能力注册表:系统权限 ↔ LLM 工具面 ────────────────────────
+  // 原则:模型看到的工具集 = 用户已授权能力的投影。三层门:
+  //   ① chat 组装时按 probe 过滤(未授权的工具 schema 不进上下文)
+  //   ② dispatchTool 执行前复查(防对话中途去系统设置撤权)
+  //   ③ sys 提示只列真实状态
+  // 用户已拍板:request_capability 直接弹系统授权框(最终允许/拒绝仍只能用户在系统框上点)。
+  var CAPS = [
+    { id: "health.steps", label: "步数", plugin: "Steps", tools: ["read_steps"] },
+  ];
+  function _capPlugin(cap) {
+    var P = (typeof window !== "undefined") && window.Capacitor && window.Capacitor.Plugins;
+    return (P && P[cap.plugin]) || null;
+  }
+  function capProbe(cap) { // → 'granted'|'denied'|'undetermined'|'unavailable'
+    var p = _capPlugin(cap);
+    if (!p || !p.probe) return Promise.resolve("unavailable");
+    return p.probe().then(function (r) { return (r && r.state) || "unavailable"; })
+      .catch(function () { return "unavailable"; });
+  }
+  function capRequest(cap) {
+    var p = _capPlugin(cap);
+    if (!p || !p.request) return Promise.resolve("unavailable");
+    return p.request().then(function (r) { return (r && r.state) || "unavailable"; })
+      .catch(function () { return "unavailable"; });
+  }
+  function capStates() { // 全表状态快照 [{cap, state}]
+    return Promise.all(CAPS.map(function (c) {
+      return capProbe(c).then(function (s) { return { cap: c, state: s }; });
+    }));
+  }
+  // 授权后才解锁的工具 schema(不进常驻 TOOL_SPECS)
+  var CAP_TOOL_SPECS = {
+    read_steps: { type: "function", function: { name: "read_steps",
+      description: "读取用户今日步数(手机计步传感器)。返回 {steps, since, approximate};approximate=true 表示首日/重启后从当下起算的近似值,回答时说明「大约」",
+      parameters: { type: "object", properties: {} } } },
+  };
+  var REQUEST_CAP_SPEC = { type: "function", function: { name: "request_capability",
+    description: "为你解锁一项手机能力。调用会【直接弹出系统授权框】打断用户 — 只在用户明确想用该能力、且你已在对话里说了一句之后调用。granted 后对应工具下一轮可用;denied 则不要重复申请,告诉用户可去系统设置手动开启",
+    parameters: { type: "object", properties: {
+      capability: { type: "string", "enum": ["health.steps"], description: "能力 id" },
+    }, required: ["capability"] } } };
+
   var TOOL_SPECS = [
     { type: "function", function: { name: "patch_journal_block", description: "修改某个时间块的内容并替换标题和正文。修改标题时需明确传递 allow_h2_rename 参数为 true",
       parameters: { type: "object", properties: {
@@ -1201,6 +1243,28 @@
         });
       case "web_search": return fch("/api/web/search", H).then(function (r) { return r.json(); });
       case "fetch_url": return fch("/api/web/fetch", H).then(function (r) { return r.json(); });
+      // ── 能力注册表工具(门第二层:执行前复查授权,防中途撤权)──
+      case "request_capability": {
+        var _reqCap = null;
+        for (var _rc = 0; _rc < CAPS.length; _rc++) if (CAPS[_rc].id === (args && args.capability)) _reqCap = CAPS[_rc];
+        if (!_reqCap) return Promise.resolve({ ok: false, error: "未知能力: " + (args && args.capability) });
+        return capRequest(_reqCap).then(function (s) {
+          return { ok: s === "granted", capability: _reqCap.id, state: s,
+            note: s === "granted" ? "已授权,对应工具下一轮对话可用"
+              : s === "denied" ? "被拒绝(或系统不再弹框)。不要重复申请;告诉用户可去 设置→能力 或系统设置手动开启"
+              : "未能授权(" + s + ")" };
+        });
+      }
+      case "read_steps": {
+        var _stepCap = null;
+        for (var _sc = 0; _sc < CAPS.length; _sc++) if (CAPS[_sc].id === "health.steps") _stepCap = CAPS[_sc];
+        return capProbe(_stepCap).then(function (s) {
+          if (s !== "granted") return { ok: false, error: "步数未授权(" + s + ")" };
+          return _capPlugin(_stepCap).today()
+            .then(function (r) { return { ok: true, steps: r.steps, since: r.since, source: r.source, approximate: !!r.approximate }; })
+            .catch(function (e) { return { ok: false, error: String((e && e.message) || e) }; });
+        });
+      }
       case "vision_classify": return fch("/api/vision/classify", H).then(function (r) { return r.json(); });
       case "ocr_image":
         // 内部走 vision_classify + extra_question(对齐 critic plan 设计)
@@ -1332,10 +1396,30 @@
     // last_actions 累积:tool dispatch 成功 push;失败 / capped 不算"真动作"
     // 用于 emit "done" 前的 claim audit(actions 空 + claim 措辞 → 加 disclaimer)
     var lastActions = [];
-    return Store.readJournalMd(todayIso()).then(function (todayMd) {
+    return Promise.all([Store.readJournalMd(todayIso()), capStates()]).then(function (_rs) {
+      var todayMd = _rs[0], capSnap = _rs[1];
+      // 能力门第一层:已授权 → 工具 schema 进上下文;可申请 → 只给 request_capability
+      var capTools = [], capOn = [], capOff = [];
+      for (var _ci = 0; _ci < capSnap.length; _ci++) {
+        var _cs = capSnap[_ci];
+        if (_cs.state === "granted") {
+          capOn.push(_cs.cap.label);
+          for (var _ti = 0; _ti < _cs.cap.tools.length; _ti++) {
+            if (CAP_TOOL_SPECS[_cs.cap.tools[_ti]]) capTools.push(CAP_TOOL_SPECS[_cs.cap.tools[_ti]]);
+          }
+        } else if (_cs.state === "undetermined" || _cs.state === "denied") {
+          capOff.push(_cs.cap.label + "(" + _cs.cap.id + ")");
+        }
+      }
+      if (capOff.length) capTools.push(REQUEST_CAP_SPEC);
+      var toolsForRun = TOOL_SPECS.concat(capTools);
       var sys = "你是用户的日记协作 AI,语气温和、像深夜台灯下说话。\n\n" +
         "这是今天的日记:\n\n" + (todayMd || "(今天还没写)") +
         "\n\n你有以下工具可用 — 改日记/打卡/换图标时调对应 tool;只聊天回应不调 tool。";
+      if (capOn.length || capOff.length) {
+        sys += "\n\n手机能力:已接入 " + (capOn.join("、") || "无") +
+          (capOff.length ? ";未接入 " + capOff.join("、") + " — 用户想用时可调 request_capability(会直接弹系统授权框,弹前先跟用户说一句)" : "");
+      }
       // ★ 对话框贴图:用户这条消息带了图(refs)→ 给 AI attachment_url + place 指引(对照 PC vision-pre-router)
       var _refs = (body && body.refs) || [];
       if (_refs.length) {
@@ -1361,7 +1445,7 @@
         }
         var lastRound = round === maxRounds - 1;
         var payload = { model: model || "deepseek-chat", messages: messages, stream: false };
-        if (!lastRound) { payload.tools = TOOL_SPECS; payload.tool_choice = "auto"; }
+        if (!lastRound) { payload.tools = toolsForRun; payload.tool_choice = "auto"; }
         var fetchPromise;
         if (CapHttp) {
           fetchPromise = CapHttp.post({ url: url, headers: headers, data: payload, connectTimeout: 15000, readTimeout: 90000 })
