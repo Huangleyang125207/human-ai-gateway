@@ -58,6 +58,28 @@
     });
   };
 
+  /* 取图入口双选:拍一张(直调相机) / 从相册选。类名对齐 R2 设计稿(gw-attach-pick),
+     组装阶段只换皮。mountModal 不在(极早期)则退化为直接开相册。取消返 null。 */
+  GW.pickPhotoVia = function () {
+    return new Promise((resolve) => {
+      if (typeof GW.mountModal !== 'function') { GW.pickPhoto().then(resolve); return; }
+      const sheet = document.createElement('div'); sheet.className = 'gw-sheet gw-attach-pick';
+      sheet.innerHTML = `<div class="gw-grip"></div>
+        <div class="gw-sheet-head">来一张<span class="sub">拍新的,或翻已有的</span></div>
+        <button class="gw-sheet-item gw-attach-pick-item" data-src="camera"><span class="glyph">拍</span>拍一张</button>
+        <button class="gw-sheet-item gw-attach-pick-item" data-src="album"><span class="glyph">选</span>从相册选</button>`;
+      let picked = false;
+      const m = GW.mountModal(sheet, { onClose: () => { if (!picked) resolve(null); } });
+      sheet.addEventListener('click', (e) => {
+        const b = e.target.closest('.gw-attach-pick-item'); if (!b) return;
+        picked = true;
+        m.close();
+        // 等 sheet 收起再拉 input:file picker 与 modal 关闭动画抢焦点会吞 change 事件
+        setTimeout(() => { GW.pickPhoto({ camera: b.dataset.src === 'camera' }).then(resolve); }, 480);
+      });
+    });
+  };
+
   const MENU = [
     { id: 'settings', glyph: 'settings', label: '设置', desc: '钥匙 · 模型 · 皮肤' },
     { id: 'aggregate', glyph: 'layers', label: '聚合页', desc: '按 #标签 横切' },
@@ -263,9 +285,9 @@
         chips.innerHTML = pending.map((u, i) => `<div class="gw-attach-chip"><img src="${u}"><button class="gw-attach-x" data-i="${i}">×</button></div>`).join('');
         chips.querySelectorAll('.gw-attach-x').forEach((x) => x.addEventListener('click', () => { pending.splice(+x.dataset.i, 1); renderChips(); refresh(); }));
       }
-      // ★ 真选图(对照 PC 对话框贴图):chatbar 附件 → WKWebView file picker → dataURL
+      // ★ 真选图(对照 PC 对话框贴图):chatbar 附件 → 双选(拍一张/从相册选) → dataURL
       bottom.querySelector('.gw-chat-attach').addEventListener('click', async () => {
-        const dataUrl = await GW.pickPhoto();
+        const dataUrl = await GW.pickPhotoVia();
         if (!dataUrl) return;
         pending.push(dataUrl);
         renderChips();

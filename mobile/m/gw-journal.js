@@ -267,7 +267,7 @@
 
   /* ★招牌:换图标 — 取图 → 端侧抠图(iOS 17+ Vision)→ /api/cutout(顺带 OCR 颗数 + 写图标)→ 重画 chip */
   GW.setTaskIcon = async function (task) {
-    const dataUrl = await GW.pickPhoto();
+    const dataUrl = await GW.pickPhotoVia();
     if (!dataUrl) return;                       // 用户取消
     GW.whisper('处理中…', true);            // 等待禁 spinner,用文字
     let icon = dataUrl;
