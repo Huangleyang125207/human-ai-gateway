@@ -179,6 +179,20 @@
       const _ring = top.querySelector('.gw-compact-ring');
       if (_ring) { _ring.addEventListener('click', () => runCompact()); setTimeout(updateCompactRing, 0); }
       if (st.tab === 'journal') buildDateband(top.querySelector('.gw-dateband'));
+      // 左右滑切最上方菜单:左滑→日记,右滑→对话。手势只认顶栏区,
+      // 起点落在日期带上不接(它自己要横向滚动)
+      let swx = null, swy = null;
+      top.addEventListener('pointerdown', (e) => {
+        swx = e.clientX; swy = e.clientY;
+        if (e.target.closest('.gw-dateband')) swx = null;
+      });
+      top.addEventListener('pointerup', (e) => {
+        if (swx == null) return;
+        const dx = e.clientX - swx, dy = e.clientY - swy; swx = null;
+        if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+        const want = dx < 0 ? 'journal' : 'chat';
+        if (want !== st.tab) { st.tab = want; render(); }
+      });
       return top;
     }
 

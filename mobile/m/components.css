@@ -32,6 +32,13 @@
   -webkit-touch-callout: none;
 }
 .gw input, .gw textarea { -webkit-user-select: text; user-select: text; }
+/* Android WebView(vivo 真机实测):祖先 user-select:none 会破坏输入框内的点按定位光标 —
+   tap 到文字中间,光标实际落在末尾,退格只能删最后一个字。只豁免 input 自身不够,
+   输入区容器整链放开(iOS 不受影响,行为不变)。 */
+.gw-bottom, .gw-bottom *, .gw-card, .gw-card *,
+.gw-agg-reg, .gw-agg-reg *, .gw-key-row, .gw-key-row *, .gw-chip-input {
+  -webkit-user-select: text; user-select: text;
+}
 /* 对话框内容自由复制:整个会话区放开选择 + 长按气泡(拷贝/打开);其余 .gw 仍关选择防放大镜 */
 .gw-thread, .gw-thread *, .gw a {
   -webkit-user-select: text; user-select: text; -webkit-touch-callout: default;
