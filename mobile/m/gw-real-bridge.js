@@ -483,7 +483,8 @@
         try {
           var up = await fetch('/api/chat/upload-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: imgs[ri] }) }).then(function (r) { return r.json(); });
           if (up && up.url) refs.push({ url: up.url });
-        } catch (e) {}
+          else { try { GW.whisper('第 ' + (ri + 1) + ' 张图没存上 · AI 这轮看不到它'); } catch (e2) {} }
+        } catch (e) { try { GW.whisper('第 ' + (ri + 1) + ' 张图没存上 · AI 这轮看不到它'); } catch (e2) {} }
       }
     }
 

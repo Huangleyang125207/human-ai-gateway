@@ -32,7 +32,28 @@
     } catch (e) { /* 永不 throw */ }
   };
 
-  /* 取一张照片(WKWebView 原生相册/相机,无新依赖)→ 返 dataURL;取消返 null */
+  /* 原图 dataURL 动辄 20-40MB:直传会把 256MB Java 堆打爆(vivo 真机三连 OOM 实锤:
+     13:35/14:59/15:02 OutOfMemoryError)。客户端先缩:最长边 1600、JPEG 0.85 → ~300KB,
+     贴纸/抠图/OCR 精度足够。失败回退原图(总比丢照片强)。 */
+  function shrinkPhoto(dataUrl) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const MAX = 1600;
+          let w = img.naturalWidth, h = img.naturalHeight;
+          if (Math.max(w, h) > MAX) { const k = MAX / Math.max(w, h); w = Math.round(w * k); h = Math.round(h * k); }
+          const c = document.createElement('canvas'); c.width = w; c.height = h;
+          c.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(c.toDataURL('image/jpeg', 0.85));
+        } catch (e) { resolve(dataUrl); }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+
+  /* 取一张照片(WKWebView 原生相册/相机,无新依赖)→ 返压缩后 dataURL;取消返 null */
   GW.pickPhoto = function (opts) {
     opts = opts || {};
     return new Promise((resolve) => {
@@ -47,7 +68,7 @@
         const f = input.files && input.files[0];
         if (!f) return finish(null);
         const r = new FileReader();
-        r.onload = () => finish(r.result);
+        r.onload = () => { shrinkPhoto(r.result).then(finish); };
         r.onerror = () => finish(null);
         r.readAsDataURL(f);
       });
@@ -174,7 +195,7 @@
           const t0 = e.touches[0]; if (!t0) return;
           swx = swLastX = t0.clientX; swy = swLastY = t0.clientY;
           swDrag = false; swEl = null;
-          if (st.subPage || e.target.closest('.gw-tasks, .gw-bottom, .gw-sheet, .gw-card, .gw-drawer, .gw-scrim')) swx = null;
+          if (st.subPage || e.target.closest('.gw-tasks, .gw-bottom, .gw-sheet, .gw-card, .gw-drawer, .gw-scrim, .gw-sticker')) swx = null;
         }, { passive: true });
         gw.addEventListener('touchmove', (e) => {
           const t0 = e.touches[0]; if (!t0) return;

@@ -62,7 +62,9 @@
         ${commits}
       </div>`;
     // ★ scrapbook 贴纸:anchor_time 命中本块 → float:right 浮一张,正文文字绕图(对照 PC paper renderStickers)
-    const stickers = (GW.scrapbook || []).filter((s) => s.anchor_time === entry.time && s.src);
+    // anchor_time 容错归一:AI/桌面可能给 '9:00' / '21：30',entry.time 是补零半角 '09:00'
+    const normT = (t) => String(t || '').replace('：', ':').split(':').map((x) => x.padStart(2, '0')).join(':');
+    const stickers = (GW.scrapbook || []).filter((s) => normT(s.anchor_time) === normT(entry.time) && s.src);
     if (stickers.length) {
       const body = row.querySelector('.gw-entry-body');
       stickers.forEach((s) => {
