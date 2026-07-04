@@ -32,6 +32,7 @@ cp "$GW/mobile/m/gw-mock.js"     "$WWW/gw-mock.js"
 cp "$GW/mobile/m/gw-widgets.js"  "$WWW/gw-widgets.js"
 cp "$GW/mobile/m/gw-journal.js"  "$WWW/gw-journal.js"
 cp "$GW/mobile/m/gw-chat.js"     "$WWW/gw-chat.js"
+cp "$GW/mobile/m/gw-pretext.js"  "$WWW/gw-pretext.js"
 cp "$GW/mobile/m/gw-app.js"      "$WWW/gw-app.js"
 
 # bridge:接通 cd 5 件套 mock → mobile-api.js shim 真后端
@@ -48,6 +49,8 @@ cp "$GW/mobile/m/manifest.json" "$WWW/manifest.json"
 cp "$GW/shared/md.js"             "$WWW/shared/md.js"
 cp "$GW/vendor/marked.min.js"     "$WWW/vendor/marked.min.js"
 cp "$GW/vendor/dompurify.min.js"  "$WWW/vendor/dompurify.min.js"
+# pretext(文字绕图 ESM)— gw-pretext.js 只在"摆过的贴纸"场景唤醒
+cp -R "$GW/vendor/pretext"        "$WWW/vendor/pretext"
 
 # brand:apple-touch-icon(PWA)
 cp "$GW/brand/logo.svg"            "$WWW/brand/logo.svg" 2>/dev/null || true

@@ -68,17 +68,30 @@
     const stickers = (GW.scrapbook || []).filter((s) => normT(s.anchor_time) === normT(entry.time) && s.src);
     if (stickers.length) {
       const body = row.querySelector('.gw-entry-body');
+      let hasPlaced = false;
       stickers.forEach((s) => {
         const fig = document.createElement('figure');
         fig.className = 'gw-sticker landing';
         fig.style.width = Math.max(24, Math.min(48, (s.size_pct || 18) * 1.6)) + '%';
         fig.style.setProperty('--rot', (s.rotation || 1.5) + 'deg');
+        fig.dataset.rotation = String(s.rotation || 0);  // pretext 多边形用
         fig.dataset.skId = s.id;
         fig.innerHTML = `<img src="${GW.esc(s.src)}" alt="">`;  // esc:防 src 属性注入(防御纵深)
+        if (s.auto_y === false && body) {
+          // 用户摆过:按存档坐标绝对定位(桌面语义;原来重载后总回落 float,拖动不持久)
+          body.style.position = 'relative';
+          fig.style.cssFloat = 'none';
+          fig.style.position = 'absolute';
+          fig.style.left = (s.x_pct || 0) + '%';
+          fig.style.top = (s.y_px || 0) + 'px';
+          hasPlaced = true;
+        }
         if (body) body.insertBefore(fig, body.firstChild);
         setTimeout(() => fig.classList.remove('landing'), 760);
         GW.bindStickerEdit(fig, s);  // Phase3:长按→拖拽/缩放/删除
       });
+      // 摆过的贴纸(absolute)→ 局部 pretext 绕排;float 态零开销不唤醒
+      if (hasPlaced && GW.pretextWrap) GW.pretextWrap.queue(body);
     }
     wrap.appendChild(del); wrap.appendChild(row);
     if (!st.readonly) wireEntryGestures(row, wrap, entry, st);
@@ -349,7 +362,12 @@
     function exitEdit() {
       if (!editing) return; editing = false;
       fig.classList.remove('editing');
-      fig.querySelectorAll('.gw-sk-del,.gw-sk-scale').forEach((h) => h.remove());
+      fig.querySelectorAll('.gw-sk-del,.gw-sk-scale,.gw-sk-rot').forEach((h) => h.remove());
+      if (s.auto_y !== false) {
+        // 没真拖过:退出编辑就回落 float 态(enterEdit 进场时临时转了 absolute)
+        fig.style.position = ''; fig.style.cssFloat = ''; fig.style.left = ''; fig.style.top = '';
+      }
+      if (GW.pretextWrap) GW.pretextWrap.queue(fig.parentElement);
     }
     function bindDrag() {
       let dragging = false, sx, sy, sl, st;
@@ -391,6 +409,7 @@
           GW.bus.emit('reloadDay');
         } else {
           persistSticker(s, { x_pct: s.x_pct, y_px: s.y_px });
+          if (GW.pretextWrap) GW.pretextWrap.queue(fig.parentElement);  // 拖完重绕(拖动中不排)
         }
       });
     }
@@ -415,7 +434,9 @@
       handle.addEventListener('pointerup', (e) => {
         if (!rotating) return; rotating = false;
         try { handle.releasePointerCapture(e.pointerId); } catch (err) {}
+        fig.dataset.rotation = String(s.rotation || 0);
         persistSticker(s, { rotation: s.rotation });
+        if (GW.pretextWrap) GW.pretextWrap.queue(fig.parentElement);
       });
     }
     function bindScale(handle) {
@@ -438,6 +459,7 @@
         const widthPct = Math.max(15, Math.min(90, (fig.getBoundingClientRect().width / bw) * 100));
         s.size_pct = Math.round((widthPct / 1.6) * 10) / 10;  // 逆 Phase1 render 映射(width%=size_pct*1.6)
         persistSticker(s, { size_pct: s.size_pct });
+        if (GW.pretextWrap) GW.pretextWrap.queue(fig.parentElement);
       });
     }
   };

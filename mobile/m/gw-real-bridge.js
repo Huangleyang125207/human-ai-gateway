@@ -451,7 +451,11 @@
     };
     if (imgs && imgs.length) {
       // imgs 兼容两代形状:老 = dataUrl 串;新 = {u, cut}(chip 抠图开关)
-      userMsg.attachments = imgs.map(function (it) { var du = (it && it.u) ? it.u : it; return { dataUrl: du, url: du }; });
+      var _dus = imgs.map(function (it) { return (it && it.u) ? it.u : it; });
+      // ★显示契约是 m.imgs(buildMsg 渲染独立照片气泡);原来只存 attachments 字段名
+      //   对不上 → 照片从不显示/重渲即"消失"。两个字段都写:imgs=显示+持久,attachments=兼容
+      userMsg.imgs = _dus;
+      userMsg.attachments = _dus.map(function (du) { return { dataUrl: du, url: du }; });
     }
     st.thread.push(userMsg);
     GW.renderThread(container, st);

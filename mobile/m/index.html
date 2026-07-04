@@ -36,11 +36,19 @@
 <script src="../../vendor/dompurify.min.js"></script>
 <script src="../../shared/md.js"></script>
 
+<!-- pretext(文字绕图,ESM 本地 vendor,离线可用)— 只有用户摆过的贴纸才唤醒(gw-pretext.js 裁剪版) -->
+<script type="module">
+  import * as pretext from "../../vendor/pretext/layout.js";
+  window.pretext = pretext;
+  document.dispatchEvent(new Event("pretext-ready"));
+</script>
+
 <!-- cd v0 5 件套(顺序固定:mock → widgets → journal → chat → app)-->
 <script src="./gw-mock.js?v=d58"></script>
 <script src="./gw-widgets.js?v=d58"></script>
 <script src="./gw-journal.js?v=d58"></script>
 <script src="./gw-chat.js?v=d58"></script>
+<script src="./gw-pretext.js?v=d58"></script>
 <script src="./gw-app.js?v=d58"></script>
 
 <!-- bridge:patch GW.gatewayMd/scanIntent/sendChat + 监听 bus pulse/reloadDay → POST -->
