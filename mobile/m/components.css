@@ -557,7 +557,7 @@ html[data-still] .gw-undo, html[data-still] .gw-whisper, html[data-still] .gw-mo
   opacity: 0; transform: scale(0.8); pointer-events: none;
   transition: opacity 0.3s var(--ease), transform 0.3s var(--ease);
 }
-.gw-sk-del, .gw-sk-scale {
+.gw-sk-del, .gw-sk-scale, .gw-sk-rot {
   position: absolute; width: 36px; height: 36px; border-radius: 50%;
   border: none; line-height: 1; cursor: pointer; z-index: 21; touch-action: none;
   display: flex; align-items: center; justify-content: center;
@@ -566,6 +566,7 @@ html[data-still] .gw-undo, html[data-still] .gw-whisper, html[data-still] .gw-mo
 /* 贴纸常 float:right 贴屏幕右沿 → handle 放角内侧(不出界,可点) */
 .gw-sk-del { top: 5px; left: 5px; background: var(--vermilion); color: var(--paper-bright); font-size: 16px; }
 .gw-sk-scale { bottom: 5px; right: 5px; background: var(--paper-bright); color: var(--umber); border: 1px solid var(--line-medium); cursor: nwse-resize; font-size: 13px; }
+.gw-sk-rot { top: 5px; right: 5px; background: var(--paper-bright); color: var(--umber); border: 1px solid var(--line-medium); cursor: grab; font-size: 13px; }
 .gw-sk-undo {
   position: fixed; left: 50%; bottom: 92px; transform: translate(-50%, 16px);
   display: flex; gap: 14px; align-items: center; padding: 10px 16px; z-index: 60;

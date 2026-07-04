@@ -4,6 +4,8 @@
   'use strict';
   const GW = window.GW;
   const LP_MS = 480, SWIPE_TRIG = 60;
+  // anchor_time 容错归一:AI/桌面可能给 '9:00' / '21：30',entry.time 是补零半角 '09:00'
+  const normT = (t) => String(t || '').replace('：', ':').split(':').map((x) => x.padStart(2, '0')).join(':');
 
   /* ── 通用模态:scrim + sheet 升起(纸感,可下滑/点空白关)── */
   GW.mountModal = function (sheetEl, opts) {
@@ -47,6 +49,7 @@
 
   function buildEntry(entry, st) {
     const wrap = document.createElement('div'); wrap.className = 'gw-entry-wrap';
+    wrap.dataset.time = entry.time;  // 贴纸拖完按落点找挂点(inferAnchor)用
     const del = document.createElement('div'); del.className = 'gw-entry-del'; del.innerHTML = '<span>松手 · 收纸</span>';
     const row = document.createElement('div'); row.className = 'gw-entry' + (entry.struck ? ' struck' : '');
     const tagsHtml = (entry.tags || []).map((t) => `<span class="gw-entry-tag">${GW.esc(t)}</span>`).join('') + (entry.author ? `<span class="gw-entry-author">${GW.esc(entry.author)}</span>` : '');
@@ -62,8 +65,6 @@
         ${commits}
       </div>`;
     // ★ scrapbook 贴纸:anchor_time 命中本块 → float:right 浮一张,正文文字绕图(对照 PC paper renderStickers)
-    // anchor_time 容错归一:AI/桌面可能给 '9:00' / '21：30',entry.time 是补零半角 '09:00'
-    const normT = (t) => String(t || '').replace('：', ':').split(':').map((x) => x.padStart(2, '0')).join(':');
     const stickers = (GW.scrapbook || []).filter((s) => normT(s.anchor_time) === normT(entry.time) && s.src);
     if (stickers.length) {
       const body = row.querySelector('.gw-entry-body');
@@ -337,9 +338,10 @@
       fig.classList.add('editing');
       const del = document.createElement('button'); del.className = 'gw-sk-del'; del.type = 'button'; del.textContent = '×'; del.setAttribute('aria-label', '删除贴纸');
       const scl = document.createElement('button'); scl.className = 'gw-sk-scale'; scl.type = 'button'; scl.textContent = '⤡'; scl.setAttribute('aria-label', '缩放贴纸');
-      fig.appendChild(del); fig.appendChild(scl);
-      if (GW.whisper) GW.whisper('编辑贴纸 · 拖动移位 · 角缩放 · ×撕下', false);
-      bindDrag(); bindScale(scl);
+      const rot = document.createElement('button'); rot.className = 'gw-sk-rot'; rot.type = 'button'; rot.textContent = '⟳'; rot.setAttribute('aria-label', '旋转贴纸');
+      fig.appendChild(del); fig.appendChild(scl); fig.appendChild(rot);
+      if (GW.whisper) GW.whisper('编辑贴纸 · 拖移位 · ⤡缩放 · ⟳旋转 · ×撕下', false);
+      bindDrag(); bindScale(scl); bindRotate(rot);
       del.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); exitEdit(); deleteSticker(fig, s); });
       const exit = (e) => { if (!fig.contains(e.target)) { exitEdit(); document.removeEventListener('pointerdown', exit, true); } };
       setTimeout(() => document.addEventListener('pointerdown', exit, true), 60);
@@ -372,7 +374,48 @@
         s.x_pct = Math.round(Math.max(0, Math.min(85, (parseFloat(fig.style.left) / bw) * 100)) * 10) / 10;
         s.y_px = Math.round(Math.max(0, parseFloat(fig.style.top) || 0));
         s.auto_y = false;
-        persistSticker(s, { x_pct: s.x_pct, y_px: s.y_px });
+        // 拖完按落点找挂点(对照 PC inferAnchorByY):贴纸中心落进别的 entry → 换 anchor 真搬家
+        const fr = fig.getBoundingClientRect();
+        const cy = fr.top + fr.height / 2;
+        let hit = null;
+        document.querySelectorAll('.gw-entry-wrap').forEach((w) => {
+          const r = w.getBoundingClientRect();
+          if (cy >= r.top && cy <= r.bottom) hit = w;
+        });
+        const t = hit && hit.dataset.time;
+        if (t && normT(t) !== normT(s.anchor_time)) {
+          s.anchor_time = t;
+          persistSticker(s, { x_pct: s.x_pct, y_px: s.y_px, anchor_time: t });
+          if (GW.whisper) GW.whisper('贴到 ' + t + ' 那块了', false);
+          exitEdit();
+          GW.bus.emit('reloadDay');
+        } else {
+          persistSticker(s, { x_pct: s.x_pct, y_px: s.y_px });
+        }
+      });
+    }
+    function bindRotate(handle) {
+      // 照抄 PC bindRotate(atan2 圆周拖):绕贴纸中心转,松手落 rotation
+      let rotating = false, cx0, cy0, startA, startRot;
+      handle.addEventListener('pointerdown', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        rotating = true;
+        const r = fig.getBoundingClientRect();
+        cx0 = r.left + r.width / 2; cy0 = r.top + r.height / 2;
+        startA = Math.atan2(e.clientY - cy0, e.clientX - cx0);
+        startRot = s.rotation || 0;
+        try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+      });
+      handle.addEventListener('pointermove', (e) => {
+        if (!rotating) return; e.preventDefault();
+        const a = Math.atan2(e.clientY - cy0, e.clientX - cx0);
+        s.rotation = Math.round((startRot + (a - startA) * 180 / Math.PI) * 10) / 10;
+        fig.style.setProperty('--rot', s.rotation + 'deg');
+      });
+      handle.addEventListener('pointerup', (e) => {
+        if (!rotating) return; rotating = false;
+        try { handle.releasePointerCapture(e.pointerId); } catch (err) {}
+        persistSticker(s, { rotation: s.rotation });
       });
     }
     function bindScale(handle) {

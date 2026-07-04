@@ -1235,7 +1235,31 @@
       case "read_today_schedule": return fch("/api/journal/today" + (args.date ? "?date=" + encodeURIComponent(args.date) : "")).then(function (r) { return r.json(); });
       case "list_recent_days": return fch("/api/journal/days?n=" + (args.n || 7)).then(function (r) { return r.json(); });
       case "set_water_cup_image": return fch("/api/water-cup", H).then(function (r) { return r.json(); });
-      case "place_scrapbook_image": return fch("/api/scrapbook/upsert", H).then(function (r) { return r.json(); });
+      case "place_scrapbook_image": {
+        // 端侧抠图接线(对齐桌面 _get_or_create_processed_attachment):cutout!==false 且
+        // Cutout 插件在 → 附件转 dataURL → 抠图 → 存为新附件换 URL;任一环失败原图兜底
+        var _pb = Object.assign({}, args);
+        var _pc = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Cutout;
+        var _pm = /^\/attachments\/([\d-]+)\/(.+)$/.exec(_pb.attachment_url || "");
+        var _cutP = Promise.resolve(null);
+        if (_pb.cutout !== false && _pc && _pc.cutout && _pm) {
+          _cutP = Store.readAttachment(_pm[1], _pm[2]).then(function (d) {
+            if (!d) return null;
+            return _pc.cutout({ image: d }).then(function (r) { return (r && r.png) || null; }).catch(function () { return null; });
+          }).catch(function () { return null; });
+        }
+        return _cutP.then(function (png) {
+          if (!png) return null;
+          return fch("/api/chat/upload-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dataUrl: png }) })
+            .then(function (r) { return r.json(); })
+            .then(function (j) { return (j && j.url) || null; })
+            .catch(function () { return null; });
+        }).then(function (newUrl) {
+          if (newUrl) _pb.attachment_url = newUrl;
+          return fch("/api/scrapbook/upsert", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(_pb) })
+            .then(function (r) { return r.json(); });
+        });
+      }
       // Group B
       case "append_journal_comment": return fch("/api/journal/append-comment", H).then(function (r) { return r.json(); });
       case "manage_daily_task":
