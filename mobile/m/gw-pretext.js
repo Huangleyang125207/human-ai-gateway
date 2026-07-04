@@ -23,7 +23,9 @@
     const cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
     const rad = ((parseFloat(fig.dataset.rotation || '0') || 0) * Math.PI) / 180;
     const cos = Math.cos(rad), sin = Math.sin(rad);
-    const pad = 6, PW = r.width / 2 + pad, PH = r.height / 2 + pad;
+    // ★用布局尺寸(offsetWidth/Height,不含 transform):rect 是旋转后的外接框,
+    //   在它上面再转一次会把多边形放大+过转,文字避让位置跟贴纸对不上(真机实测覆盖文字)
+    const pad = 6, PW = fig.offsetWidth / 2 + pad, PH = fig.offsetHeight / 2 + pad;
     return [[-PW, -PH], [PW, -PH], [PW, PH], [-PW, PH]].map(([x, y]) =>
       [cx + x * cos - y * sin - originRect.left, cy + x * sin + y * cos - originRect.top]);
   }

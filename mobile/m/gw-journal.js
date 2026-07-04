@@ -90,8 +90,14 @@
         setTimeout(() => fig.classList.remove('landing'), 760);
         GW.bindStickerEdit(fig, s);  // Phase3:长按→拖拽/缩放/删除
       });
-      // 摆过的贴纸(absolute)→ 局部 pretext 绕排;float 态零开销不唤醒
-      if (hasPlaced && GW.pretextWrap) GW.pretextWrap.queue(body);
+      // 摆过的贴纸(absolute)→ 局部 pretext 绕排;float 态零开销不唤醒。
+      // 图片可能未加载完(高度 0 → 多边形塌成线,文字照常压过)→ load 后再排一次
+      if (hasPlaced && GW.pretextWrap) {
+        GW.pretextWrap.queue(body);
+        body.querySelectorAll('.gw-sticker img').forEach((im) => {
+          if (!im.complete) im.addEventListener('load', () => GW.pretextWrap.queue(body), { once: true });
+        });
+      }
     }
     wrap.appendChild(del); wrap.appendChild(row);
     if (!st.readonly) wireEntryGestures(row, wrap, entry, st);
