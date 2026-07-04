@@ -406,7 +406,7 @@
       bottom.querySelector('.gw-chat-attach').addEventListener('click', async () => {
         const dataUrl = await GW.pickPhotoVia();
         if (!dataUrl) return;
-        pending.push(dataUrl);
+        pending.push({ u: dataUrl, cut: true });   // 默认抠;chip 上可切「原」
         renderChips();
         refresh();
       });

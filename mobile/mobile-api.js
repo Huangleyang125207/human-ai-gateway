@@ -1504,6 +1504,11 @@
         sys += "\n\n【本轮用户发了 " + _refs.length + " 张图】attachment_url:" +
           _refs.map(function (r) { return r.url || r; }).join("、") +
           "。若用户想把图贴到日记(贴/放/钉到某条或某时间块),调 place_scrapbook_image(attachment_url, anchor_time='HH:MM') 落贴纸(JSON 旁路、不动 MD);anchor_time 取用户指定的时间,没指定就取今天最近一条 entry。";
+        var _noCut = _refs.filter(function (r) { return r && r.cutout === false; }).map(function (r) { return r.url; });
+        if (_noCut.length) {
+          sys += "\n用户已为这些图选了「原图不抠」(chip 开关 = 最终意图,不要再问):" + _noCut.join("、") +
+            " — 对它们调 place_scrapbook_image 时必须传 cutout=false。";
+        }
       }
       var messages = [{ role: "system", content: sys }].concat(histToMsgs(body), [{ role: "user", content: (body && body.message) || "" }]);
       var events = [];

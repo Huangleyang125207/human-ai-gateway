@@ -450,7 +450,8 @@
       kind: 'msg', who: 'me', text: text || '', id: userId
     };
     if (imgs && imgs.length) {
-      userMsg.attachments = imgs.map(function (u) { return { dataUrl: u, url: u }; });
+      // imgs 兼容两代形状:老 = dataUrl 串;新 = {u, cut}(chip 抠图开关)
+      userMsg.attachments = imgs.map(function (it) { var du = (it && it.u) ? it.u : it; return { dataUrl: du, url: du }; });
     }
     st.thread.push(userMsg);
     GW.renderThread(container, st);
@@ -480,9 +481,10 @@
     var refs = [];
     if (imgs && imgs.length) {
       for (var ri = 0; ri < imgs.length; ri++) {
+        var _it = imgs[ri]; var _du = (_it && _it.u) ? _it.u : _it;
         try {
-          var up = await fetch('/api/chat/upload-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: imgs[ri] }) }).then(function (r) { return r.json(); });
-          if (up && up.url) refs.push({ url: up.url });
+          var up = await fetch('/api/chat/upload-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: _du }) }).then(function (r) { return r.json(); });
+          if (up && up.url) refs.push({ url: up.url, cutout: !(_it && _it.cut === false) });
           else { try { GW.whisper('第 ' + (ri + 1) + ' 张图没存上 · AI 这轮看不到它'); } catch (e2) {} }
         } catch (e) { try { GW.whisper('第 ' + (ri + 1) + ' 张图没存上 · AI 这轮看不到它'); } catch (e2) {} }
       }
