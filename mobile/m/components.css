@@ -63,6 +63,10 @@
 }
 @keyframes gw-breathe { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
 
+/* 双页 pager:日记/对话两页常驻一条 200% 轨道,切换/拖动 = 轨道平移(跟手) */
+.gw-track { flex: 1; min-height: 0; display: flex; width: 200%; will-change: transform; }
+.gw-pane { width: 50%; min-width: 50%; display: flex; flex-direction: column; min-height: 0; position: relative; overflow: hidden; }
+.gw-pane .gw-dateband { position: sticky; top: 0; z-index: 4; background: linear-gradient(to bottom, var(--paper-base) 82%, transparent); padding-top: 6px; }
 .gw-scroll {
   position: relative; z-index: 1; flex: 1; min-height: 0;
   overflow-y: auto; overflow-x: hidden;

@@ -137,6 +137,26 @@
 
     function dayState(k) { const d = st.days.find((x) => x.key === k); return d ? d.state : 'today'; }
 
+    /* ── 双页 pager:日记/对话两页常驻一条 200% 轨道,切换 = 轨道平移 ── */
+    function paneW() { return gw.clientWidth || window.innerWidth; }
+    function baseX() { return st.tab === 'chat' ? -paneW() : 0; }
+    function rebuildHeader() {
+      // 标题栏固定不随页滑;切换只重建它 → 朱砂下划线墨迹重放(点击/滑动同一个动画)
+      const old = gw.querySelector('.gw-top');
+      if (old) old.replaceWith(topbar());
+    }
+    function setTab(want, animate) {
+      if (want === st.tab) return;
+      st.tab = want;
+      const track = gw.querySelector('.gw-track');
+      if (track) {
+        track.style.transition = animate ? 'transform 0.2s ease-out' : 'none';
+        track.style.transform = 'translateX(' + baseX() + 'px)';
+        setTimeout(() => { track.style.transition = ''; }, 240);
+      }
+      rebuildHeader();
+    }
+
     function render() {
       // ── 整页左右滑切 tab(左滑→日记,右滑→对话)。绑 gw 根,只绑一次。
       //    让位区:打卡横滑带 / chatbar 输入区 / 弹层;subPage 整页让位。
@@ -164,14 +184,14 @@
           if (!swDrag) {
             if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) {
               swDrag = true;
-              swEl = gw.querySelector('.gw-scroll');
-              swW = gw.clientWidth || window.innerWidth;
+              swEl = gw.querySelector('.gw-track');   // 拖的是双页轨道,新页真身实时跟进
+              swW = paneW();
               if (swEl) swEl.style.transition = 'none';
             } else if (Math.abs(dy) > 14) { swx = null; return; }   // 纵向意图 → 让给滚动
           }
           if (swDrag) {
             e.preventDefault();
-            if (swEl) swEl.style.transform = 'translateX(' + dx * (validDir(dx) ? 1 : 0.3) + 'px)';
+            if (swEl) swEl.style.transform = 'translateX(' + (baseX() + dx * (validDir(dx) ? 1 : 0.3)) + 'px)';
           }
         }, { passive: false });
         function swFinish(x) {
@@ -181,14 +201,10 @@
           if (!swDrag || !el) { swDrag = false; return; }
           swDrag = false;
           const commit = validDir(dx) && Math.abs(dx) > Math.min(90, swW * 0.22);
-          el.style.transition = 'transform 0.16s ease-out';
-          if (commit) {
-            el.style.transform = 'translateX(' + (dx < 0 ? -swW : swW) + 'px)';
-            setTimeout(() => { st.tab = dx < 0 ? 'chat' : 'journal'; render(); }, 160);
-          } else {
-            el.style.transform = 'translateX(0)';
-            setTimeout(() => { if (el.isConnected) { el.style.transition = ''; el.style.transform = ''; } }, 220);
-          }
+          el.style.transition = 'transform 0.18s ease-out';
+          if (commit) { st.tab = dx < 0 ? 'chat' : 'journal'; rebuildHeader(); }  // 两页常驻,不重渲染
+          el.style.transform = 'translateX(' + baseX() + 'px)';
+          setTimeout(() => { if (el.isConnected) el.style.transition = ''; }, 240);
         }
         gw.addEventListener('touchend', (e) => {
           const t0 = e.changedTouches[0];
@@ -200,23 +216,30 @@
       st.readonly = (ds === 'past') && !(st.dayCatalog && st.dayCatalog.is_writable);
       gw.dataset.theme = st.theme;
       // iOS 真状态栏在 webview 上方,删 cd 原型画的 9:41 + 假电池(避免重复)
-      gw.innerHTML = `<div class="gw-grain"></div><div class="gw-glow"></div>
-        <div class="gw-scroll"></div>`;
-      const scroll = gw.querySelector('.gw-scroll');
-      if (st.subPage) { renderSub(scroll); return; }
-      scroll.appendChild(topbar());
-      if (st.tab === 'journal') {
-        const care = document.createElement('section'); care.className = 'gw-care'; care.id = 'care';
-        const tl = document.createElement('div'); tl.className = 'gw-timeline';
-        scroll.appendChild(care); scroll.appendChild(tl);
-        GW.renderCare(care, st); GW.renderTimeline(tl, st);
-        gw.appendChild(nib());
-        wireHideOnScroll(scroll);
-      } else {
-        const th = document.createElement('div'); th.className = 'gw-thread';
-        scroll.appendChild(th); GW.renderThread(th, st);
-        gw.appendChild(chatbar(th));
+      gw.innerHTML = `<div class="gw-grain"></div><div class="gw-glow"></div>`;
+      if (st.subPage) {
+        const scroll = document.createElement('div'); scroll.className = 'gw-scroll';
+        gw.appendChild(scroll); renderSub(scroll); return;
       }
+      gw.appendChild(topbar());
+      // 双页常驻轨道:两页都活着,拖动时新页真身实时跟进(不是翻完才渲染)
+      const track = document.createElement('div'); track.className = 'gw-track';
+      const pj = document.createElement('section'); pj.className = 'gw-pane'; pj.dataset.pane = 'journal';
+      const js = document.createElement('div'); js.className = 'gw-scroll';
+      const band = document.createElement('div'); band.className = 'gw-dateband';
+      js.appendChild(band); buildDateband(band);
+      const care = document.createElement('section'); care.className = 'gw-care'; care.id = 'care';
+      const tl = document.createElement('div'); tl.className = 'gw-timeline';
+      js.appendChild(care); js.appendChild(tl);
+      pj.appendChild(js); pj.appendChild(nib());
+      const pc = document.createElement('section'); pc.className = 'gw-pane'; pc.dataset.pane = 'chat';
+      const cs = document.createElement('div'); cs.className = 'gw-scroll';
+      const th = document.createElement('div'); th.className = 'gw-thread';
+      cs.appendChild(th); pc.appendChild(cs); pc.appendChild(chatbar(th));
+      track.appendChild(pj); track.appendChild(pc);
+      gw.appendChild(track);
+      GW.renderCare(care, st); GW.renderTimeline(tl, st); GW.renderThread(th, st);
+      track.style.transform = 'translateX(' + baseX() + 'px)';
     }
 
     function topbar() {
@@ -230,13 +253,11 @@
           <span class="gw-top-spacer"></span>
           ${st.tab === 'chat' ? `<button class="gw-compact-ring" aria-label="整理对话历史(压成摘要)"></button>` : ''}
           <span class="gw-breath-dot" title="AI 在场"></span>
-        </div>
-        ${st.tab === 'journal' ? `<div class="gw-dateband"></div>` : ''}`;
+        </div>`;
       top.querySelector('.gw-burger').addEventListener('click', openDrawer);
-      top.querySelectorAll('.gw-nav-item').forEach((b) => b.addEventListener('click', () => { st.tab = b.dataset.tab; render(); }));
+      top.querySelectorAll('.gw-nav-item').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab, true)));
       const _ring = top.querySelector('.gw-compact-ring');
       if (_ring) { _ring.addEventListener('click', () => runCompact()); setTimeout(updateCompactRing, 0); }
-      if (st.tab === 'journal') buildDateband(top.querySelector('.gw-dateband'));
       return top;
     }
 
