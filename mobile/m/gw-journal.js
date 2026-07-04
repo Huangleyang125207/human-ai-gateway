@@ -127,7 +127,7 @@
       <button class="gw-sheet-item" data-act="edit"><span class="glyph">${I.edit}</span>改一块</button>
       <button class="gw-sheet-item" data-act="append"><span class="glyph">${I.append}</span>加内容</button>
       <button class="gw-sheet-item" data-act="strike"><span class="glyph">${I.strike}</span>${entry.struck ? '撤销划掉' : '划掉收纸'}</button>
-      <button class="gw-sheet-item" data-act="del"><span class="glyph">撕</span>撕掉这块 · 可拾回</button>
+      <button class="gw-sheet-item" data-act="del"><span class="glyph">删</span>删除</button>
       <button class="gw-sheet-item" data-act="sticker"><span class="glyph">${I.sticker}</span>贴张图</button>
       <button class="gw-sheet-item" data-act="point"><span class="glyph ai-mark">${I.point}</span>指给 AI 看 <span class="ai-mark" style="margin-left:4px">✦</span></button>
       ${hasTask ? `<button class="gw-sheet-item" data-act="task"><span class="glyph">${I.pill}</span>管理打卡项</button>` : ''}`;

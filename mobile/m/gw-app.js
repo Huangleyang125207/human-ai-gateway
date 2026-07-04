@@ -165,7 +165,7 @@
           if (swx == null || x == null) { swx = null; return; }
           const dx = x - swx, dy = y - swy; swx = null;
           if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
-          const want = dx < 0 ? 'journal' : 'chat';
+          const want = dx < 0 ? 'chat' : 'journal';  // 左滑→对话(右侧 tab),右滑→日记 — 常规方向
           if (want !== st.tab) { st._slide = want; st.tab = want; render(); }
         }
         gw.addEventListener('touchend', (e) => {
