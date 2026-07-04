@@ -142,37 +142,59 @@
       //    让位区:打卡横滑带 / chatbar 输入区 / 弹层;subPage 整页让位。
       //    日期带不让位 — 用户拍板放弃它的横滚翻页,滑动优先切 tab。
       //    entry 左滑删除无冲突:日记页左滑切"日记"= no-op,右滑 entry 行本就不进删除模式。
+      // 跟手翻页:页面随触点实时位移;松手过阈值顺势翻页(0.16s 收尾),不够弹回;
+      // 无处可翻的方向给 0.3 橡皮阻尼。左滑→对话(右侧 tab),右滑→日记。
+      // preventDefault 是 vivo 等 OEM WebView 的手势所有权(不抢就冻结坐标,issue 36910235)。
       if (!gw._swBound) {
         gw._swBound = true;
         let swx = null, swy = null, swLastX = null, swLastY = null;
+        let swEl = null, swDrag = false, swW = 1;
+        const validDir = (dx) => (st.tab === 'journal' ? dx < 0 : dx > 0);
         gw.addEventListener('touchstart', (e) => {
           const t0 = e.touches[0]; if (!t0) return;
           swx = swLastX = t0.clientX; swy = swLastY = t0.clientY;
+          swDrag = false; swEl = null;
           if (st.subPage || e.target.closest('.gw-tasks, .gw-bottom, .gw-sheet, .gw-card, .gw-drawer, .gw-scrim')) swx = null;
         }, { passive: true });
-        // {passive:false} + 横向意图确立即 preventDefault — vivo 等 OEM WebView 不抢下
-        // 所有权就停发 touchmove、touchend 坐标冻结在起点(Chromium issue 36910235,
-        // 真机探针实锤:滑 216ms 结束坐标 == 起点)。touch-action CSS 它们不认,JS 硬抢才认。
         gw.addEventListener('touchmove', (e) => {
           const t0 = e.touches[0]; if (!t0) return;
           swLastX = t0.clientX; swLastY = t0.clientY;
-          if (swx != null) {
-            const dx = t0.clientX - swx, dy = t0.clientY - swy;
-            if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) e.preventDefault();
+          if (swx == null) return;
+          const dx = t0.clientX - swx, dy = t0.clientY - swy;
+          if (!swDrag) {
+            if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+              swDrag = true;
+              swEl = gw.querySelector('.gw-scroll');
+              swW = gw.clientWidth || window.innerWidth;
+              if (swEl) swEl.style.transition = 'none';
+            } else if (Math.abs(dy) > 14) { swx = null; return; }   // 纵向意图 → 让给滚动
+          }
+          if (swDrag) {
+            e.preventDefault();
+            if (swEl) swEl.style.transform = 'translateX(' + dx * (validDir(dx) ? 1 : 0.3) + 'px)';
           }
         }, { passive: false });
-        function swFinish(x, y, why) {
-          if (swx == null || x == null) { swx = null; return; }
-          const dx = x - swx, dy = y - swy; swx = null;
-          if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
-          const want = dx < 0 ? 'chat' : 'journal';  // 左滑→对话(右侧 tab),右滑→日记 — 常规方向
-          if (want !== st.tab) { st._slide = want; st.tab = want; render(); }
+        function swFinish(x) {
+          if (swx == null || x == null) { swx = null; swDrag = false; return; }
+          const dx = x - swx; swx = null;
+          const el = swEl; swEl = null;
+          if (!swDrag || !el) { swDrag = false; return; }
+          swDrag = false;
+          const commit = validDir(dx) && Math.abs(dx) > Math.min(90, swW * 0.22);
+          el.style.transition = 'transform 0.16s ease-out';
+          if (commit) {
+            el.style.transform = 'translateX(' + (dx < 0 ? -swW : swW) + 'px)';
+            setTimeout(() => { st.tab = dx < 0 ? 'chat' : 'journal'; render(); }, 160);
+          } else {
+            el.style.transform = 'translateX(0)';
+            setTimeout(() => { if (el.isConnected) { el.style.transition = ''; el.style.transform = ''; } }, 220);
+          }
         }
         gw.addEventListener('touchend', (e) => {
           const t0 = e.changedTouches[0];
-          swFinish(t0 ? t0.clientX : swLastX, t0 ? t0.clientY : swLastY, 'end');
+          swFinish(t0 ? t0.clientX : swLastX);
         }, { passive: true });
-        gw.addEventListener('touchcancel', () => swFinish(swLastX, swLastY, 'cancel'), { passive: true });
+        gw.addEventListener('touchcancel', () => swFinish(swLastX), { passive: true });
       }
       var ds = dayState(st.dayKey);
       st.readonly = (ds === 'past') && !(st.dayCatalog && st.dayCatalog.is_writable);
@@ -195,8 +217,6 @@
         scroll.appendChild(th); GW.renderThread(th, st);
         gw.appendChild(chatbar(th));
       }
-      // 翻页 = 硬切,过渡动画只留标题栏(nav 下划线 gw-ink-spread 每次重建自动重放)
-      st._slide = null;
     }
 
     function topbar() {
@@ -213,7 +233,7 @@
         </div>
         ${st.tab === 'journal' ? `<div class="gw-dateband"></div>` : ''}`;
       top.querySelector('.gw-burger').addEventListener('click', openDrawer);
-      top.querySelectorAll('.gw-nav-item').forEach((b) => b.addEventListener('click', () => { st._slide = b.dataset.tab; st.tab = b.dataset.tab; render(); }));
+      top.querySelectorAll('.gw-nav-item').forEach((b) => b.addEventListener('click', () => { st.tab = b.dataset.tab; render(); }));
       const _ring = top.querySelector('.gw-compact-ring');
       if (_ring) { _ring.addEventListener('click', () => runCompact()); setTimeout(updateCompactRing, 0); }
       if (st.tab === 'journal') buildDateband(top.querySelector('.gw-dateband'));
