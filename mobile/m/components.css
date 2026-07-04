@@ -83,6 +83,13 @@
 .gw-statusbar svg { display: block; }
 
 /* ═══ 2 · 顶栏 + 日期带 ═══ */
+/* 翻页动效:切 tab 时新页轻推入场(位移 4% + 透纸,安静不弹跳) */
+@media (prefers-reduced-motion: no-preference) {
+  .gw-scroll.gw-slide-l { animation: gwSlideL 0.26s ease; }
+  .gw-scroll.gw-slide-r { animation: gwSlideR 0.26s ease; }
+  @keyframes gwSlideL { from { transform: translateX(-4%); opacity: 0.5; } to { transform: none; opacity: 1; } }
+  @keyframes gwSlideR { from { transform: translateX(4%); opacity: 0.5; } to { transform: none; opacity: 1; } }
+}
 .gw-top {
   position: sticky; top: 0; z-index: 5; flex: none;
   /* 横向手势归我们(左右滑切 tab),纵向仍归页面滚动 — 不设的话 WebView 把横滑判给滚动,

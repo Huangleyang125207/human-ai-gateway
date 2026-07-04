@@ -138,6 +138,42 @@
     function dayState(k) { const d = st.days.find((x) => x.key === k); return d ? d.state : 'today'; }
 
     function render() {
+      // ── 整页左右滑切 tab(左滑→日记,右滑→对话)。绑 gw 根,只绑一次。
+      //    让位区:打卡横滑带 / chatbar 输入区 / 弹层;subPage 整页让位。
+      //    日期带不让位 — 用户拍板放弃它的横滚翻页,滑动优先切 tab。
+      //    entry 左滑删除无冲突:日记页左滑切"日记"= no-op,右滑 entry 行本就不进删除模式。
+      if (!gw._swBound) {
+        gw._swBound = true;
+        let swx = null, swy = null, swLastX = null, swLastY = null;
+        gw.addEventListener('touchstart', (e) => {
+          const t0 = e.touches[0]; if (!t0) return;
+          swx = swLastX = t0.clientX; swy = swLastY = t0.clientY;
+          if (st.subPage || e.target.closest('.gw-tasks, .gw-bottom, .gw-sheet, .gw-card, .gw-drawer, .gw-scrim')) swx = null;
+        }, { passive: true });
+        // {passive:false} + 横向意图确立即 preventDefault — vivo 等 OEM WebView 不抢下
+        // 所有权就停发 touchmove、touchend 坐标冻结在起点(Chromium issue 36910235,
+        // 真机探针实锤:滑 216ms 结束坐标 == 起点)。touch-action CSS 它们不认,JS 硬抢才认。
+        gw.addEventListener('touchmove', (e) => {
+          const t0 = e.touches[0]; if (!t0) return;
+          swLastX = t0.clientX; swLastY = t0.clientY;
+          if (swx != null) {
+            const dx = t0.clientX - swx, dy = t0.clientY - swy;
+            if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) e.preventDefault();
+          }
+        }, { passive: false });
+        function swFinish(x, y, why) {
+          if (swx == null || x == null) { swx = null; return; }
+          const dx = x - swx, dy = y - swy; swx = null;
+          if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+          const want = dx < 0 ? 'journal' : 'chat';
+          if (want !== st.tab) { st._slide = want; st.tab = want; render(); }
+        }
+        gw.addEventListener('touchend', (e) => {
+          const t0 = e.changedTouches[0];
+          swFinish(t0 ? t0.clientX : swLastX, t0 ? t0.clientY : swLastY, 'end');
+        }, { passive: true });
+        gw.addEventListener('touchcancel', () => swFinish(swLastX, swLastY, 'cancel'), { passive: true });
+      }
       var ds = dayState(st.dayKey);
       st.readonly = (ds === 'past') && !(st.dayCatalog && st.dayCatalog.is_writable);
       gw.dataset.theme = st.theme;
@@ -159,6 +195,13 @@
         scroll.appendChild(th); GW.renderThread(th, st);
         gw.appendChild(chatbar(th));
       }
+      // 翻页动效:滑动/点 tab 切换时新页轻推入场(安静的位移+透纸,reduced-motion 由 CSS gate)
+      if (st._slide) {
+        const dir = st._slide === 'chat' ? 'gw-slide-r' : 'gw-slide-l';
+        st._slide = null;
+        scroll.classList.add(dir);
+        setTimeout(() => scroll.classList.remove(dir), 340);
+      }
     }
 
     function topbar() {
@@ -175,29 +218,10 @@
         </div>
         ${st.tab === 'journal' ? `<div class="gw-dateband"></div>` : ''}`;
       top.querySelector('.gw-burger').addEventListener('click', openDrawer);
-      top.querySelectorAll('.gw-nav-item').forEach((b) => b.addEventListener('click', () => { st.tab = b.dataset.tab; render(); }));
+      top.querySelectorAll('.gw-nav-item').forEach((b) => b.addEventListener('click', () => { st._slide = b.dataset.tab; st.tab = b.dataset.tab; render(); }));
       const _ring = top.querySelector('.gw-compact-ring');
       if (_ring) { _ring.addEventListener('click', () => runCompact()); setTimeout(updateCompactRing, 0); }
       if (st.tab === 'journal') buildDateband(top.querySelector('.gw-dateband'));
-      // 左右滑切最上方菜单:左滑→日记,右滑→对话。手势只认顶栏区,
-      // 起点落在日期带上不接(它自己要横向滚动)
-      // 用 touch 事件而非 pointer:WebView 会把横滑判给滚动发 pointercancel,
-      // pointerup 永远不来(logcat 实锤);touchend 照发。配合 CSS touch-action:pan-y
-      // (顶栏横向手势归我们,纵向仍归滚动)。
-      let swx = null, swy = null;
-      top.addEventListener('touchstart', (e) => {
-        const t0 = e.touches[0]; if (!t0) return;
-        swx = t0.clientX; swy = t0.clientY;
-        if (e.target.closest('.gw-dateband')) swx = null;
-      }, { passive: true });
-      top.addEventListener('touchend', (e) => {
-        if (swx == null) return;
-        const t0 = e.changedTouches[0]; if (!t0) { swx = null; return; }
-        const dx = t0.clientX - swx, dy = t0.clientY - swy; swx = null;
-        if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
-        const want = dx < 0 ? 'journal' : 'chat';
-        if (want !== st.tab) { st.tab = want; render(); }
-      }, { passive: true });
       return top;
     }
 
@@ -309,6 +333,8 @@
       ta.addEventListener('focus', () => {
         if (growT) clearInterval(growT);
         growT = setInterval(() => {
+          // 组字期零事件:发送键可用态同样只能靠轮询刷(否则打完不删一个字按钮不亮)
+          send.disabled = !(ta.value.trim() || pending.length);
           if (ta.clientHeight < 120 && ta.scrollHeight > ta.clientHeight) autosize();
         }, 160);
       });

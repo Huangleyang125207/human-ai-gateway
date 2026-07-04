@@ -98,18 +98,13 @@
       const adx = e.clientX - downX, ady = e.clientY - downY;
       if (mode === null && (Math.abs(adx) > 8 || Math.abs(ady) > 8)) {
         clearLp(); row.classList.remove('lp-arming');
-        if (Math.abs(adx) > Math.abs(ady) && adx < 0) { mode = 'swipe'; dragging = true; row.classList.add('dragging'); try { row.setPointerCapture(e.pointerId); } catch (x) {} }
-        else mode = 'scroll';
+        // 滑动删除已移除(整页滑动切 tab 后误删率高,用户拍板)— 删除走长按 sheet
+        mode = 'scroll';
       }
-      if (mode === 'swipe') { dx = Math.max(-96, Math.min(0, adx)); row.style.transform = `translateX(${dx}px)`; }
     });
     function up(e) {
       clearLp(); row.classList.remove('lp-arming');
-      if (mode === 'swipe') {
-        dragging = false; row.classList.remove('dragging');
-        if (dx < -SWIPE_TRIG) { row.style.transform = `translateX(-110%)`; setTimeout(() => GW.deleteEntry(entry, st), 220); }
-        else { row.style.transform = ''; }
-      } else if (mode === null) { /* tap */
+      if (mode === null) { /* tap */
         // 正文里的外链归外链 handler(开系统浏览器);tap 手势走 pointer 事件,
         // click 上的 preventDefault 拦不住这里 — 不让点链接同时弹编辑卡
         const a = e && e.target && e.target.closest && e.target.closest('a[href]');
@@ -132,6 +127,7 @@
       <button class="gw-sheet-item" data-act="edit"><span class="glyph">${I.edit}</span>改一块</button>
       <button class="gw-sheet-item" data-act="append"><span class="glyph">${I.append}</span>加内容</button>
       <button class="gw-sheet-item" data-act="strike"><span class="glyph">${I.strike}</span>${entry.struck ? '撤销划掉' : '划掉收纸'}</button>
+      <button class="gw-sheet-item" data-act="del"><span class="glyph">撕</span>撕掉这块 · 可拾回</button>
       <button class="gw-sheet-item" data-act="sticker"><span class="glyph">${I.sticker}</span>贴张图</button>
       <button class="gw-sheet-item" data-act="point"><span class="glyph ai-mark">${I.point}</span>指给 AI 看 <span class="ai-mark" style="margin-left:4px">✦</span></button>
       ${hasTask ? `<button class="gw-sheet-item" data-act="task"><span class="glyph">${I.pill}</span>管理打卡项</button>` : ''}`;
@@ -142,6 +138,7 @@
       setTimeout(() => {
         if (act === 'edit') GW.openCard({ entry: entry, st: st });
         else if (act === 'strike') { entry.struck = !entry.struck; GW.bus.emit('reloadDay'); GW.whisper(entry.struck ? '已划掉收纸 · 痕迹留着' : '划痕已抹去'); }
+        else if (act === 'del') GW.deleteEntry(entry, st);
         else if (act === 'point') { GW.bus.emit('point', entry); }
         else if (act === 'append') GW.openCard({ entry: entry, st: st, append: true });
         else if (act === 'sticker') GW.whisper('选张图贴上来…', true);
