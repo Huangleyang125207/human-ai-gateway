@@ -195,13 +195,8 @@
         scroll.appendChild(th); GW.renderThread(th, st);
         gw.appendChild(chatbar(th));
       }
-      // 翻页动效:滑动/点 tab 切换时新页轻推入场(安静的位移+透纸,reduced-motion 由 CSS gate)
-      if (st._slide) {
-        const dir = st._slide === 'chat' ? 'gw-slide-r' : 'gw-slide-l';
-        st._slide = null;
-        scroll.classList.add(dir);
-        setTimeout(() => scroll.classList.remove(dir), 340);
-      }
+      // 翻页 = 硬切,过渡动画只留标题栏(nav 下划线 gw-ink-spread 每次重建自动重放)
+      st._slide = null;
     }
 
     function topbar() {
