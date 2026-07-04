@@ -194,6 +194,8 @@
 .gw-cup.with-image.filled img { filter: grayscale(0) opacity(1); }
 /* ★对照 PC scrapbook:贴纸 float:right 浮在 entry 旁,drop-shadow 三态模拟"浮高" + 一次性落纸动画 */
 .gw-sticker { float: right; width: 30%; margin: 2px 0 8px 14px; transform: rotate(var(--rot, 1.5deg));
+  /* pretext 绕图层(z:1)盖在正文上;贴纸必须浮在层之上(z:2)才能继续长按/拖拽 */
+  position: relative; z-index: 2;
   filter: drop-shadow(0 4px 12px rgba(58, 42, 24, 0.26)); transition: filter 0.2s var(--ease), transform 0.2s var(--ease);
   -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 /* img pointer-events:none → 长按/拖拽落到 figure(我的 handler),不触发 WKWebView 原生图片菜单 */

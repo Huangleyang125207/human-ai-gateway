@@ -173,7 +173,7 @@
 
     const layer = document.createElement('div');
     layer.className = LAYER;
-    layer.style.cssText = `position:absolute;left:0;top:0;width:${width}px;height:${y + lineHeight}px;font:${font};pointer-events:auto;`;
+    layer.style.cssText = `position:absolute;left:0;top:0;width:${width}px;height:${y + lineHeight}px;font:${font};pointer-events:auto;z-index:1;`;
     for (const ln of lines) {
       const row = document.createElement('div');
       row.style.cssText = `position:absolute;left:${ln.x}px;top:${ln.y}px;width:${ln.width}px;line-height:${lineHeight}px;white-space:nowrap;overflow:hidden;`;
