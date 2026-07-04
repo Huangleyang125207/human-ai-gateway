@@ -139,7 +139,7 @@
     if (r0.width < 50) return;
     const obstacles = figs.map((f) => ({ poly: figPolygon(f, r0) }));
     const runs = extractRuns(el);
-    if (!runs || !runs.length) return;
+    if (!runs || !runs.length) { fallbackFloat(figs); return; }   // 含列表/表格等 → 绕不了,贴纸退回浮动位(宁可失位置不遮字)
     const { plain, runRanges } = flattenRuns(runs);
     const text = plain.replace(/\n+$/, '');
     if (!text.trim()) return;
@@ -201,7 +201,10 @@
 
     if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
     el.dataset.pretextOldMinHeight = el.style.minHeight || '';
-    el.style.minHeight = (y + lineHeight) + 'px';
+    // 正文框至少罩住最低的贴纸底沿:否则大贴纸+短正文时溢出框外,盖住批注/邻条(单 entry 作用域外没人避让)
+    let figBottom = 0;
+    figs.forEach((f) => { const b = f.offsetTop + f.offsetHeight; if (b > figBottom) figBottom = b; });
+    el.style.minHeight = Math.max(y + lineHeight, figBottom + 8) + 'px';
     [...el.childNodes].forEach((n) => {
       if (n.nodeType === Node.ELEMENT_NODE && n.classList && (n.classList.contains(LAYER) || n.classList.contains('gw-sticker'))) return;
       if (n.nodeType === Node.TEXT_NODE) {
@@ -217,6 +220,11 @@
     });
     el.appendChild(layer);
     el.dataset.gwWrapped = '1';
+  }
+
+  /* 绕不了时的兜底:贴纸退回浮动位(CSS 原生绕排保证不遮字,位置保真让位于可读性) */
+  function fallbackFloat(figs) {
+    figs.forEach((f) => { f.style.position = ''; f.style.cssFloat = ''; f.style.left = ''; f.style.top = ''; });
   }
 
   /* queue:rAF 合并 + pretext ready 门;同一帧多次 queue 只排一遍 */

@@ -43,6 +43,8 @@
 .gw-thread, .gw-thread *, .gw a {
   -webkit-user-select: text; user-select: text; -webkit-touch-callout: default;
 }
+/* 正文框收住浮动贴纸(float 溢出会盖住下方批注/邻条) */
+.gw-entry-body::after { content: ''; display: block; clear: both; }
 /* markdown 表格(AI 输出 + 日记 entry)—— 移动端此前无表格样式:窄屏自适应,过宽则容器横向滚 */
 .gw-msg-text, .gw-note-body, .gw-entry-body { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .gw table { border-collapse: collapse; margin: 8px 0; font: 13.5px/1.6 var(--font-sans); }
