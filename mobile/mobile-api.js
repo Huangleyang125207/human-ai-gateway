@@ -1104,6 +1104,12 @@
       // 普通 msg(无 kind 或 kind:'msg')
       var role = (h.role === "ai" || h.role === "assistant" || h.who === "ai") ? "assistant" : "user";
       var content = typeof h.content === "string" ? h.content : (h.text || "");
+      // ★ 历史图片路径透出:不透出 AI 下一轮就"看不到用户发过的照片",
+      //   对"用刚才那张图换水杯/贴日记"这类跨轮引用直接失明(7.5 真机实锤)
+      if (h.imgs && h.imgs.length) {
+        var urls = h.imgs.filter(function (u) { return typeof u === "string" && u.indexOf("/attachments/") === 0; });
+        if (urls.length) content += (content ? "\n" : "") + "[已上传图片: " + urls.join(" , ") + "]";
+      }
       if (content) out.push({ role: role, content: content });
     }
     return out;
@@ -1196,8 +1202,11 @@
         rotation: { type: "number", description: "旋转角度(度数),默认随机 -2 到 +2 之间" },
         cutout: { type: "boolean", description: "是否抠图,默认 true" },
       }, required: ["attachment_url", "anchor_time"] }}},
-    { type: "function", function: { name: "set_water_cup_image", description: "更换喝水图标。优先使用单个 emoji 字符(如 🥤)以保持简洁,避免生成复杂格式",
-      parameters: { type: "object", properties: { image: { type: "string", description: "单个 emoji 字符(如 🥤,优先选择)或 PNG 格式的 Base64 编码 URL" } }, required: ["image"] }}},
+    { type: "function", function: { name: "set_water_cup_image", description: "更换喝水打卡图标。用户发了照片想当水杯图标时传 attachment_url(会自动抠图);想要简洁图标时传单个 emoji 字符(如 🥤)",
+      parameters: { type: "object", properties: {
+        image: { type: "string", description: "单个 emoji 字符(如 🥤)" },
+        attachment_url: { type: "string", description: "用户上传照片的附件 URL,格式:/attachments/YYYY-MM-DD/xxx.jpg" },
+      } }}},
     // Group B 新增
     { type: "function", function: { name: "append_journal_comment", description: "为日记条目添加 AI 评论。当无法直接修改用户撰写的内容时使用此功能",
       parameters: { type: "object", properties: {
@@ -1321,7 +1330,31 @@
       case "set_daily_task_meta": return fch("/api/daily-tasks/meta", H).then(function (r) { return r.json(); });
       case "read_today_schedule": return fch("/api/journal/today" + (args.date ? "?date=" + encodeURIComponent(args.date) : "")).then(function (r) { return r.json(); });
       case "list_recent_days": return fch("/api/journal/days?n=" + (args.n || 7)).then(function (r) { return r.json(); });
-      case "set_water_cup_image": return fch("/api/water-cup", H).then(function (r) { return r.json(); });
+      case "set_water_cup_image": {
+        // 照片当水杯图标:抠图后存新附件换 URL(复用 place_scrapbook_image 接线,对齐桌面
+        // /api/water-cup 的 server 端抠图);无照片(emoji)或任一环失败 → 原参数兜底
+        var _wb = Object.assign({}, args);
+        var _wc = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Cutout;
+        var _wm = /^\/attachments\/([\d-]+)\/(.+)$/.exec(_wb.attachment_url || "");
+        var _wcutP = Promise.resolve(null);
+        if (_wc && _wc.cutout && _wm) {
+          _wcutP = Store.readAttachment(_wm[1], _wm[2]).then(function (d) {
+            if (!d) return null;
+            return _wc.cutout({ image: d }).then(function (r) { return (r && r.png) || null; }).catch(function () { return null; });
+          }).catch(function () { return null; });
+        }
+        return _wcutP.then(function (png) {
+          if (!png) return null;
+          return fch("/api/chat/upload-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dataUrl: png }) })
+            .then(function (r) { return r.json(); })
+            .then(function (j) { return (j && j.url) || null; })
+            .catch(function () { return null; });
+        }).then(function (newUrl) {
+          if (newUrl) _wb.attachment_url = newUrl;
+          return fch("/api/water-cup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(_wb) })
+            .then(function (r) { return r.json(); });
+        });
+      }
       case "place_scrapbook_image": {
         // 端侧抠图接线(对齐桌面 _get_or_create_processed_attachment):cutout!==false 且
         // Cutout 插件在 → 附件转 dataURL → 抠图 → 存为新附件换 URL;任一环失败原图兜底

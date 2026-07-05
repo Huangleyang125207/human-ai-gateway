@@ -249,7 +249,13 @@
         };
       });
       // 八杯水图标(用户上传的水杯抠图)— 对齐 PC ritual.js _cupImageUrl
-      try { var wc = await safeJson('/api/water-cup'); GW.cupImageUrl = (wc && wc.image_url) || null; } catch (e) { GW.cupImageUrl = null; }
+      try {
+        var wc = await safeJson('/api/water-cup');
+        var cupUrl = (wc && wc.image_url) || null;
+        // /attachments/ 短路径 <img> 不走 shim 拦截 → 解析成 dataURL(同聊天照片气泡)
+        if (cupUrl && cupUrl.indexOf('/attachments/') === 0 && GW.resolveImg) cupUrl = await GW.resolveImg(cupUrl);
+        GW.cupImageUrl = cupUrl;
+      } catch (e) { GW.cupImageUrl = null; }
     } catch (e) { console.warn('[bridge] /api/daily-tasks 失败,沿用 mock', e); }
 
     // ★ 招牌:21:30 lazy 纸条 —— app 打开若当天 21:30 是占位 ##,AI 据 past_boards(过去7晚自己的纸条)
@@ -604,6 +610,16 @@
                 st.thread.push({ kind: 'msg', who: 'ai', text: '(无回复)', id: aiId });
                 GW.renderThread(container, st);
               }
+              // AI 换过水杯图 → 重取 + 解析,reloadDay 重渲时打卡区立即见新图
+              try {
+                if (st.thread.some(function (x) { return x && x.kind === 'tool' && x.name === 'set_water_cup_image' && x.state === 'ok'; })) {
+                  window.fetch('/api/water-cup').then(function (r) { return r.json(); }).then(function (wc2) {
+                    var u2 = (wc2 && wc2.image_url) || null;
+                    if (u2 && u2.indexOf('/attachments/') === 0 && GW.resolveImg) return GW.resolveImg(u2).then(function (du) { GW.cupImageUrl = du; });
+                    GW.cupImageUrl = u2;
+                  }).then(function () { GW.bus && GW.bus.emit('reloadDay'); }).catch(function () {});
+                }
+              } catch (e) {}
               // AI 写完 md 后 → 刷新内存 GW.journal[dayKey] + 时间线重渲(spec case 1 ⑥)
               // FIX C — 用当前 selected day 的 iso(补昨天/历史日时不会错刷今天)
               // FIX A.c — emit('reloadDay') 在 bridgePrefetch resolve 之后:
