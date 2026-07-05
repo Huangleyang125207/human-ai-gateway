@@ -66,6 +66,11 @@
     });
   }
 
+  // PATTERN: util — 文件名后缀推 mime(attachment 二进制存储读回拼 dataURL 用)
+  function _mimeFromStem(stem) {
+    var ext = String(stem).split(".").pop().toLowerCase();
+    return ({ jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" })[ext] || "application/octet-stream";
+  }
   var CapacitorBackend = {
     // ── 日记文件名迁移守护:文件名内嵌"第N天",dayNum 锚点改变(硬编码→动态)后,
     //    同一 iso 的 canonical 文件名会变 → 旧文件读不到、写入开叉文件(iOS 真机实锤:
@@ -127,6 +132,17 @@
       return fs.deleteFile({ path: capPath(k), directory: DIR }).catch(function () {});
     },
     keys: function (prefix) {
+      // ★ setting/ 前缀走 Preferences.keys()(7.5 修:此前非 journal 一律返 [],
+      //   uploads_index 列举永远为空 → 照片 curator 在真机上失明)
+      if (prefix.indexOf("setting/") === 0) {
+        var prefs = _getPrefs();
+        if (!prefs || !prefs.keys) return Promise.resolve([]);
+        var sub = prefix.slice(8);
+        return prefs.keys().then(function (r) {
+          return ((r && r.keys) || []).filter(function (k) { return k.indexOf(sub) === 0; })
+            .map(function (k) { return "setting/" + k; });
+        }).catch(function () { return []; });
+      }
       return _fsWait().then(function (fs) {
       if (!fs) return [];
       if (prefix.indexOf("journal/") === 0) {
@@ -269,15 +285,51 @@
         return ks.map(function (k) { return k.slice("journal/".length); }).sort();
       });
     },
-    // vision/OCR 移植 — attachment 存 Capacitor Filesystem(浏览器对应 localStorage)
-    // dataURL inline 存 attachments/<date>/<stem>(从 server 端 chat_routes 复刻 sha256
-    // 去重 + 按日期分目录,但不存 mime 链路,直接存完整 dataURL prefix 保留 mime)
-    writeAttachment: function (date, stem, dataUrl) { return Backend.setText("attachments/" + date + "/" + stem, dataUrl); },
-    readAttachment: function (date, stem) { return Backend.getText("attachments/" + date + "/" + stem); },
+    // vision/OCR 移植 — attachment 对齐 PC 保存方式(7.5 移植):真二进制文件存
+    // gw/attachments/YYYY-MM-DD/<stem>(chat_routes.py ATTACHMENTS_DIR 同布局,
+    // 比旧 base64 .txt 省 1/3 体积);对外契约不变:write 收 dataURL / read 返 dataURL。
+    // 旧 kv 文本格式读到即懒迁移成二进制并删旧键。浏览器仍走 localStorage dataURL。
+    writeAttachment: function (date, stem, dataUrl) {
+      if (!_getFs()) return Backend.setText("attachments/" + date + "/" + stem, dataUrl);
+      var b64 = String(dataUrl).replace(/^data:[^,]*,/, "");
+      return _fsWait().then(function (f) {
+        if (!f) throw new Error("存储不可用");
+        return f.writeFile({ path: "gw/attachments/" + date + "/" + stem, data: b64, directory: DIR, recursive: true });
+      });
+    },
+    readAttachment: function (date, stem) {
+      if (!_getFs()) return Backend.getText("attachments/" + date + "/" + stem);
+      return _fsWait().then(function (f) {
+        if (!f) return null;
+        return f.readFile({ path: "gw/attachments/" + date + "/" + stem, directory: DIR }).then(function (r) {
+          return "data:" + _mimeFromStem(stem) + ";base64," + r.data;
+        }).catch(function () {
+          // 旧 kv dataURL 文本 → 迁移成二进制,删旧键;迁移失败也把旧值返出去(不阻读)
+          return Backend.getText("attachments/" + date + "/" + stem).then(function (old) {
+            if (!old) return null;
+            var b64 = String(old).replace(/^data:[^,]*,/, "");
+            return f.writeFile({ path: "gw/attachments/" + date + "/" + stem, data: b64, directory: DIR, recursive: true })
+              .then(function () { return Backend.remove("attachments/" + date + "/" + stem); })
+              .then(function () { return old; }, function () { return old; });
+          });
+        });
+      });
+    },
     listAttachments: function (date) {
-      var prefix = "attachments/" + (date ? date + "/" : "");
-      return Backend.keys(prefix).then(function (ks) {
-        return ks.map(function (k) { return k.slice("attachments/".length); }).sort();
+      if (!_getFs()) {
+        var prefix = "attachments/" + (date ? date + "/" : "");
+        return Backend.keys(prefix).then(function (ks) {
+          return ks.map(function (k) { return k.slice("attachments/".length); }).sort();
+        });
+      }
+      return _fsWait().then(function (f) {
+        if (!f) return [];
+        return f.readdir({ path: "gw/attachments/" + (date || ""), directory: DIR }).then(function (r) {
+          return ((r && r.files) || []).map(function (x) {
+            var n = typeof x === "string" ? x : x.name;
+            return date ? date + "/" + n : n;
+          }).sort();
+        }).catch(function () { return []; });
       });
     },
     // attachment metadata index(对齐 PC _index.json):vision_classify result 缓存 + uploaded_at
@@ -619,11 +671,30 @@
         if (existing) return { url: url, deduped: true, size: parsed.buf.byteLength };
         return Store.writeAttachment(date, stem, dataUrl).then(function () {
           return Store.writeUploadMeta(date, stem, { uploaded_at: Date.now(), size: parsed.buf.byteLength, mime: parsed.mime }).then(function () {
+            _bgOcrIndex(date, stem, dataUrl);  // fire-and-forget,对齐 PC _index_attachment
             return { url: url, deduped: false, size: parsed.buf.byteLength };
           });
         });
       });
     });
+  }
+  // 上传即后台 OCR(对齐 PC _index_attachment:OCR upload 时跑,vision 留 lazy):
+  // 失败静默降级 — 索引没有 ocr_text 只是 curator 检索少一路,不阻上传
+  function _bgOcrIndex(date, stem, dataUrl) {
+    setTimeout(function () {
+      try {
+        var plugin = (typeof window !== "undefined") && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeOcr;
+        if (!plugin || !plugin.recognize) return;
+        plugin.recognize({ image: dataUrl, languages: ["zh-Hans", "en-US"] }).then(function (r) {
+          if (!r || !r.text) return;
+          return Store.readUploadMeta(date, stem).then(function (meta) {
+            meta = meta || {};
+            meta.ocr_text = String(r.text).slice(0, 2000);
+            return Store.writeUploadMeta(date, stem, meta);
+          });
+        }).catch(function () {});
+      } catch (e) {}
+    }, 0);
   }
   // ★ 7.5 OOM 崩溃根因修:thread 里 msg.imgs/attachments 曾内联 dataURL(单文件 13MB),
   //   saveThread 过 Capacitor 桥 → Java 侧 JSONTokener 47MB 分配打爆 256MB 堆。
