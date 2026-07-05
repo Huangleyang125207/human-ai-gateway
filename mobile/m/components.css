@@ -149,10 +149,12 @@
 .gw-care-label .whisper { font: 400 11px var(--font-kai); letter-spacing: 0; text-transform: none; color: var(--ink-faint); }
 .gw-care-block.readonly { opacity: 0.78; }
 
-/* 3.1 八杯水:横排单行 8 杯;按住 → 放大态(原地长高,一屏 3 只,拖动滚动点亮 · 7.5 拍板) */
-.gw-cups { overflow: hidden; touch-action: pan-y; }
-.gw-cups-strip { display: flex; gap: 9px; align-items: flex-end; }
-.gw-cup { position: relative; z-index: 10; flex: 1 1 0; min-width: 0; height: 38px; transform-origin: bottom center; transition: transform var(--t-fast) var(--ease), height 0.22s var(--ease); }
+/* 3.1 八杯水:横排单行 8 杯;按住 → 放大态(原地长高,一屏 5 只,拖动滚动点亮,中心夸张放大 · 7.5 拍板)
+   touch-action:none 常驻 — vivo 上中途切 touchAction 对当前手势不生效,原生滚动会 pointercancel
+   掐死拖动,只剩落点语义(方向感反转的真因);38px 小带子牺牲纵向滚动发起权,值得 */
+.gw-cups { overflow: hidden; touch-action: none; padding-top: 0; transition: padding-top 0.28s cubic-bezier(0.22, 1, 0.36, 1); }
+.gw-cups-strip { display: flex; gap: 9px; align-items: flex-end; will-change: transform; }
+.gw-cup { position: relative; z-index: 10; flex: 1 1 0; min-width: 0; height: 38px; transform-origin: bottom center; transition: transform 0.24s cubic-bezier(0.34, 1.56, 0.64, 1), height 0.28s cubic-bezier(0.22, 1, 0.36, 1), flex-basis 0.28s cubic-bezier(0.22, 1, 0.36, 1); }
 /* ★ z-index:10 同 chip — 保证 cup 1-8 真接 tap */
 .gw-cup svg { width: 100%; height: 100%; display: block; overflow: visible; }
 .gw-cup.focus { transform: scale(1.55); z-index: 4; }
@@ -202,13 +204,15 @@
 .gw-cup.with-image { aspect-ratio: 1; height: auto; background: none; }
 .gw-cup.with-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-drag: none; user-select: none; filter: grayscale(1) opacity(0.4); transition: filter 0.4s var(--ease); }
 .gw-cup.with-image.filled img { filter: grayscale(0) opacity(1); }
-/* 放大态:strip 无 gap(cupW=rowW/3 精确),中心杯轻抬;reduced-motion 直接跳过渡 */
+/* 放大态:一屏 5 只(strip 无 gap,cupW=rowW/5 精确);中心杯夸张放大(回弹 ease)+
+   邻杯阶梯;row 加 padding-top 给 focus 放大留头部空间(overflow:hidden 不剪) */
+.gw-care-block.zoom .gw-cups { padding-top: 46px; }
 .gw-care-block.zoom .gw-cups-strip { gap: 0; }
-.gw-care-block.zoom .gw-cup { flex: 0 0 33.3333%; height: 96px; }
+.gw-care-block.zoom .gw-cup { flex: 0 0 20%; height: 64px; }
 .gw-care-block.zoom .gw-cup.with-image { height: auto; }
-.gw-care-block.zoom .gw-cup.focus { transform: scale(1.12); }
-.gw-care-block.zoom .gw-cup.near { transform: none; }
-@media (prefers-reduced-motion: reduce) { .gw-cup, .gw-cups-strip { transition: none !important; } }
+.gw-care-block.zoom .gw-cup.focus { transform: scale(1.75); z-index: 12; }
+.gw-care-block.zoom .gw-cup.near { transform: scale(1.22); z-index: 11; }
+@media (prefers-reduced-motion: reduce) { .gw-cups, .gw-cup, .gw-cups-strip { transition: none !important; } }
 /* ★对照 PC scrapbook:贴纸 float:right 浮在 entry 旁,drop-shadow 三态模拟"浮高" + 一次性落纸动画 */
 .gw-sticker { float: right; width: 30%; margin: 2px 0 8px 14px; transform: rotate(var(--rot, 1.5deg));
   /* pretext 绕图层(z:1)盖在正文上;贴纸必须浮在层之上(z:2)才能继续长按/拖拽 */

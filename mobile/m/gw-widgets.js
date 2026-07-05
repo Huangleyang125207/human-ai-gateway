@@ -61,8 +61,17 @@
       // dragging 标志门控 move,而非 hasPointerCapture —— 长按图标一旦触发原生拖拽会丢失指针捕获,
       // 之后 setPointerCapture 静默失败 → hasPointerCapture 恒 false → 滑动永久失灵(长按后锁死真因)。
       let dragging = false, zx0 = 0, off = 0, cupW = 1, rowW = 1;
+      const VISIBLE = 5;
+      const EASE_OUT = 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)';
       const offFor = (i) => rowW / 2 - (i + 0.5) * cupW;
       const setStrip = (o) => { strip.style.transform = 'translateX(' + o + 'px)'; };
+      // 中心杯夸张放大 + 邻杯阶梯(focus/near),点亮态同步
+      function setEmphasis(centerIdx) {
+        strip.querySelectorAll('.gw-cup').forEach((c, i) => {
+          c.classList.toggle('focus', i === centerIdx);
+          c.classList.toggle('near', Math.abs(i - centerIdx) === 1);
+        });
+      }
       function setLit(n) {
         if (n === st.water) return;
         if (n > st.water) justIdx = n - 1;
@@ -70,21 +79,22 @@
         strip.querySelectorAll('.gw-cup').forEach((c, i) => {
           c.classList.toggle('filled', i < n);
           c.classList.toggle('just', i === justIdx && i < n);
-          c.classList.toggle('focus', i === n - 1);
         });
         paintFoot();
       }
       row.addEventListener('pointerdown', (e) => {
         dragging = true;
         try { row.setPointerCapture(e.pointerId); } catch (x) {}
-        const i = idxAt(e.clientX);
-        rowW = row.clientWidth; cupW = rowW / 3;
+        const i = Math.max(0, idxAt(e.clientX));
+        rowW = row.clientWidth; cupW = rowW / VISIBLE;
         block.classList.add('zoom');
-        row.style.touchAction = 'none';   // 放大态拦纵向滚动,拖动全归杯带
-        zx0 = e.clientX; off = offFor(i < 0 ? 0 : i);
+        zx0 = e.clientX; off = offFor(i);
+        // 进场:strip 平滑滑到位(和长高/放大同拍),0.3s 后交还拖动(拖动期间必须零过渡跟手)
+        strip.style.transition = EASE_OUT;
         setStrip(off);
-        setLit((i < 0 ? 0 : i) + 1);
-        strip.querySelectorAll('.gw-cup').forEach((c, k) => c.classList.toggle('focus', k === i));
+        setTimeout(() => { if (dragging) strip.style.transition = 'none'; }, 300);
+        setLit(i + 1);
+        setEmphasis(i);
       });
       row.addEventListener('pointermove', (e) => {
         if (!dragging) return;
@@ -92,18 +102,26 @@
         const lo = offFor(N - 1), hi = offFor(0);
         if (o < lo) o = lo + (o - lo) * 0.3;   // 两端橡皮阻尼
         if (o > hi) o = hi + (o - hi) * 0.3;
+        if (strip.style.transition !== 'none') strip.style.transition = 'none';
         setStrip(o);
         const center = Math.max(0, Math.min(N - 1, Math.round((rowW / 2 - o) / cupW - 0.5)));
         setLit(center + 1);
+        setEmphasis(center);
       });
       const end = () => {
         if (!dragging) return;
         dragging = false;
         block.classList.remove('zoom');
-        row.style.touchAction = '';
-        strip.style.transform = '';
-        paint();   // 回缩重渲(带 just 脉冲)
-        setTimeout(() => { justIdx = -1; paint(); }, 900);
+        // 退场:strip 平滑滑回 0,和收窄/缩高同拍;动画完再重渲(避免中途换 DOM 跳帧)
+        strip.style.transition = EASE_OUT;
+        setStrip(0);
+        strip.querySelectorAll('.gw-cup').forEach((c) => c.classList.remove('focus', 'near'));
+        setTimeout(() => {
+          strip.style.transition = '';
+          strip.style.transform = '';
+          paint();   // 回缩落定重渲(带 just 脉冲)
+          setTimeout(() => { justIdx = -1; paint(); }, 900);
+        }, 300);
         GW.bus.emit('pulse');
       };
       row.addEventListener('pointerup', end); row.addEventListener('pointercancel', end);
