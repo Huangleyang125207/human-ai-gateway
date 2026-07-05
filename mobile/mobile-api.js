@@ -1108,7 +1108,9 @@
       //   对"用刚才那张图换水杯/贴日记"这类跨轮引用直接失明(7.5 真机实锤)
       if (h.imgs && h.imgs.length) {
         var urls = h.imgs.filter(function (u) { return typeof u === "string" && u.indexOf("/attachments/") === 0; });
-        if (urls.length) content += (content ? "\n" : "") + "[已上传图片: " + urls.join(" , ") + "]";
+        // 指令式标记:弱标记("[已上传图片: x]")会被模型自己此前"照片没存下来"的
+        // 发言带偏而无视(7.5 真机实锤);必须明说"图还在、URL 直接可用"
+        if (urls.length) content += (content ? "\n" : "") + "[系统:本条消息附带的图片已永久保存,附件 URL: " + urls.join(" , ") + " — 后续任何时候需要用这张图(换水杯图标/贴日记等),直接把此 URL 作为 attachment_url 传给对应工具即可,图片不会丢失]";
       }
       if (content) out.push({ role: role, content: content });
     }
