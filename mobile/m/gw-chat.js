@@ -30,9 +30,16 @@
     const text = m.who === 'ai' ? GW.gatewayMd(m.text) : `<div class="gw-msg-text">${GW.esc(m.text)}</div>`;
     n.innerHTML = `<span class="who">${who}</span>` +
       (m.who === 'ai' ? `<div class="gw-msg-text">${m.streaming ? GW.esc(m.text) : GW.gatewayMd(m.text)}</div>` : `<div class="gw-msg-text">${GW.esc(m.text)}</div>`) +
-      (m.imgs ? `<div class="gw-msg-imgs">${m.imgs.map((u) => `<img src="${GW.esc(u)}" alt="">`).join('')}</div>` : '') +
+      (m.imgs ? `<div class="gw-msg-imgs">${m.imgs.map((u) => `<img src="${u.indexOf('data:') === 0 ? GW.esc(u) : ''}" data-att="${u.indexOf('data:') === 0 ? '' : GW.esc(u)}" alt="">`).join('')}</div>` : '') +
       (m.err ? `<div class="gw-msg-err-note">没发出去 · 点一下重试</div>` : '');
     n.dataset.id = m.id || '';
+    // ★ /attachments/ 短路径(7.5 OOM 修后 thread 不再存 dataURL)→ 异步解析成 dataURL 填 src
+    if (m.imgs && GW.resolveImg) {
+      n.querySelectorAll('img[data-att]').forEach((im) => {
+        const p = im.dataset.att; if (!p) return;
+        GW.resolveImg(p).then((du) => { if (du) im.src = du; });
+      });
+    }
     return n;
   }
 

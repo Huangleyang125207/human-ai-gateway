@@ -350,35 +350,45 @@
       });
     },
     // bak.5 删 → bak.4→bak.5 → ... → 当前→bak.1。无当前 thread 时 noop。
+    // ★ 7.5 OOM 修:bak 从 Preferences 挪 Filesystem("thread-bak/N" 文件键)。
+    //   旧位置(setting/thread_bak/N)曾把多 MB thread 塞 SharedPreferences,整个 XML 常驻内存。
+    //   旧 Preferences bak 由 GET /api/thread/history 迁移时删除。
     rotateThreadBaks: function () {
       return Backend.getText("thread").then(function (cur) {
         if (cur == null) return;
         // 从 4→5, 3→4, 2→3, 1→2, current→1。bak.5 旧值丢弃。
-        return Backend.getText("setting/thread_bak/4").then(function (b4) {
-          return (b4 == null ? Promise.resolve() : Backend.setText("setting/thread_bak/5", b4));
-        }).then(function () { return Backend.getText("setting/thread_bak/3"); }).then(function (b3) {
-          return (b3 == null ? Promise.resolve() : Backend.setText("setting/thread_bak/4", b3));
-        }).then(function () { return Backend.getText("setting/thread_bak/2"); }).then(function (b2) {
-          return (b2 == null ? Promise.resolve() : Backend.setText("setting/thread_bak/3", b2));
-        }).then(function () { return Backend.getText("setting/thread_bak/1"); }).then(function (b1) {
-          return (b1 == null ? Promise.resolve() : Backend.setText("setting/thread_bak/2", b1));
-        }).then(function () { return Backend.setText("setting/thread_bak/1", cur); });
+        return Backend.getText("thread-bak/4").then(function (b4) {
+          return (b4 == null ? Promise.resolve() : Backend.setText("thread-bak/5", b4));
+        }).then(function () { return Backend.getText("thread-bak/3"); }).then(function (b3) {
+          return (b3 == null ? Promise.resolve() : Backend.setText("thread-bak/4", b3));
+        }).then(function () { return Backend.getText("thread-bak/2"); }).then(function (b2) {
+          return (b2 == null ? Promise.resolve() : Backend.setText("thread-bak/3", b2));
+        }).then(function () { return Backend.getText("thread-bak/1"); }).then(function (b1) {
+          return (b1 == null ? Promise.resolve() : Backend.setText("thread-bak/2", b1));
+        }).then(function () { return Backend.setText("thread-bak/1", cur); });
       });
     },
     listThreadBaks: function () {
-      // 扫 1..5,有则进列表(mobile 无 readdir,逐个尝试)
+      // 扫 1..5,有则进列表(fs 新位 miss 再看旧 Preferences 位 — corrupt 恢复网跨迁移不空窗)
       var ps = [1, 2, 3, 4, 5].map(function (i) {
-        return Backend.getText("setting/thread_bak/" + i).then(function (s) {
-          return s == null ? null : { index: i, bytes: s.length };
+        return Backend.getText("thread-bak/" + i).then(function (s) {
+          if (s != null) return { index: i, bytes: s.length };
+          return Backend.getText("setting/thread_bak/" + i).then(function (old) {
+            return old == null ? null : { index: i, bytes: old.length };
+          });
         });
       });
       return Promise.all(ps).then(function (rs) { return rs.filter(Boolean); });
     },
-    readThreadBakAt: function (idx) { return Backend.getText("setting/thread_bak/" + idx); },
-    // 原损坏内容存 setting/thread_corrupted/<ts>(对齐桌面.corrupted.<ts> 备份策略)
+    readThreadBakAt: function (idx) {
+      return Backend.getText("thread-bak/" + idx).then(function (s) {
+        return s != null ? s : Backend.getText("setting/thread_bak/" + idx);
+      });
+    },
+    // 原损坏内容存 thread-corrupted/<ts> 文件(对齐桌面.corrupted.<ts> 备份策略)
     archiveCorruptedThread: function (raw) {
       var ts = Date.now();
-      return Backend.setText("setting/thread_corrupted/" + ts, raw).then(function () { return ts; });
+      return Backend.setText("thread-corrupted/" + ts, raw).then(function () { return ts; });
     },
     getSetting: function (k) { return Backend.getText("setting/" + k); },
     setSetting: function (k, v) { return Backend.setText("setting/" + k, v); },
@@ -594,6 +604,64 @@
       for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
       return { mime: m[1], buf: u.buffer };
     } catch (e) { return null; }
+  }
+  // PATTERN: util — dataURL 存附件(sha256 去重)
+  // USE WHEN: 任何要把 dataURL 落 attachment store 换短路径的地方(upload-image / thread 瘦身)
+  function _saveDataUrlAttachment(dataUrl) {
+    var parsed = _dataUrlToBuf(dataUrl);
+    if (!parsed) return Promise.resolve(null);
+    var ext = ({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" })[parsed.mime] || "bin";
+    var date = todayIso();
+    return _sha256Hex(parsed.buf).then(function (hash) {
+      var stem = hash + "." + ext;
+      var url = "/attachments/" + date + "/" + stem;
+      return Store.readAttachment(date, stem).then(function (existing) {
+        if (existing) return { url: url, deduped: true, size: parsed.buf.byteLength };
+        return Store.writeAttachment(date, stem, dataUrl).then(function () {
+          return Store.writeUploadMeta(date, stem, { uploaded_at: Date.now(), size: parsed.buf.byteLength, mime: parsed.mime }).then(function () {
+            return { url: url, deduped: false, size: parsed.buf.byteLength };
+          });
+        });
+      });
+    });
+  }
+  // ★ 7.5 OOM 崩溃根因修:thread 里 msg.imgs/attachments 曾内联 dataURL(单文件 13MB),
+  //   saveThread 过 Capacitor 桥 → Java 侧 JSONTokener 47MB 分配打爆 256MB 堆。
+  //   这里把 history 里所有 data: 内联图转成附件短路径;落盘前必经此闸(save + 读取迁移双入口)。
+  function _slimHistoryImgs(hist) {
+    var changed = false;
+    var ps = [];
+    function isData(s) { return typeof s === "string" && s.indexOf("data:") === 0; }
+    (hist || []).forEach(function (m) {
+      if (!m) return;
+      // imgs:data: 内联 → 存附件换短路径(sha256 去重,同图不重复占空间)
+      if (m.imgs && m.imgs.length) {
+        m.imgs.forEach(function (u, i) {
+          if (!isData(u)) return;
+          changed = true;
+          ps.push(_saveDataUrlAttachment(u).then(function (r) { m.imgs[i] = r ? r.url : null; }));
+        });
+      }
+      // attachments:老形状每项带 dataUrl+url 双份 dataURL 拷贝 → 只留短路径 url
+      if (m.attachments && m.attachments.some(function (a) { return a && (a.dataUrl || isData(a.url)); })) {
+        changed = true;
+        m.attachments = m.attachments
+          .map(function (a) { return (a && a.url && !isData(a.url)) ? { url: a.url } : null; })
+          .filter(Boolean);
+      }
+    });
+    return Promise.all(ps).then(function () {
+      (hist || []).forEach(function (m) {
+        if (!m) return;
+        if (m.imgs) { m.imgs = m.imgs.filter(Boolean); if (!m.imgs.length) delete m.imgs; }
+        // attachments 被掏空但 imgs 有路径 → 从 imgs 重建(保持两字段契约一致)
+        if (m.attachments && !m.attachments.length) {
+          if (m.imgs && m.imgs.length) m.attachments = m.imgs.map(function (p) { return { url: p }; });
+          else delete m.attachments;
+        }
+      });
+      return { hist: hist, changed: changed };
+    });
   }
   // 失败哨兵判定 — 降级链靠它识别"这串不是搜索结果"。
   // 文案可以改,形状不能破:失败返回必须匹配这里(1361deb 把 "[360 …" 前缀改成
@@ -2186,7 +2254,22 @@
             });
           });
         }
-        return jsonResp({ history: r.history || [], mtime: mt });
+        // ★ 一次性迁移(7.5 OOM):旧 thread 内联 dataURL(实测 13MB)→ 转附件短路径回写。
+        //   直接 setText 不走 rotate(rotate 会把 13MB 胖版复制进 bak,重蹈大桥消息覆辙);
+        //   顺手删旧 Preferences 巨型 bak(13MB×5 常驻 SharedPreferences = 516MB RSS 元凶)。
+        return _slimHistoryImgs(r.history || []).then(function (s) {
+          if (!s.changed) return jsonResp({ history: s.hist, mtime: mt });
+          var mt2 = Date.now();
+          return Promise.all([
+            Backend.setText("thread", JSON.stringify(s.hist)),
+            Backend.setText("setting/thread_mtime", String(mt2)),
+            Store.removeSetting("thread_bak/1"), Store.removeSetting("thread_bak/2"),
+            Store.removeSetting("thread_bak/3"), Store.removeSetting("thread_bak/4"),
+            Store.removeSetting("thread_bak/5"),
+          ]).then(function () {
+            return jsonResp({ history: s.hist, mtime: mt2, migrated: true });
+          });
+        });
       });
     },
     // 复刻桌面 /api/thread/restore-from-bak(test_restore_from_bak_roundtrip + bad_index 400 + missing 404)
@@ -2224,8 +2307,11 @@
             message: "stale base_mtime — reload server history before saving",
           }, 409);
         }
-        return Store.writeThread(hist).then(function (mt) {
-          return jsonResp({ ok: true, mtime: mt, count: hist.length });
+        // ★ 落盘前必经瘦身闸:任何 data: 内联图转短路径(7.5 OOM 防线,防未来回归)
+        return _slimHistoryImgs(hist).then(function (s) {
+          return Store.writeThread(s.hist).then(function (mt) {
+            return jsonResp({ ok: true, mtime: mt, count: s.hist.length });
+          });
         });
       });
     },
@@ -2296,21 +2382,20 @@
       if (!dataUrl || typeof dataUrl !== "string" || dataUrl.indexOf("data:") !== 0) {
         return jsonResp({ ok: false, error: "缺 dataUrl 或格式错(必须 data:...;base64,...)" }, 400);
       }
-      var parsed = _dataUrlToBuf(dataUrl);
-      if (!parsed) return jsonResp({ ok: false, error: "图片格式错误" }, 400);
-      var ext = ({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" })[parsed.mime] || "bin";
-      var date = todayIso();
-      return _sha256Hex(parsed.buf).then(function (hash) {
-        var stem = hash + "." + ext;
-        return Store.readAttachment(date, stem).then(function (existing) {
-          if (existing) return jsonResp({ ok: true, url: "/attachments/" + date + "/" + stem, deduped: true, size: parsed.buf.byteLength });
-          return Store.writeAttachment(date, stem, dataUrl).then(function () {
-            // 写 metadata index(uploaded_at + size + mime)— vision_classify 后续 enrich description
-            return Store.writeUploadMeta(date, stem, { uploaded_at: Date.now(), size: parsed.buf.byteLength, mime: parsed.mime }).then(function () {
-              return jsonResp({ ok: true, url: "/attachments/" + date + "/" + stem, deduped: false, size: parsed.buf.byteLength });
-            });
-          });
-        });
+      return _saveDataUrlAttachment(dataUrl).then(function (r) {
+        if (!r) return jsonResp({ ok: false, error: "图片格式错误" }, 400);
+        return jsonResp({ ok: true, url: r.url, deduped: r.deduped, size: r.size });
+      });
+    },
+    // ★ 聊天照片气泡渲染入口:thread 只存 /attachments/ 短路径(7.5 OOM 修),
+    //   <img src> 不走 shim fetch 拦截 → 前端经此路由拿 dataURL(同 scrapbook GET 解析手法)
+    "GET /api/attachment-data": function (req, u) {
+      var attUrl = new URL(u, location.origin).searchParams.get("url") || "";
+      var m = /^\/attachments\/([^/]+)\/(.+)$/.exec(attUrl);
+      if (!m) return jsonResp({ ok: false, error: "url 格式错误" }, 400);
+      return Store.readAttachment(m[1], m[2]).then(function (d) {
+        if (!d) return jsonResp({ ok: false, error: "附件不存在" }, 404);
+        return jsonResp({ ok: true, dataUrl: d });
       });
     },
     "POST /api/vision/classify": function (req, u, body) {

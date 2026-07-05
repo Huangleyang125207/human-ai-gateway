@@ -115,6 +115,19 @@
       try { GW.whisper('对话没存上 · 稍后再试'); } catch (e2) {}
     });
   }
+  // ★ 聊天照片气泡渲染:thread 只存 /attachments/ 短路径,<img> 不走 shim fetch 拦截,
+  //   渲染前查内存 cache → miss 再走 /api/attachment-data 解析成 dataURL(同 scrapbook 手法)
+  GW.resolveImg = function (path) {
+    GW._imgCache = GW._imgCache || {};
+    if (GW._imgCache[path]) return Promise.resolve(GW._imgCache[path]);
+    return window.fetch('/api/attachment-data?url=' + encodeURIComponent(path))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.dataUrl) { GW._imgCache[path] = d.dataUrl; return d.dataUrl; }
+        return null;
+      }).catch(function () { return null; });
+  };
+
   function showThreadCorruptSheet() {
     if (!GW.root) { setTimeout(showThreadCorruptSheet, 600); return; }  // boot 早于 mount 时等挂载
     if (typeof GW.mountModal !== 'function') { try { GW.whisper('对话记录损坏 · 已暂停写入保护现场'); } catch (e) {} return; }
@@ -450,16 +463,33 @@
     var userMsg = {
       kind: 'msg', who: 'me', text: text || '', id: userId
     };
+    // ★ 7.5 OOM 崩溃根因:thread 里存 dataURL(imgs+attachments 三份拷贝)→ thread.json 13MB
+    //   → saveThread 过 Capacitor 桥 JSONTokener 47MB 分配打爆 256MB Java 堆(dropbox 实锤)。
+    //   契约改为:先上传拿 /attachments/ 短路径,thread 只存路径;dataURL 只进内存 cache 供即时渲染。
+    var refs = [];
     if (imgs && imgs.length) {
-      // imgs 兼容两代形状:老 = dataUrl 串;新 = {u, cut}(chip 抠图开关)
-      var _dus = imgs.map(function (it) { return (it && it.u) ? it.u : it; });
-      // ★显示契约是 m.imgs(buildMsg 渲染独立照片气泡);原来只存 attachments 字段名
-      //   对不上 → 照片从不显示/重渲即"消失"。两个字段都写:imgs=显示+持久,attachments=兼容
-      userMsg.imgs = _dus;
-      userMsg.attachments = _dus.map(function (du) { return { dataUrl: du, url: du }; });
+      var paths = [];
+      for (var ri = 0; ri < imgs.length; ri++) {
+        var _it = imgs[ri]; var _du = (_it && _it.u) ? _it.u : _it;
+        try {
+          var up = await fetch('/api/chat/upload-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: _du }) }).then(function (r) { return r.json(); });
+          if (up && up.url) {
+            GW._imgCache = GW._imgCache || {};
+            GW._imgCache[up.url] = _du;
+            paths.push(up.url);
+            refs.push({ url: up.url, cutout: !(_it && _it.cut === false) });
+          } else { try { GW.whisper('第 ' + (ri + 1) + ' 张图没存上 · AI 这轮看不到它'); } catch (e2) {} }
+        } catch (e) { try { GW.whisper('第 ' + (ri + 1) + ' 张图没存上 · AI 这轮看不到它'); } catch (e2) {} }
+      }
+      if (paths.length) {
+        userMsg.imgs = paths;
+        userMsg.attachments = paths.map(function (p) { return { url: p }; });
+      }
     }
     st.thread.push(userMsg);
     GW.renderThread(container, st);
+    // ★ 早持久化:崩溃/被 OEM 杀(拍照 intent 期间常见)不再吞掉整轮 —— 用户消息先落盘
+    saveThread(st, container);
 
     // 信号采集(真 sink)
     GW.scanIntent(text);
@@ -482,19 +512,7 @@
     // histToMsgs 已 cd 4 kind:msg/ref/note/tool — 我传整条 thread(去掉本轮 user)就行
     var historyForApi = st.thread.slice(0, -1);  // 去掉刚 push 的 user msg(它进 body.message)
 
-    // ★ 对话框贴图:上传图 → attachment_url(短路径),塞进 body.refs 供 AI place_scrapbook_image 引用
-    var refs = [];
-    if (imgs && imgs.length) {
-      for (var ri = 0; ri < imgs.length; ri++) {
-        var _it = imgs[ri]; var _du = (_it && _it.u) ? _it.u : _it;
-        try {
-          var up = await fetch('/api/chat/upload-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: _du }) }).then(function (r) { return r.json(); });
-          if (up && up.url) refs.push({ url: up.url, cutout: !(_it && _it.cut === false) });
-          else { try { GW.whisper('第 ' + (ri + 1) + ' 张图没存上 · AI 这轮看不到它'); } catch (e2) {} }
-        } catch (e) { try { GW.whisper('第 ' + (ri + 1) + ' 张图没存上 · AI 这轮看不到它'); } catch (e2) {} }
-      }
-    }
-
+    // (贴图上传已在 push userMsg 前完成 — refs 供 AI place_scrapbook_image 引用)
     fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
