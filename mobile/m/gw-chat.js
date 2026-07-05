@@ -37,6 +37,16 @@
   }
 
   /* ── tool chip 三态 ── */
+  /* 工具 → 日记坐标(可跳转 chip):带 time/anchor_time 的落到那一块;打卡类落到晨课区 */
+  const DAY_JUMP_TOOLS = { check_daily_task: 1, set_daily_task_meta: 1, manage_daily_task: 1, set_water_cup_image: 1 };
+  GW.toolJumpTarget = function (m) {
+    if (!m || m.kind !== 'tool' || !m.args) return null;
+    const time = m.args.time || m.args.anchor_time;
+    if (time) return { date: m.args.date || null, time: String(time) };
+    if (DAY_JUMP_TOOLS[m.name]) return { date: m.args.date || null, care: true };
+    return null;
+  };
+
   function buildChip(m) {
     const icon = GW.ICON[GW.toolGroupIcon(m.name)] || GW.ICON.dot;
     const label = GW.toolLabel(m.name, m.args);
@@ -53,6 +63,13 @@
         r = div('gw-chip-fail-reason'); r.dataset.for = m.id; r.textContent = m.error || '出问题了';
         chip.after(r);
       });
+    } else {
+      // 成功的动作 chip → 点一下跳到日记里它落笔的位置
+      const target = GW.toolJumpTarget(m);
+      if (target) {
+        chip.classList.add('jump');
+        chip.addEventListener('click', () => { if (GW.jumpToJournal) GW.jumpToJournal(target); });
+      }
     }
     return chip;
   }

@@ -60,8 +60,9 @@
   var threadCorrupt = null;    // 损坏未处理 = {baks};期间禁止 save 覆盖
 
   function mapThreadMsg(m, i) {
-    // cd 原 schema 已带 kind/who → 直接用;旧 {role, content} → 转 cd
-    if (m && m.kind && m.who) return m;
+    // cd 原 schema 带 kind(msg/ref/note/tool)→ 原样保留。
+    // ★不能要求 who:tool/ref/note 没有 who 字段,老条件把工具 chip 重载时碾成空 me 消息
+    if (m && m.kind) return m;
     return {
       kind: 'msg',
       who: (m.role === 'assistant' || m.who === 'ai') ? 'ai' : 'me',

@@ -52,6 +52,20 @@
   }
   // ★ catch 不吞 write 错 — 之前 .catch(()=>{}) 让 setText 在 plugin fail 时假装 success,
   //   导致 saveKey 返 ok:true 但 storage 空。现在 reject 让 caller 看到真错。
+  // ── fs 就绪门:启动早期 Filesystem 插件未挂载时,读文件返 null 会被当"文件不存在",
+  //    幂等 new-day 会拿骨架盖掉真文件(数据丢失级)。"未就绪"必须等待,不能误判为缺失。──
+  function _fsWait() {
+    var f = _getFs();
+    if (f) return Promise.resolve(f);
+    return new Promise(function (res) {
+      var n = 0;
+      var t = setInterval(function () {
+        var fs2 = _getFs();
+        if (fs2 || ++n > 50) { clearInterval(t); res(fs2 || null); }
+      }, 100);
+    });
+  }
+
   var CapacitorBackend = {
     // ── 日记文件名迁移守护:文件名内嵌"第N天",dayNum 锚点改变(硬编码→动态)后,
     //    同一 iso 的 canonical 文件名会变 → 旧文件读不到、写入开叉文件(iOS 真机实锤:
@@ -81,26 +95,30 @@
       });
     },
     getText: function (k) {
-      var prefs = _getPrefs(), fs = _getFs();
+      var prefs = _getPrefs();
       if (k.indexOf("setting/") === 0 && prefs) return prefs.get({ key: k.slice(8) }).then(function (r) { return r && r.value != null ? r.value : null; }).catch(function () { return null; });
-      if (!fs) return Promise.resolve(null);
-      if (k.indexOf("journal/") === 0) {
-        return CapacitorBackend._canonJournal(k.slice(8)).then(function (p) {
-          return fs.readFile({ path: p, directory: DIR, encoding: "utf8" }).then(function (r) { return r.data; }).catch(function () { return null; });
-        });
-      }
-      return fs.readFile({ path: capPath(k), directory: DIR, encoding: "utf8" }).then(function (r) { return r.data; }).catch(function () { return null; });
+      return _fsWait().then(function (fs) {
+        if (!fs) return null;
+        if (k.indexOf("journal/") === 0) {
+          return CapacitorBackend._canonJournal(k.slice(8)).then(function (p) {
+            return fs.readFile({ path: p, directory: DIR, encoding: "utf8" }).then(function (r) { return r.data; }).catch(function () { return null; });
+          });
+        }
+        return fs.readFile({ path: capPath(k), directory: DIR, encoding: "utf8" }).then(function (r) { return r.data; }).catch(function () { return null; });
+      });
     },
     setText: function (k, v) {
-      var prefs = _getPrefs(), fs = _getFs();
+      var prefs = _getPrefs();
       if (k.indexOf("setting/") === 0 && prefs) return prefs.set({ key: k.slice(8), value: v });
-      if (!fs) return Promise.reject(new Error("存储不可用"));
-      if (k.indexOf("journal/") === 0) {
-        return CapacitorBackend._canonJournal(k.slice(8)).then(function (p) {
-          return fs.writeFile({ path: p, data: v, directory: DIR, encoding: "utf8", recursive: true });
-        });
-      }
-      return fs.writeFile({ path: capPath(k), data: v, directory: DIR, encoding: "utf8", recursive: true });
+      return _fsWait().then(function (fs) {
+        if (!fs) throw new Error("存储不可用");
+        if (k.indexOf("journal/") === 0) {
+          return CapacitorBackend._canonJournal(k.slice(8)).then(function (p) {
+            return fs.writeFile({ path: p, data: v, directory: DIR, encoding: "utf8", recursive: true });
+          });
+        }
+        return fs.writeFile({ path: capPath(k), data: v, directory: DIR, encoding: "utf8", recursive: true });
+      });
     },
     remove: function (k) {
       var prefs = _getPrefs(), fs = _getFs();
@@ -109,8 +127,8 @@
       return fs.deleteFile({ path: capPath(k), directory: DIR }).catch(function () {});
     },
     keys: function (prefix) {
-      var fs = _getFs();
-      if (!fs) return Promise.resolve([]);
+      return _fsWait().then(function (fs) {
+      if (!fs) return [];
       if (prefix.indexOf("journal/") === 0) {
         return fs.readdir({ path: "gw/journal", directory: DIR }).then(function (r) {
           var files = (r && r.files) || [];
@@ -126,7 +144,8 @@
           return out;
         }).catch(function () { return []; });
       }
-      return Promise.resolve([]);
+      return [];
+      });
     },
   };
 

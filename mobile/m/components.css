@@ -43,6 +43,11 @@
 .gw-thread, .gw-thread *, .gw a {
   -webkit-user-select: text; user-select: text; -webkit-touch-callout: default;
 }
+/* 可跳转的工具 chip:落过笔的动作,点一下回到日记现场 */
+.gw-chip-tool.jump { cursor: pointer; }
+.gw-chip-tool.jump::after { content: '›'; margin-left: 5px; color: var(--ink-faint); font-weight: 600; }
+.gw-jump-flash { animation: gwJumpFlash 1.3s ease; }
+@keyframes gwJumpFlash { 0% { background: rgba(177, 74, 43, 0.12); } 100% { background: transparent; } }
 /* 正文框收住浮动贴纸(float 溢出会盖住下方批注/邻条) */
 .gw-entry-body::after { content: ''; display: block; clear: both; }
 /* markdown 表格(AI 输出 + 日记 entry)—— 移动端此前无表格样式:窄屏自适应,过宽则容器横向滚 */

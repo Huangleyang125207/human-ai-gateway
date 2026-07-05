@@ -178,6 +178,28 @@
       rebuildHeader();
     }
 
+    // 工具 chip → 跳到日记里对应位置:切页动画 + 换天(如需) + 定位滚动 + 高亮一闪
+    GW.jumpToJournal = function (tgt) {
+      tgt = tgt || {};
+      const pad = (t) => String(t || '').replace('：', ':').split(':').map((x) => x.padStart(2, '0')).join(':');
+      const todayIso = (st.days.find((d) => d.state === 'today') || {}).iso;
+      const iso = tgt.date || todayIso;
+      const day = st.days.find((d) => d.iso === iso);
+      if (day && day.key !== st.dayKey && day.state !== 'creatable' && day.state !== 'locked') pickDay(day);
+      else if (!day && tgt.date) GW.whisper('那天不在最近的日期带里');
+      setTab('journal', true);
+      setTimeout(() => {
+        let el = null;
+        if (tgt.time) el = gw.querySelector('.gw-entry-wrap[data-time="' + pad(tgt.time) + '"]');
+        if (!el) el = gw.querySelector('.gw-care');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('gw-jump-flash');
+          setTimeout(() => el.classList.remove('gw-jump-flash'), 1400);
+        }
+      }, 340);   // 等换天渲染 + 切页动画落定再定位
+    };
+
     function render() {
       // ── 整页左右滑切 tab(左滑→日记,右滑→对话)。绑 gw 根,只绑一次。
       //    让位区:打卡横滑带 / chatbar 输入区 / 弹层;subPage 整页让位。
