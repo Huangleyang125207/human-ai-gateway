@@ -1793,7 +1793,29 @@
           return events;
         });
       }
-      return callRound(0).then(function (all) { return sseResp(all); });
+      // ★ vision hints(对照 PC chat_routes._refs_to_vision_hints):chat 时对每张 ref
+      //   跑 /api/vision/classify(内部有 uploads_index vision_result 缓存,重复图不重复扣费),
+      //   把"图里是什么"注进 system — 没有这步模型对图片内容零感知(7.5 真机实锤:
+      //   用户发补剂照说'帮我添加打卡',AI 只能反问)。单图失败静默跳过,不阻对话。
+      var _visionHintP = !_refs.length ? Promise.resolve("") : Promise.all(_refs.map(function (r) {
+        var u = r.url || r;
+        return fch("/api/vision/classify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ attachment_url: u }) })
+          .then(function (rr) { return rr.json(); })
+          .then(function (j) {
+            var v = j && j.result;
+            if (!v) return null;
+            var desc = typeof v === "string" ? v : (v.description || v.desc || JSON.stringify(v));
+            return "- " + u + ": " + String(desc).slice(0, 400);
+          }).catch(function () { return null; });
+      })).then(function (arr) {
+        var xs = arr.filter(Boolean);
+        return xs.length ? "\n\n【图片内容(vision 识别)】\n" + xs.join("\n") +
+          "\n结合图片内容行动:是物品/补剂想打卡 → manage_daily_task 加项(可再用图当图标);是水杯 → set_water_cup_image;想留在日记 → place_scrapbook_image。" : "";
+      }).catch(function () { return ""; });
+      return _visionHintP.then(function (vh) {
+        if (vh) messages[0].content += vh;
+        return callRound(0);
+      }).then(function (all) { return sseResp(all); });
     });
   }
 
