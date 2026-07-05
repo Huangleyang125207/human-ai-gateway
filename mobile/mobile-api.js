@@ -1631,7 +1631,10 @@
   // ── claim audit(Path X:防 AI 口头声称已写入但没真 tool call)──────
   // 桌面 chat_routes L280 _audit_unauthorized_claim 端口:5.22 msg 5/7 事故等价防御。
   // claim 措辞 + actions 空 → 自动加 disclaimer 让用户看到"AI 在撒谎"。
-  var _CLAIM_PHRASE_RE = /记进|写进|搞定|已写[入好]|已加入|已添加|已保存|已记录|已贴|已落|已 ?patch|写好了|写完了|加好了|加完了|落进|saved|recorded|wrote|patched|done/i;
+  // 7.5 事故:用户发补剂照"帮我加打卡"→ AI 回"帮你加到打卡里啦/打卡成功/勾上啦"但零 tool call,
+  //   daily-tasks.md 空。原正则漏了 加到/打卡成功/勾上 等完成态措辞(guard 是 actions 空,
+  //   故可放心拓宽:真调了 tool 就不触发)。桌面 chat_routes 同步。
+  var _CLAIM_PHRASE_RE = /记进|写进|搞定|已写[入好]|已加入|已添加|已保存|已记录|已贴|已落|已 ?patch|写好了|写完了|加好了|加完了|落进|帮你加[到上进]|已.{0,4}勾[上选]|打卡成功|已打卡|设置好[了啦]|已设置好|创建好[了啦]|已创建|已更新|更新好[了啦]|加上去了|加进去了|saved|recorded|wrote|patched|done|added|checked|created|updated/i;
   var _CLAIM_DISCLAIMER =
     "\n\n*(server audit:本回合未触发任何 tool 调用,上面的「已写入/记进了」等措辞" +
     "未对应真实动作 — 日记 / 聚合页没改。要真落请说『重试』或换一句指令。)*";
@@ -1686,7 +1689,9 @@
       var toolsForRun = TOOL_SPECS.concat(capTools);
       var sys = "你是用户的日记协作 AI,语气温和、像深夜台灯下说话。\n\n" +
         "这是今天的日记:\n\n" + (todayMd || "(今天还没写)") +
-        "\n\n你有以下工具可用 — 改日记/打卡/换图标时调对应 tool;只聊天回应不调 tool。";
+        "\n\n你有以下工具可用 — 改日记/打卡/换图标时调对应 tool;只聊天回应不调 tool。" +
+        "\n⚠️铁律:凡是「加打卡项/勾打卡/改日记/换图标」这类会改数据的动作,必须真调对应 tool(manage_daily_task/check_daily_task/…)。" +
+        "严禁只用文字说『已加到打卡里/打卡成功/已勾上』而不调 tool——没调 tool = 什么都没发生,用户会以为做了却落空。要做就调,做不了就说清楚,不许假装。";
       if (capOn.length || capOff.length) {
         sys += "\n\n手机能力:已接入 " + (capOn.join("、") || "无") +
           (capOff.length ? ";未接入 " + capOff.join("、") + " — 用户想用时可调 request_capability(会直接弹系统授权框,弹前先跟用户说一句)" : "");

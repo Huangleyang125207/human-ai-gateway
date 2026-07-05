@@ -267,9 +267,13 @@ def _exec_synth_calls(synth_calls, messages, last_actions, loaded_groups, quota_
 # journal 文件没动。CC 的解法是 tool_use 结构化 block(说=做绑死);
 # 我们用 server 出口审计:claim 措辞 + actions 空 → 自动加 disclaimer,
 # 用户看到这条就知道"AI 在撒谎"。
+# 7.5 事故(mobile 实锤,PC 同源):AI 回"帮你加到打卡里啦/打卡成功/勾上啦"但零 tool call。
+# 原正则漏了 加到/打卡成功/勾上 等完成态(guard 是 actions 空,可放心拓宽)。mobile-api.js 同步。
 _CLAIM_PHRASE_RE = re.compile(
     r'(记进|写进|搞定|已写[入好]|已加入|已添加|已保存|已记录|已贴|已落|已 ?patch|'
-    r'写好了|写完了|加好了|加完了|落进|saved|recorded|wrote|patched|done)',
+    r'写好了|写完了|加好了|加完了|落进|帮你加[到上进]|已.{0,4}勾[上选]|打卡成功|已打卡|'
+    r'设置好[了啦]|已设置好|创建好[了啦]|已创建|已更新|更新好[了啦]|加上去了|加进去了|'
+    r'saved|recorded|wrote|patched|done|added|checked|created|updated)',
     re.IGNORECASE,
 )
 _CLAIM_DISCLAIMER = (

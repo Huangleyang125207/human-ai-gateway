@@ -248,6 +248,18 @@
           image_url: t.image_url || null
         };
       });
+      // ★ 7.5 真机 bug 修:GW.tasks/GW.water 是重赋值的新数组,GW.state.tasks 还指旧引用
+      //   → AI 加打卡项/改水量后 reloadDay 重渲读 st(旧),当场不显示,要切天再回来才出现。
+      //   预取 iso 若正是当前显示日 → 同步进 st(日期守卫防预取今天却串改所看的历史日)。
+      if (GW.state) {
+        var _curIso = null;
+        try {
+          var _dk = GW.state.dayKey;
+          var _do = (typeof GW.days === 'function' ? GW.days() : []).find(function (x) { return x.key === _dk; });
+          _curIso = _do ? _do.iso : null;
+        } catch (e) {}
+        if (_curIso === iso) { GW.state.tasks = GW.tasks; GW.state.water = GW.water; }
+      }
       // 八杯水图标(用户上传的水杯抠图)— 对齐 PC ritual.js _cupImageUrl
       try {
         var wc = await safeJson('/api/water-cup');
