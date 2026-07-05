@@ -1,17 +1,19 @@
 {
   "name": "capacitor-cutout",
-  "version": "0.0.1",
-  "description": "端侧抠主体 · iOS Vision(VNGenerateForegroundInstanceMask) / Android ML Kit Subject Segmentation",
+  "version": "0.0.2",
+  "description": "端侧抠主体 · iOS Vision(VNGenerateForegroundInstanceMask) / Android MediaPipe Interactive Segmenter(magic_touch,离线 bundled,无 GMS 依赖,全 AOSP 系 ROM 可用)",
   "main": "src/index.js",
   "module": "src/index.js",
   "types": "src/index.d.ts",
   "files": [
     "src/",
     "ios/",
+    "android/",
     "CapacitorCutout.podspec"
   ],
   "capacitor": {
-    "ios": { "src": "ios" }
+    "ios": { "src": "ios" },
+    "android": { "src": "android" }
   },
   "peerDependencies": {
     "@capacitor/core": "^6.0.0"
