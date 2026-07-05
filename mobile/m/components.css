@@ -199,7 +199,7 @@
 /* 自定义碗图:cup 变正方形(随 1/8 宽,碗更清楚);img 绝对铺满 cup 盒子 object-fit 兜住 —
    否则 grid+height:100% 不解析,img 按 宽×固有比 长出去,溢出固定高 cup → 撞下面的计数(真机实测) */
 .gw-cup.with-image { aspect-ratio: 1; height: auto; background: none; }
-.gw-cup.with-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; filter: grayscale(1) opacity(0.4); transition: filter 0.4s var(--ease); }
+.gw-cup.with-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-drag: none; user-select: none; filter: grayscale(1) opacity(0.4); transition: filter 0.4s var(--ease); }
 .gw-cup.with-image.filled img { filter: grayscale(0) opacity(1); }
 /* ★对照 PC scrapbook:贴纸 float:right 浮在 entry 旁,drop-shadow 三态模拟"浮高" + 一次性落纸动画 */
 .gw-sticker { float: right; width: 30%; margin: 2px 0 8px 14px; transform: rotate(var(--rot, 1.5deg));

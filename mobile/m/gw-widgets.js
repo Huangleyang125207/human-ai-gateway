@@ -39,7 +39,7 @@
       for (let i = 0; i < N; i++) {
         const cupFilled = i < st.water;
         const cup = el('div', 'gw-cup' + (i === focusIdx ? ' focus' : (Math.abs(i - focusIdx) === 1 && focusIdx >= 0 ? ' near' : '')) + (i === justIdx ? ' just' : '') + (cupImg ? ' with-image' : '') + (cupFilled ? ' filled' : ''));
-        cup.innerHTML = cupImg ? `<img src="${cupImg}" alt="">` : cupSVG(cupFilled, i, scope);
+        cup.innerHTML = cupImg ? `<img src="${cupImg}" alt="" draggable="false">` : cupSVG(cupFilled, i, scope);
         row.appendChild(cup);
       }
       foot.querySelector('b').textContent = st.water;
@@ -59,9 +59,12 @@
       paint();
     }
     if (!st.readonly) {
-      row.addEventListener('pointerdown', (e) => { try { row.setPointerCapture(e.pointerId); } catch (x) {} apply(e.clientX); });
-      row.addEventListener('pointermove', (e) => { if (row.hasPointerCapture && row.hasPointerCapture(e.pointerId)) apply(e.clientX); });
-      const end = () => { focusIdx = -1; paint(); setTimeout(() => { justIdx = -1; paint(); }, 900); GW.bus.emit('pulse'); };
+      // dragging 标志门控 move,而非 hasPointerCapture —— 长按图标一旦触发原生拖拽会丢失指针捕获,
+      // 之后 setPointerCapture 静默失败 → hasPointerCapture 恒 false → 滑动永久失灵(长按后锁死真因)。
+      let dragging = false;
+      row.addEventListener('pointerdown', (e) => { dragging = true; try { row.setPointerCapture(e.pointerId); } catch (x) {} apply(e.clientX); });
+      row.addEventListener('pointermove', (e) => { if (dragging) apply(e.clientX); });
+      const end = () => { dragging = false; focusIdx = -1; paint(); setTimeout(() => { justIdx = -1; paint(); }, 900); GW.bus.emit('pulse'); };
       row.addEventListener('pointerup', end); row.addEventListener('pointercancel', end);
     }
     paint();
