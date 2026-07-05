@@ -56,6 +56,18 @@
   /* 取一张照片(WKWebView 原生相册/相机,无新依赖)→ 返压缩后 dataURL;取消返 null */
   GW.pickPhoto = function (opts) {
     opts = opts || {};
+    // 原生(Capacitor):走 @capacitor/camera —— 拍的照片 saveToGallery 同步进系统相册;相册选不重复存。
+    const Cam = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()
+      && window.Capacitor.Plugins && window.Capacitor.Plugins.Camera;
+    if (Cam) {
+      return Cam.getPhoto({
+        quality: 80, allowEditing: false, resultType: 'dataUrl',
+        source: opts.camera ? 'CAMERA' : 'PHOTOS',
+        saveToGallery: !!opts.camera,          // 拍照即存系统相册(相册选来的不重复存)
+        presentationStyle: 'popover',
+      }).then((p) => (p && p.dataUrl) ? shrinkPhoto(p.dataUrl) : null).catch(() => null); // 取消/无权限→null
+    }
+    // 兜底(浏览器 / dev / 无插件):网页 <input capture>
     return new Promise((resolve) => {
       const input = document.createElement('input');
       input.type = 'file'; input.accept = 'image/*';
@@ -217,7 +229,7 @@
           const t0 = e.touches[0]; if (!t0) return;
           swx = swLastX = t0.clientX; swy = swLastY = t0.clientY;
           swDrag = false; swEl = null;
-          if (st.subPage || e.target.closest('.gw-tasks, .gw-bottom, .gw-sheet, .gw-card, .gw-drawer, .gw-scrim, .gw-sticker')) swx = null;
+          if (st.subPage || e.target.closest('.gw-tasks, .gw-cups, .gw-bottom, .gw-sheet, .gw-card, .gw-drawer, .gw-scrim, .gw-sticker')) swx = null;
         }, { passive: true });
         gw.addEventListener('touchmove', (e) => {
           const t0 = e.touches[0]; if (!t0) return;
