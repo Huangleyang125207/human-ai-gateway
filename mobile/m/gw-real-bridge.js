@@ -617,7 +617,12 @@
                     var u2 = (wc2 && wc2.image_url) || null;
                     if (u2 && u2.indexOf('/attachments/') === 0 && GW.resolveImg) return GW.resolveImg(u2).then(function (du) { GW.cupImageUrl = du; });
                     GW.cupImageUrl = u2;
-                  }).then(function () { GW.bus && GW.bus.emit('reloadDay'); }).catch(function () {});
+                  }).then(function () {
+                    // reloadDay/reloadCare 有 tab==='journal' 守卫,换图时用户正在对话页会被跳过;
+                    // 双页 pager 两页 DOM 常驻 → 直接重画 care,滑回日记即见新图
+                    var careEl = document.querySelector('.gw-care');
+                    if (careEl && GW.renderCare && GW.state) GW.renderCare(careEl, GW.state);
+                  }).catch(function () {});
                 }
               } catch (e) {}
               // AI 写完 md 后 → 刷新内存 GW.journal[dayKey] + 时间线重渲(spec case 1 ⑥)
