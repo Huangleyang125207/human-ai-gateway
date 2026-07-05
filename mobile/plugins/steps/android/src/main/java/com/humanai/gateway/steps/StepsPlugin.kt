@@ -38,6 +38,34 @@ import java.util.Locale
 )
 class StepsPlugin : Plugin() {
 
+    // ★ 7.5 真机修:TYPE_STEP_COUNTER 注册后不立即回调,只在迈步时才 onSensorChanged
+    //   (官方文档实锤)。原 readCounter 只在读取那 3s 临时注册 → 站着不动没事件 → 超时"无法获取"。
+    //   改常驻监听器:load 起持续注册,任何一步都缓存最新累计值 + 持久化;读取直接返缓存,
+    //   零等待。Recording API 是官方另一路但需 GMS,国产 ROM 用不了,故走常驻 sensor。
+    @Volatile private var cachedSteps: Long = -1L
+    private var persistentRegistered = false
+    private val persistentListener = object : SensorEventListener {
+        override fun onSensorChanged(e: SensorEvent) {
+            cachedSteps = e.values[0].toLong()
+            context.getSharedPreferences("gw_steps", Context.MODE_PRIVATE)
+                .edit().putLong("last_cum", cachedSteps).apply()
+        }
+        override fun onAccuracyChanged(s: Sensor?, a: Int) {}
+    }
+    /** 常驻注册计步监听(幂等)。无传感器/未授权则跳过,授权后 permDone 会再调一次。 */
+    private fun ensurePersistent() {
+        if (persistentRegistered || !sensorAvailable()) return
+        if (Build.VERSION.SDK_INT >= 29 && getPermissionState("activity") != PermissionState.GRANTED) return
+        val sensor = sensorManager().getDefaultSensor(Sensor.TYPE_STEP_COUNTER) ?: return
+        sensorManager().registerListener(persistentListener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+        persistentRegistered = true
+    }
+
+    override fun load() {
+        super.load()
+        ensurePersistent()
+    }
+
     private fun sensorManager(): SensorManager =
         context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
@@ -68,10 +96,15 @@ class StepsPlugin : Plugin() {
     }
 
     @PermissionCallback
-    private fun permDone(call: PluginCall) { probe(call) }
+    private fun permDone(call: PluginCall) { ensurePersistent(); probe(call) }
 
-    // ── 一次性读当前累计值(3 秒超时) ──────────────────────
+    // ── 读当前累计值:常驻缓存优先(零等待)→ 临时监听 6s → 持久化兜底 ──────
+    //   缓存来自常驻监听器(load 起就在跑),只要 app 开着期间迈过任一步就有值。
+    //   都没有再临时注册等 6s(比原 3s 宽);仍拿不到 → 用上次持久化的累计值(approximate)
+    //   兜底,而非硬 reject —— 让"站着不动"退化成"显示上次已知步数"而非"无法获取"。
     private fun readCounter(call: PluginCall, onValue: (Long) -> Unit) {
+        ensurePersistent()
+        if (cachedSteps >= 0) { onValue(cachedSteps); return }   // 常驻监听已有值 → 直接返
         val sm = sensorManager()
         val sensor = sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
             ?: run { call.reject("unavailable"); return }
@@ -90,9 +123,13 @@ class StepsPlugin : Plugin() {
             if (!done) {
                 done = true
                 sm.unregisterListener(listener)
-                call.reject("no-reading — 传感器 3 秒无读数(可能设备无计步硬件)")
+                if (cachedSteps >= 0) { onValue(cachedSteps); return@postDelayed }
+                val persisted = context.getSharedPreferences("gw_steps", Context.MODE_PRIVATE)
+                    .getLong("last_cum", -1L)
+                if (persisted >= 0) onValue(persisted)   // 上次已知累计,approximate 由 baseline 逻辑判
+                else call.reject("no-reading — 传感器 6 秒无读数,走两步再试")
             }
-        }, 3000)
+        }, 6000)
     }
 
     // ── 今日基线(近似) ────────────────────────────────────
