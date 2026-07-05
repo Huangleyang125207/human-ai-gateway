@@ -29,42 +29,83 @@
     const block = el('div', 'gw-care-block' + (st.readonly ? ' readonly' : ''));
     block.innerHTML =
       `<div class="gw-care-label">八杯水 <span class="whisper">${st.readonly ? '历史日只读' : '睡前一抹点亮'}</span></div>
-       <div class="gw-cups"></div>
+       <div class="gw-cups"><div class="gw-cups-strip"></div></div>
        <div class="gw-cups-foot"><b>${st.water}</b> / ${N} 杯 · <span class="hint"></span></div>`;
     const row = block.querySelector('.gw-cups');
+    const strip = block.querySelector('.gw-cups-strip');
     const foot = block.querySelector('.gw-cups-foot');
-    let justIdx = -1, focusIdx = -1;
-    function paint() {
-      row.innerHTML = '';
-      for (let i = 0; i < N; i++) {
-        const cupFilled = i < st.water;
-        const cup = el('div', 'gw-cup' + (i === focusIdx ? ' focus' : (Math.abs(i - focusIdx) === 1 && focusIdx >= 0 ? ' near' : '')) + (i === justIdx ? ' just' : '') + (cupImg ? ' with-image' : '') + (cupFilled ? ' filled' : ''));
-        cup.innerHTML = cupImg ? `<img src="${cupImg}" alt="" draggable="false">` : cupSVG(cupFilled, i, scope);
-        row.appendChild(cup);
-      }
+    let justIdx = -1;
+    function paintFoot() {
       foot.querySelector('b').textContent = st.water;
       foot.querySelector('.hint').textContent = st.readonly ? '' : (st.water >= N ? '今天喝够了' : `还差 ${N - st.water} 杯`);
     }
+    function paint() {
+      strip.innerHTML = '';
+      for (let i = 0; i < N; i++) {
+        const cupFilled = i < st.water;
+        const cup = el('div', 'gw-cup' + (i === justIdx ? ' just' : '') + (cupImg ? ' with-image' : '') + (cupFilled ? ' filled' : ''));
+        cup.innerHTML = cupImg ? `<img src="${cupImg}" alt="" draggable="false">` : cupSVG(cupFilled, i, scope);
+        strip.appendChild(cup);
+      }
+      paintFoot();
+    }
     function idxAt(clientX) {
-      const cups = row.querySelectorAll('.gw-cup'); let best = -1, bd = 1e9;
+      const cups = strip.querySelectorAll('.gw-cup'); let best = -1, bd = 1e9;
       cups.forEach((c, i) => { const r = c.getBoundingClientRect(); const d = Math.abs(clientX - (r.left + r.width / 2)); if (d < bd) { bd = d; best = i; } });
       return best;
     }
-    function apply(clientX) {
-      if (st.readonly) return;
-      const i = idxAt(clientX); if (i < 0) return;
-      focusIdx = i;
-      if (i + 1 > st.water) justIdx = i;
-      st.water = i + 1;
-      paint();
-    }
     if (!st.readonly) {
+      // ★ 按住即放大(7.5 对齐拍板):pointerdown → 杯带原地长高、一屏 3 只、居中在按下的杯
+      //   (快点一下 = 点亮到该杯,旧"一抹点亮"语义兼容);拖动 = 杯带 1:1 跟手滚动,
+      //   过中心即点亮/回退(滚动位置=杯数);松手结算回缩。
       // dragging 标志门控 move,而非 hasPointerCapture —— 长按图标一旦触发原生拖拽会丢失指针捕获,
       // 之后 setPointerCapture 静默失败 → hasPointerCapture 恒 false → 滑动永久失灵(长按后锁死真因)。
-      let dragging = false;
-      row.addEventListener('pointerdown', (e) => { dragging = true; try { row.setPointerCapture(e.pointerId); } catch (x) {} apply(e.clientX); });
-      row.addEventListener('pointermove', (e) => { if (dragging) apply(e.clientX); });
-      const end = () => { dragging = false; focusIdx = -1; paint(); setTimeout(() => { justIdx = -1; paint(); }, 900); GW.bus.emit('pulse'); };
+      let dragging = false, zx0 = 0, off = 0, cupW = 1, rowW = 1;
+      const offFor = (i) => rowW / 2 - (i + 0.5) * cupW;
+      const setStrip = (o) => { strip.style.transform = 'translateX(' + o + 'px)'; };
+      function setLit(n) {
+        if (n === st.water) return;
+        if (n > st.water) justIdx = n - 1;
+        st.water = n;
+        strip.querySelectorAll('.gw-cup').forEach((c, i) => {
+          c.classList.toggle('filled', i < n);
+          c.classList.toggle('just', i === justIdx && i < n);
+          c.classList.toggle('focus', i === n - 1);
+        });
+        paintFoot();
+      }
+      row.addEventListener('pointerdown', (e) => {
+        dragging = true;
+        try { row.setPointerCapture(e.pointerId); } catch (x) {}
+        const i = idxAt(e.clientX);
+        rowW = row.clientWidth; cupW = rowW / 3;
+        block.classList.add('zoom');
+        row.style.touchAction = 'none';   // 放大态拦纵向滚动,拖动全归杯带
+        zx0 = e.clientX; off = offFor(i < 0 ? 0 : i);
+        setStrip(off);
+        setLit((i < 0 ? 0 : i) + 1);
+        strip.querySelectorAll('.gw-cup').forEach((c, k) => c.classList.toggle('focus', k === i));
+      });
+      row.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        let o = off + (e.clientX - zx0);
+        const lo = offFor(N - 1), hi = offFor(0);
+        if (o < lo) o = lo + (o - lo) * 0.3;   // 两端橡皮阻尼
+        if (o > hi) o = hi + (o - hi) * 0.3;
+        setStrip(o);
+        const center = Math.max(0, Math.min(N - 1, Math.round((rowW / 2 - o) / cupW - 0.5)));
+        setLit(center + 1);
+      });
+      const end = () => {
+        if (!dragging) return;
+        dragging = false;
+        block.classList.remove('zoom');
+        row.style.touchAction = '';
+        strip.style.transform = '';
+        paint();   // 回缩重渲(带 just 脉冲)
+        setTimeout(() => { justIdx = -1; paint(); }, 900);
+        GW.bus.emit('pulse');
+      };
       row.addEventListener('pointerup', end); row.addEventListener('pointercancel', end);
     }
     paint();
