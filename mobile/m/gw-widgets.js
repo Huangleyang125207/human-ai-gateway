@@ -82,29 +82,34 @@
         });
         paintFoot();
       }
+      // ★ 相对拖动映射(7.5 三修拍板):按哪都行 — 起点永远 = 当前水量那只杯(点按不改杯数);
+      //   拖动是相对位移,整个 0→8 行程压缩在 SPAN(0.75 屏宽)内,不抬手可从头调到尾;
+      //   手指位移经 step 齿轮比驱动杯带(视觉仍平移 cupW/杯),两端橡皮阻尼。左滑加。
+      let startIdx = 0, step = 1;
       row.addEventListener('pointerdown', (e) => {
         dragging = true;
         try { row.setPointerCapture(e.pointerId); } catch (x) {}
-        const i = Math.max(0, idxAt(e.clientX));
         rowW = row.clientWidth; cupW = rowW / VISIBLE;
+        step = (rowW * 0.75) / N;
+        startIdx = Math.max(0, st.water - 1);
         block.classList.add('zoom');
-        zx0 = e.clientX; off = offFor(i);
+        zx0 = e.clientX; off = offFor(startIdx);
         // 进场:strip 平滑滑到位(和长高/放大同拍),0.3s 后交还拖动(拖动期间必须零过渡跟手)
         strip.style.transition = EASE_OUT;
         setStrip(off);
         setTimeout(() => { if (dragging) strip.style.transition = 'none'; }, 300);
-        setLit(i + 1);
-        setEmphasis(i);
+        setEmphasis(startIdx);
       });
       row.addEventListener('pointermove', (e) => {
         if (!dragging) return;
-        let o = off + (e.clientX - zx0);
-        const lo = offFor(N - 1), hi = offFor(0);
-        if (o < lo) o = lo + (o - lo) * 0.3;   // 两端橡皮阻尼
-        if (o > hi) o = hi + (o - hi) * 0.3;
+        // 连续杯位:起点杯 + 手指位移/齿轮比;越界部分打 0.3 阻尼再收进 [0, N-1]
+        let f = startIdx + (zx0 - e.clientX) / step;
+        if (f < 0) f = f * 0.3;
+        if (f > N - 1) f = (N - 1) + (f - (N - 1)) * 0.3;
+        f = Math.max(-0.45, Math.min(N - 0.55, f));
         if (strip.style.transition !== 'none') strip.style.transition = 'none';
-        setStrip(o);
-        const center = Math.max(0, Math.min(N - 1, Math.round((rowW / 2 - o) / cupW - 0.5)));
+        setStrip(offFor(f));
+        const center = Math.max(0, Math.min(N - 1, Math.round(f)));
         setLit(center + 1);
         setEmphasis(center);
       });
