@@ -102,11 +102,14 @@
       });
       row.addEventListener('pointermove', (e) => {
         if (!dragging) return;
-        // 连续杯位:起点杯 + 手指位移/齿轮比;越界部分打 0.3 阻尼再收进 [0, N-1]
+        // 连续杯位:起点杯 + 手指位移/齿轮比;越界走苹果橡皮筋公式
+        // f(x) = (x·d·c)/(d + c·x),c=0.55(UIScrollView 常数),d=0.6 杯位行程软上限:
+        // 刚越界近乎跟手,越拖越硬,无限拖也到不了 d — 无需硬钳位
+        const RUBBER_C = 0.55, RUBBER_D = 0.6;
+        const rubber = (x) => (x * RUBBER_D * RUBBER_C) / (RUBBER_D + RUBBER_C * x);
         let f = startIdx + (zx0 - e.clientX) / step;
-        if (f < 0) f = f * 0.3;
-        if (f > N - 1) f = (N - 1) + (f - (N - 1)) * 0.3;
-        f = Math.max(-0.45, Math.min(N - 0.55, f));
+        if (f < 0) f = -rubber(-f);
+        else if (f > N - 1) f = (N - 1) + rubber(f - (N - 1));
         if (strip.style.transition !== 'none') strip.style.transition = 'none';
         setStrip(offFor(f));
         const center = Math.max(0, Math.min(N - 1, Math.round(f)));
