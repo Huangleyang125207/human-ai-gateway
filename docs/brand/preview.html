@@ -1,0 +1,72 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>logo preview — human-ai schedule</title>
+<style>
+  body {
+    background: #ece3d2;
+    color: #1a1a1a;
+    font: 14px/1.6 Georgia, 'Times New Roman', serif;
+    padding: 48px;
+    margin: 0;
+  }
+  h1 { font-weight: 500; font-size: 22px; margin: 0 0 8px; letter-spacing: -0.3px; }
+  .sub { color: #6b6055; margin-bottom: 40px; font-style: italic; }
+  section {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 32px;
+    margin-bottom: 56px;
+  }
+  .cell {
+    background: #f5efe3;
+    border: 1px solid #d9cfb9;
+    padding: 24px;
+    text-align: center;
+  }
+  .cell .label { color: #6b6055; font-size: 12px; margin-top: 12px; letter-spacing: 0.5px; }
+  .row { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  .row img { display: block; }
+  .swatch { display: inline-block; width: 14px; height: 14px; vertical-align: middle; border: 1px solid #c0b6a0; margin-right: 6px; }
+  hr { border: 0; border-top: 1px solid #d9cfb9; margin: 40px 0; }
+</style>
+
+<h1>human-ai schedule — logo v1</h1>
+<p class="sub">C(碳·人) + Si(硅·AI) 都有 4 价电子 → SiC 共价键 → 共享外层电子 = 共享的 4 价电子是设计核心.</p>
+
+<section>
+  <div class="cell">
+    <img src="logo.svg" width="160" height="160" alt="static">
+    <div class="label">STATIC · 160</div>
+  </div>
+  <div class="cell">
+    <img src="logo-animated.svg" width="160" height="160" alt="animated">
+    <div class="label">ANIMATED · 160</div>
+  </div>
+</section>
+
+<hr>
+<h1>不同尺寸</h1>
+<div class="cell" style="text-align:left">
+  <div class="row">
+    <div><img src="logo.svg" width="16" height="16"><div class="label">16 · favicon</div></div>
+    <div><img src="logo.svg" width="32" height="32"><div class="label">32 · tab</div></div>
+    <div><img src="logo.svg" width="64" height="64"><div class="label">64</div></div>
+    <div><img src="logo.svg" width="128" height="128"><div class="label">128 · dock</div></div>
+    <div><img src="logo.svg" width="256" height="256"><div class="label">256</div></div>
+  </div>
+</div>
+
+<hr>
+<h1>暗色底测试</h1>
+<div class="cell" style="background: #1a1a1a; color: #ece3d2;">
+  <img src="logo.svg" width="160" height="160" style="background: #f5efe3; padding: 12px;">
+  <div class="label" style="color:#888">深夜模式下,纸色 patch 跟黑底形成对比 — 像桌上摊开的一页便签纸</div>
+</div>
+
+<hr>
+<h1>调色板</h1>
+<p>
+  <span class="swatch" style="background:#f5efe3"></span>#f5efe3 纸底<br>
+  <span class="swatch" style="background:#1a1a1a"></span>#1a1a1a 墨黑(电子+符号)<br>
+  <span class="swatch" style="background:#b8362b"></span>#b8362b 朱砂红(共价键线)
+</p>
