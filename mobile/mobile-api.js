@@ -109,7 +109,15 @@
         if (!fs) return null;
         if (k.indexOf("journal/") === 0) {
           return CapacitorBackend._canonJournal(k.slice(8)).then(function (p) {
-            return fs.readFile({ path: p, directory: DIR, encoding: "utf8" }).then(function (r) { return r.data; }).catch(function () { return null; });
+            return fs.readFile({ path: p, directory: DIR, encoding: "utf8" }).then(function (r) { return r.data; }, function () {
+              // ★复审 R1:真身读不到 → 回退 .bak(原子写崩溃残留窗口的恢复网,让 setText 的 .bak "可恢复"成真)。
+              //   .bak 存在且非空 → promote 回真身(自愈)再返;.bak 也没 = 真·新一天 → null。
+              return fs.readFile({ path: p + ".bak", directory: DIR, encoding: "utf8" }).then(function (b) {
+                if (!b || !b.data) return null;
+                return fs.writeFile({ path: p, data: b.data, directory: DIR, encoding: "utf8", recursive: true })
+                  .then(function () { return b.data; }, function () { return b.data; });
+              }, function () { return null; });
+            });
           });
         }
         return fs.readFile({ path: capPath(k), directory: DIR, encoding: "utf8" }).then(function (r) { return r.data; }).catch(function () { return null; });
@@ -142,9 +150,10 @@
           }, function () { /* 首次无真身,跳过备份 */ });
         })
         .then(function () {
-          return fs.deleteFile({ path: p, directory: DIR }).catch(function () {});  // 真身不存在也无妨
-        })
-        .then(function () {
+          // ★复审 B2/R2:Capacitor rename 原生已覆盖目标(Android renameTo / iOS moveItem 前先删旧)
+          //   → 原来手动 deleteFile 冗余,且把删→rename 拆成更宽的 JS async 空窗。直接 rename:
+          //   成功=新真身;失败=真身原样(tmp 孤儿下次覆盖)。残留窗口(原生删旧后 rename 失败)由
+          //   getText 的 .bak 回退兜底(R1)。
           return fs.rename({ from: tmp, to: p, directory: DIR, toDirectory: DIR });
         });
     },
@@ -1134,11 +1143,24 @@
   //   再走云端。端侧可用则直接用。返 { text, engine, degraded }。
   //   真离线端侧模型(PP-OCR onnx / Tesseract)是 degraded 路径的目标替代,见 native-ocr 插件 TODO。
   var _ocrProbe = null;               // null=未探测, true/false=端侧可用性缓存
+  // ★复审 R4:native promise 若永不 settle(GMS/库 hang)会让 cutout 永久卡"处理中…"。
+  //   给端侧调用套超时,超时按 native-error 走云端兜底。
+  function _withTimeout(p, ms) {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var t = setTimeout(function () { if (!done) { done = true; reject(new Error("ocr-timeout")); } }, ms);
+      Promise.resolve(p).then(function (v) { if (!done) { done = true; clearTimeout(t); resolve(v); } },
+        function (e) { if (!done) { done = true; clearTimeout(t); reject(e); } });
+    });
+  }
   function _ocrNativeAvailable(plugin) {
-    if (_ocrProbe !== null) return Promise.resolve(_ocrProbe);
-    if (!plugin || !plugin.available) { _ocrProbe = !!(plugin && plugin.recognize); return Promise.resolve(_ocrProbe); }
-    return plugin.available().then(function (r) { _ocrProbe = !!(r && r.available); return _ocrProbe; })
-      .catch(function () { _ocrProbe = false; return false; });
+    // ★复审 R3:只缓存 true(端侧确认可用);false/异常不缓存下次重探,避免 transient false
+    //   或探测期异常把整个会话永久钉死到云端付费兜底。
+    if (_ocrProbe === true) return Promise.resolve(true);
+    if (!plugin || !plugin.available) { var has = !!(plugin && plugin.recognize); if (has) _ocrProbe = true; return Promise.resolve(has); }
+    return _withTimeout(plugin.available(), 6000).then(function (r) {
+      var ok = !!(r && r.available); if (ok) _ocrProbe = true; return ok;
+    }).catch(function () { return false; });
   }
   function _runOcr(dataUrl, urlForCloud) {
     var plugin = (typeof window !== "undefined") && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeOcr;
@@ -1148,7 +1170,7 @@
     }
     return _ocrNativeAvailable(plugin).then(function (ok) {
       if (ok) {
-        return plugin.recognize({ image: dataUrl, languages: ["zh-Hans", "en-US"] })
+        return _withTimeout(plugin.recognize({ image: dataUrl, languages: ["zh-Hans", "en-US"] }), 12000)
           .then(function (r) { return { text: (r && r.text) || "", engine: (r && r.engine) || "native", degraded: false }; })
           .catch(function () {
             // 端侧本应可用却抛错 → 兜云端 + 记信号(区别于无 GMS)
@@ -1161,16 +1183,10 @@
       return _ocrViaCloud(urlForCloud || null, dataUrl).then(function (t) { return { text: t || "", engine: "CloudVision_fallback", degraded: true }; });
     });
   }
-  var _ocrNoticeShown = false;
   function _ocrDegradedNotice(reason) {
+    // ★复审 B5:只发遥测信号。面向用户的"用了云端"明示改由消费方(setTaskIcon)合进最终成功
+    //   whisper —— 这里若自己 whisper 会被后续成功 whisper 秒盖(单个共享元素),等于没提示。
     try { if (typeof window !== "undefined" && window.emitSignal) window.emitSignal("ocr.cloud_fallback", { reason: reason }); } catch (e) {}
-    if (_ocrNoticeShown) return;        // 一次性,不每张图都打扰
-    _ocrNoticeShown = true;
-    try {
-      if (typeof window !== "undefined" && window.GW && window.GW.whisper) {
-        window.GW.whisper(reason === "no-gms" ? "这台设备没有端侧文字识别,这次用了云端(会走一次云调用)" : "端侧识别没成,这次用了云端", false);
-      }
-    } catch (e) {}
   }
 
   // ── 空白一天模板(打卡段 + 半小时格)— 复刻桌面 _new_day_create 生成算法,输出字节一致 ──
@@ -1873,8 +1889,15 @@
           var raw = msg.content || "(空回复)";
           var synth = _extractSynthToolCalls(raw);
           if (synth.calls.length && !lastRound) {
-            // 伪 tool_call 的 assistant 消息进 messages(content 用 strip 后的,避免 DSML 再喂回模型)
-            messages.push({ role: "assistant", content: synth.stripped });
+            // 伪 tool_call 的 assistant 消息进 messages。★复审 B3:必须挂 tool_calls 字段 —— 否则
+            // 后面 push 的 role:"tool" 成孤儿(assistant 没声明调用),下一轮 callRound 回发触发
+            // OpenAI/DeepSeek 契约 400 → 整个对话崩"AI 对话失败"。对齐 PC chat_routes L471-477。
+            messages.push({
+              role: "assistant", content: synth.stripped,
+              tool_calls: synth.calls.map(function (c) {
+                return { id: c.id, type: "function", function: { name: c.name, arguments: JSON.stringify(c.args) } };
+              }),
+            });
             var sps = synth.calls.map(function (c) {
               var cap = TOOL_FREQ_CAP[c.name];
               if (cap != null) {
@@ -2198,12 +2221,14 @@
       var tmw = tm.getFullYear() + "-" + pad2(tm.getMonth() + 1) + "-" + pad2(tm.getDate());
       // 跟 PC 一致:最多建到明天(+1),再远拒
       if (date > tmw) return jsonResp({ ok: false, error: "最多创建到明天" });
-      return Store.readJournalMd(date).then(function (md) {
+      // ★复审 B1:唯一漏网的未加锁 read-modify-write。骨架建晚于并发写 → 空骨架盖真文件
+      //   (L58 注释自己点名的数据丢失级);包进锁,与其余 8 个写 handler 一致。
+      return withJournalLock(date, function () { return Store.readJournalMd(date).then(function (md) {
         if (md !== null) return jsonResp({ ok: true, created: false, file: isoToStem(date) + ".md", message: "已存在" });
         return Store.writeJournalMd(date, emptyDayMd()).then(function () {
           return jsonResp({ ok: true, created: true, file: isoToStem(date) + ".md", message: "已创建" });
         });
-      });
+      }); });
     },
     "GET /api/daily-tasks": function (req, u) {
       var date = qsDate(u) || todayIso();
@@ -2294,6 +2319,7 @@
               ok: true, task_name: name,
               ocr_pill_count: pillCount > 0 ? pillCount : null,
               engine: r.engine, ocr_text: r.text,
+              degraded: !!r.degraded,   // ★复审 B5:透回前端,由 setTaskIcon 合进最终 whisper(否则被成功 whisper 秒盖)
             });
           });
         });
@@ -2448,8 +2474,11 @@
         } else if ("increment" in body) {
           var inc = parseInt(body.increment, 10) | 0;
           next = Math.max(0, Math.min(dose, cur + inc));
-        } else if (body && typeof body.checked === "boolean") {
-          next = body.checked ? dose : 0;
+        } else if (body && ("checked" in body)) {
+          // ★复审 B4:synth/DSML 路径下 checked 恒字符串("true"/"false"),原 typeof==="boolean"
+          //   判定失败会落到 toggle → 语义反转(取消勾选反而勾上)。宽松判真值。
+          var _ck = body.checked === true || String(body.checked).toLowerCase() === "true";
+          next = _ck ? dose : 0;
         } else {
           next = (cur >= dose) ? 0 : dose;  // toggle
         }

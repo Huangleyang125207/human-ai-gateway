@@ -369,7 +369,7 @@
       const C = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Cutout;
       if (C && C.cutout) { const r = await C.cutout({ image: dataUrl }); if (r && r.png) icon = r.png; }
     } catch (e) { /* 抠图失败(非 iOS17 / 无主体)→ 原图兜底 */ }
-    let ok = false, pill = null;
+    let ok = false, pill = null, degraded = false;
     try {
       const resp = await fetch('/api/cutout', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -378,11 +378,14 @@
       const j = await resp.json().catch(() => ({}));
       ok = resp.ok && j && j.ok !== false;
       pill = j && j.ocr_pill_count;
+      degraded = !!(j && j.degraded);           // ★复审 B5:无 GMS 走了云端识别 → 明示进最终 whisper
     } catch (e) { /* 网络/解析失败 → ok 留 false */ }
     if (ok) {
       task.image_url = icon;                    // 乐观更新 → 立即重画
       GW.bus.emit('reloadCare');
-      GW.whisper(pill ? `图标贴好了 · 顺手认出 ${pill} 粒` : '图标贴好了 · ' + task.name, false);
+      // 明示"这次走了云端"合进成功 whisper(而非被秒盖的独立提示)
+      const cloud = degraded ? ' · 这次用了云端识别' : '';
+      GW.whisper((pill ? `图标贴好了 · 顺手认出 ${pill} 粒` : '图标贴好了 · ' + task.name) + cloud, false);
     } else {
       GW.whisper('设图标没成,稍后再试', false);
     }
