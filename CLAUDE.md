@@ -39,6 +39,32 @@ gateway/                ← 本目录
 
 ---
 
+## References(路由表 — 从 gateway cwd 进来先看这)
+
+> 从 gateway/ 开 session 路由不到 agents创作平台/CLAUDE.md,所以在这自带一张。「我想干 X → 去哪」。
+
+| 我想要... | 去哪 |
+|---|---|
+| 项目 meta / context(强制 pre-load) | [`docs/PROJECT.md`](docs/PROJECT.md) |
+| 大改 viewer 视觉 → 交设计 agent | [`docs/DESIGN_BRIEF.md`](docs/DESIGN_BRIEF.md) |
+| 发版流程 / release 模板 | [`docs/RELEASE_TEMPLATE.md`](docs/RELEASE_TEMPLATE.md) |
+| 加新前端皮肤(复用引擎只换皮) | [`docs/SKIN_WORKFLOW.md`](docs/SKIN_WORKFLOW.md) |
+| 用户视角的 PULSE / 定位 | [`docs/USER_PULSE.md`](docs/USER_PULSE.md) |
+| 项目大脑地图(散落各处的总索引) | [`docs/INDEX.md`](docs/INDEX.md) |
+| 品牌 logo / preview | [`docs/brand/`](docs/brand/) |
+| 运营(小红书手册 / 云厂商外联) | [`docs/spread/`](docs/spread/) |
+| 加一个 widget / widget 怎么写 | [`docs/gateway-extension/`](docs/gateway-extension/)(SKILL.md · WIDGET_AUTHORING.md) |
+| **改移动端前端 → 别写即时脚本,跑固化测试网** | [`mobile/parity/`](mobile/parity/)(109 golden oracle;`run.mjs` / `harness.mjs` / `check-fe-be.sh`) |
+| 移动端交互 E2E 规格(日记/拍照/剪贴簿/标签) | `mobile/INTERACTION_E2E_*.md` |
+| 移动端 Android 构建 / OCR native | [`mobile/ANDROID_BUILD.md`](mobile/ANDROID_BUILD.md) · `mobile/OCR_NATIVE_PLAN.md` |
+| parity 方法论(前后端一致性 TDD) | [`WEBVIEW-PARITY-TDD.md`](WEBVIEW-PARITY-TDD.md) · `mobile/PARITY_LOOP.md` |
+| 桌面自更新 / SSL / 待办 backlog | [`INTERNAL_TEST_BACKLOG.md`](INTERNAL_TEST_BACKLOG.md) |
+| 子 agent 编排 / briefing | [`AGENT_BRIEFING_TEMPLATE.md`](AGENT_BRIEFING_TEMPLATE.md) · [`AGENT_ORCHESTRATION_PATTERNS.md`](AGENT_ORCHESTRATION_PATTERNS.md) |
+| PULSE 真源(外部,runtime 耦合勿搬) | `~/agents创作平台/agents/human-ai-schedule/PULSE.md` |
+| 日记 / 标签聚合数据真源 | `~/.human-ai/vault/`(勿写;`agents创作平台/数据库/valut` 是 5 月冻结镜像勿用) |
+
+---
+
 ## Local progress(gateway 自己)
 
 - [x] v0.1.20: 三轮 ultracode review 出的 P1+P2 22 条全部收口
