@@ -36,3 +36,6 @@ __pycache__/
 
 # Capacitor plugin Android build output (Gradle)
 mobile/plugins/*/android/build/
+
+# 设计草稿 — 本地 scratch,含大图,不入版本控制(7.6 整顿定)
+design/2607-fable-mobile/
