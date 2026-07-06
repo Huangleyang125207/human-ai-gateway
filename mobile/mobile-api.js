@@ -118,12 +118,32 @@
       return _fsWait().then(function (fs) {
         if (!fs) throw new Error("存储不可用");
         if (k.indexOf("journal/") === 0) {
+          // ★ H2:日记本体是 MD-is-truth 根数据 → 原子写 + .bak(对齐 PC _safe_write_text)
           return CapacitorBackend._canonJournal(k.slice(8)).then(function (p) {
-            return fs.writeFile({ path: p, data: v, directory: DIR, encoding: "utf8", recursive: true });
+            return CapacitorBackend._writeAtomicWithBak(fs, p, v);
           });
         }
         return fs.writeFile({ path: capPath(k), data: v, directory: DIR, encoding: "utf8", recursive: true });
       });
+    },
+    // ★ H2 原子写 + 单级备份:tmp 全量落 → 现真身备份到 .bak → rename 覆盖。
+    //   崩溃/OOM 只可能撕裂 .tmp(丢弃),真身要么旧要么新,永不半截;.bak 留最后一版好数据。
+    //   Capacitor rename 覆盖行为跨平台不保证 → 先删真身再 rename(窗口内 JS 单线程 + 写锁
+    //   串行,崩在此 ~1ms 窗口只丢真身但 .bak 在,可恢复)。
+    _writeAtomicWithBak: function (fs, p, v) {
+      var tmp = p + ".tmp";
+      return fs.writeFile({ path: tmp, data: v, directory: DIR, encoding: "utf8", recursive: true })
+        .then(function () {
+          return fs.readFile({ path: p, directory: DIR, encoding: "utf8" }).then(function (cur) {
+            return fs.writeFile({ path: p + ".bak", data: cur.data, directory: DIR, encoding: "utf8" }).catch(function () {});
+          }, function () { /* 首次无真身,跳过备份 */ });
+        })
+        .then(function () {
+          return fs.deleteFile({ path: p, directory: DIR }).catch(function () {});  // 真身不存在也无妨
+        })
+        .then(function () {
+          return fs.rename({ from: tmp, to: p, directory: DIR, toDirectory: DIR });
+        });
     },
     remove: function (k) {
       var prefs = _getPrefs(), fs = _getFs();
@@ -1827,6 +1847,17 @@
   // ── 端点处理 ─────────────────────────────────────────
   function qsDate(u) { return new URL(u, location.origin).searchParams.get("date") || ""; }
 
+  // ★ H2:按日期串行化日记 read-modify-write,堵 lost-update(AI 21:30 纸条写入 +
+  //   用户行内编辑并发交错 → 后写者覆盖先写者,对齐 PC sha-baseline+lock 红线)。
+  //   JS 单线程,竞态只在 async gap;同一 iso 的写全排进一条 promise 链顺序执行。
+  var _journalWriteChain = {};
+  function withJournalLock(date, fn) {
+    var prev = _journalWriteChain[date] || Promise.resolve();
+    var run = prev.then(fn, fn);              // 不管前一个成败都跑本次
+    _journalWriteChain[date] = run.then(function () {}, function () {});  // 链尾永不 reject
+    return run;
+  }
+
   var handlers = {
     "GET /api/init-status": function () {
       return jsonResp({ ready: true, phase: "ready", detail: "", started_at: null, finished_at: null, error: null });
@@ -2222,7 +2253,7 @@
       var name = body && body.task_name;
       if (!name) return jsonResp({ ok: false, error: "缺少打卡名称" }, 400);
       var today = todayIso();
-      return Store.readJournalMd(today).then(function (md) {
+      return withJournalLock(today, function () { return Store.readJournalMd(today).then(function (md) {
         var lines = (md || "").split(/\r?\n/);
         var end = suppRegionEnd(lines);
         // 检查重名 — 已有则 ok no-op
@@ -2237,7 +2268,7 @@
         return Store.writeJournalMd(today, newLines.join("\n")).then(function () {
           return jsonResp({ ok: true, task_name: name, added: true });
         });
-      });
+      }); });
     },
     "POST /api/daily-tasks/delete": function (req, u, body) {
       // D7 test_delete_cascade_md_image_meta(5.15 肌酸丢 guard):
@@ -2245,7 +2276,7 @@
       var date = (body && body.date) || todayIso();
       var name = (body && body.task_name) || "";
       if (!name) return jsonResp({ ok: false, error: "缺少打卡名称" }, 400);
-      return Promise.all([
+      return withJournalLock(date, function () { return Promise.all([
         Store.readJournalMd(date),
         Store.getSetting("taskimg/" + name),  // 先看 image 是否存在
       ]).then(function (rs) {
@@ -2259,7 +2290,7 @@
         return Promise.all(p).then(function () {
           return jsonResp({ ok: true, task_name: name, image_removed: hadImage });
         });
-      });
+      }); });
     },
     // 历史:近 N 天每天是否打勾,对齐 PC 端 /history(query: name + days)
     "GET /api/daily-tasks/history": function (req, u) {
@@ -2300,7 +2331,7 @@
       var date = (body && body.date) || todayIso();
       if (!isWritableDate(date)) return jsonResp({ ok: false, error: "date 不在可写窗口(只能补昨天 hour<12,不能写未来)" }, 400);
       var name = body && body.task_name;
-      return Promise.all([
+      return withJournalLock(date, function () { return Promise.all([
         Store.readJournalMd(date),
         Store.getSetting("taskmeta/" + name),
         Store.getSetting("taskintake/" + name),
@@ -2356,7 +2387,7 @@
             remaining: null,
           });
         });
-      });
+      }); });
     },
     // 八杯水:落进当天 md 的"喝水"子杯勾选(序号<=filled 勾上),持久化八杯水进度
     "POST /api/daily-tasks/water": function (req, u, body) {
@@ -2364,12 +2395,12 @@
       // 与 /check 同一道补卡窗口(闭集 {今天, 次日中午前的昨天}):UI readonly 已挡,这里是纵深
       if (!isWritableDate(date)) return jsonResp({ ok: false, error: "只能记今天的喝水(次日中午前可补昨天)" }, 403);
       var filled = Math.max(0, Math.min(8, (body && body.filled) | 0));
-      return Store.readJournalMd(date).then(function (md) {
+      return withJournalLock(date, function () { return Store.readJournalMd(date).then(function (md) {
         if (md === null) return jsonResp({ ok: false, error: "no file" }, 404);
         return Store.writeJournalMd(date, setWaterFilled(md, filled)).then(function () {
           return jsonResp({ ok: true, filled: filled });
         });
-      });
+      }); });
     },
     // 复刻桌面 thread_routes.py:
     //   GET 损坏 → status='corrupt' + baks(5.17:绝不空 [] 当真覆盖);健康返 mtime 给 client 做 CAS
@@ -2463,7 +2494,7 @@
       if (!tmatch || parseInt(tmatch[1], 10) > 23 || parseInt(tmatch[2], 10) > 59) {
         return jsonResp({ ok: false, error: "time 格式应为 HH:MM" }, 400);  // 原实现 mm=undefined 会写出损坏 H1 '# 21：undefined'
       }
-      return Store.readJournalMd(date).then(function (md) {
+      return withJournalLock(date, function () { return Store.readJournalMd(date).then(function (md) {
         if (md === null) return jsonResp({ ok: false, error: "no journal file for " + date }, 404);
         var h = parseInt(tmatch[1], 10), mm = tmatch[2];
         var author = (body && body.author) || "user";
@@ -2505,7 +2536,7 @@
         return Store.writeJournalMd(date, nextMd).then(function () {
           return jsonResp({ ok: true, inserted: "# " + h + "：" + mm, file: isoToStem(date) + ".md", appended_to_existing: !!existing });
         });
-      });
+      }); });
     },
     // ── vision/OCR 移植 — 复刻桌面 /api/chat/upload-image + /api/vision/classify
     //    mobile 端 attachment 走 Capacitor Filesystem dataURL inline 存(浏览器对应
@@ -2779,7 +2810,7 @@
       var comment = body && (body.comment_md || body.comment);
       var author = (body && body.author) || "ai";
       if (!time || !comment) return jsonResp({ error: "缺少时间或批注" }, 400);
-      return Store.readJournalMd(date).then(function (md) {
+      return withJournalLock(date, function () { return Store.readJournalMd(date).then(function (md) {
         if (md === null) return jsonResp({ error: "no file" }, 404);
         var lines = md.split(/\r?\n/);
         var pad = pad2(parseInt(time.split(":")[0], 10)) + ":" + time.split(":")[1];
@@ -2801,7 +2832,7 @@
         return Store.writeJournalMd(date, newLines.join("\n")).then(function () {
           return jsonResp({ ok: true, appended: time, file: isoToStem(date) + ".md" });
         });
-      });
+      }); });
     },
     "POST /api/journal/patch": function (req, u, body) {
       // 复刻桌面 _patch_block 完整契约:
@@ -2819,7 +2850,7 @@
       var newMd = (body && body.new_md) || "";
       var author = (body && body.author) || "user";
       var allowRename = !!(body && body.allow_h2_rename);
-      return Store.readJournalMd(date).then(function (md) {
+      return withJournalLock(date, function () { return Store.readJournalMd(date).then(function (md) {
         if (md === null) return jsonResp({ error: "no file" }, 404);
         var pad = pad2(parseInt((time || "0:0").split(":")[0], 10)) + ":" + (time || "0:00").split(":")[1];
         var lines = md.split(/\r?\n/);
@@ -2865,11 +2896,11 @@
         return Store.writeJournalMd(date, out.join("\n")).then(function () {
           return jsonResp({ patched: time, file: isoToStem(date) + ".md" });
         });
-      });
+      }); });
     },
     "POST /api/journal/delete-block": function (req, u, body) {
       var date = (body && body.date) || todayIso(), time = normTime(body && body.time);
-      return Store.readJournalMd(date).then(function (md) {
+      return withJournalLock(date, function () { return Store.readJournalMd(date).then(function (md) {
         if (md === null) return jsonResp({ error: "no file" }, 404);
         var pad = pad2(parseInt((time || "0:0").split(":")[0], 10)) + ":" + (time || "0:00").split(":")[1];
         var lines = md.split(/\r?\n/), out = [], skip = false, found = false;
@@ -2887,7 +2918,7 @@
         return Store.writeJournalMd(date, out.join("\n")).then(function () {
           return jsonResp({ ok: true, cleared: time, file: isoToStem(date) + ".md" });
         });
-      });
+      }); });
     },
 
     // 对话:有 key 就真连 DeepSeek(读今天日记当 context);没 key 提示去设置填
