@@ -112,7 +112,10 @@ async def daily_task_check(req: Request):
         state = _bump_intake(name, delta=int(body["increment"]), for_date=for_date)
     else:
         # 兼容旧:checked=true → 置满 daily_dose;false → 置 0
-        checked_flag = bool(body.get("checked"))
+        # ★复审 B4:DSML/synth 路径 checked 会是字符串 "false" → bool("false")==True → 反转
+        #   (取消勾选反而勾上)。显式判真值。mobile-api.js 同步。
+        _ck = body.get("checked")
+        checked_flag = (_ck is True) or (str(_ck).strip().lower() == "true")
         meta_map = _load_task_meta_map()
         cur = _task_meta_state(name, meta_map, target_date=for_date)
         target = cur["daily_dose"] if checked_flag else 0
