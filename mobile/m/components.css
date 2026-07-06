@@ -328,6 +328,14 @@
 .gw-sheet-item .ai-mark { color: var(--vermilion); }
 /* 轻飘的意图采集项(权重低于实际功能)*/
 .gw-sheet-soft { padding: 12px var(--gut) 4px; font: 13px var(--font-kai); color: var(--ink-faint); background: none; border: 0; cursor: pointer; width: 100%; text-align: left; }
+/* H5 · daily-task 管理态:改剂量输入行 + 完成率点阵(纸做法,非 dashboard) */
+.gw-dose-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 9px var(--gut); font: 15px var(--font-serif); color: var(--ink-strong); }
+.gw-dose-row .gw-chip-input { text-align: center; }
+.gw-stat-dots { display: flex; gap: 8px; padding: 10px var(--gut) 18px; }
+.gw-stat-day { flex: 1; min-width: 0; text-align: center; font: 11px var(--font-sans); font-variant-numeric: tabular-nums; padding: 8px 0; border-radius: var(--r-sm, 4px); color: var(--ink-faint); background: var(--paper-sunken); border: 1px solid var(--line-medium); }
+.gw-stat-day.on { color: #fff; background: var(--vermilion); border-color: var(--vermilion); }
+.gw-stat-day.off { color: var(--ink-soft); background: var(--paper-sunken); }
+.gw-stat-day.na { opacity: 0.45; }
 
 /* 5.5 openCard 编辑器(底部升起的信笺 sheet)*/
 .gw-card { position: absolute; left: 0; right: 0; bottom: 0; z-index: 41; background: var(--paper-bright); border-radius: var(--r-sheet) var(--r-sheet) 0 0; box-shadow: var(--sheet-shadow); padding: 8px var(--gut) calc(16px + var(--safe-bot)); display: flex; flex-direction: column; max-height: 92%; transform: translateY(100%); transition: transform var(--t-mid) var(--ease-paper); }

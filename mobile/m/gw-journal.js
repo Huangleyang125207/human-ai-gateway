@@ -270,9 +270,9 @@
     sheet.innerHTML = `<div class="gw-grip"></div>
       <div class="gw-sheet-head">${GW.esc(task.name)}<span class="sub">${task.daily_dose >= 2 ? '每天 ' + task.daily_dose + ' 粒' : ''}${task.days_left != null ? ' · 还能吃 ' + task.days_left + ' 天' : ''}</span></div>
       <button class="gw-sheet-item" data-act="icon"><span class="glyph">${I.sticker}</span>换图标</button>
-      <button class="gw-sheet-item"><span class="glyph">${I.settings}</span>改每天几粒 / 一瓶几粒</button>
-      <button class="gw-sheet-item"><span class="glyph">${I.layers}</span>看本周完成率</button>
-      <button class="gw-sheet-item danger"><span class="glyph">${I.trash_no}</span>删除这项</button>
+      <button class="gw-sheet-item" data-act="dose"><span class="glyph">${I.settings}</span>改每天几粒 / 一瓶几粒</button>
+      <button class="gw-sheet-item" data-act="stats"><span class="glyph">${I.layers}</span>看本周完成率</button>
+      <button class="gw-sheet-item danger" data-act="del"><span class="glyph">${I.trash_no}</span>删除这项</button>
       <button class="gw-sheet-soft" data-act="want">想要新打卡项 · 跟 AI 商量 →</button>`;
     const m = GW.mountModal(sheet);
     sheet.addEventListener('click', (e) => {
@@ -280,7 +280,82 @@
       const item = e.target.closest('.gw-sheet-item');
       if (soft) { m.close(); setTimeout(() => GW.bus.emit('wantNewTask'), 320); }
       else if (item && item.dataset.act === 'icon') { m.close(); setTimeout(() => GW.setTaskIcon(task), 320); }
-      else if (item) { m.close(); setTimeout(() => GW.whisper('（demo）改剂量 / 完成率 / 删除 待接(Phase 3)', false), 320); }
+      else if (item && item.dataset.act === 'dose') { m.close(); setTimeout(() => GW.editTaskDose(task), 320); }
+      else if (item && item.dataset.act === 'stats') { m.close(); setTimeout(() => GW.showTaskStats(task), 320); }
+      else if (item && item.dataset.act === 'del') { m.close(); setTimeout(() => GW.deleteTask(task), 320); }
+    });
+  };
+
+  /* H5:当前显示日 iso(管理态只在今天,但历史日也稳)+ 重取当天 catalog 后重画晨课带 */
+  function careIso() {
+    try {
+      var dk = GW.state && GW.state.dayKey;
+      var d = (typeof GW.days === 'function' ? GW.days() : []).find(function (x) { return x.key === dk; });
+      if (d && d.iso) return d.iso;
+    } catch (e) {}
+    return new Date().toISOString().slice(0, 10);
+  }
+  GW.refreshCare = function () {
+    var iso = careIso();
+    var p = GW.bridgePrefetch ? GW.bridgePrefetch(iso) : Promise.resolve();
+    return p.then(function () { GW.bus && GW.bus.emit('reloadCare'); }, function () { GW.bus && GW.bus.emit('reloadCare'); });
+  };
+
+  /* H5 · 改剂量:每天几粒(daily_dose)/ 一瓶几粒(total_pills)→ POST /api/daily-tasks/meta */
+  GW.editTaskDose = function (task) {
+    const sheet = document.createElement('div'); sheet.className = 'gw-sheet';
+    const dose = task.daily_dose || 1;
+    sheet.innerHTML = `<div class="gw-grip"></div>
+      <div class="gw-sheet-head">${GW.esc(task.name)} · 剂量<span class="sub">改完打卡按新剂量算</span></div>
+      <label class="gw-dose-row">每天几粒<input class="gw-chip-input" type="number" inputmode="numeric" min="1" value="${dose}" data-f="daily_dose"></label>
+      <label class="gw-dose-row">一瓶几粒<input class="gw-chip-input" type="number" inputmode="numeric" min="0" value="${task.total_pills != null ? task.total_pills : ''}" placeholder="可留空" data-f="total_pills"></label>
+      <button class="gw-sheet-item" data-act="save"><span class="glyph">${GW.ICON.check || '✓'}</span>保存</button>`;
+    const m = GW.mountModal(sheet);
+    sheet.querySelector('[data-act="save"]').addEventListener('click', () => {
+      const dd = sheet.querySelector('[data-f="daily_dose"]').value.trim();
+      const tp = sheet.querySelector('[data-f="total_pills"]').value.trim();
+      const body = { task_name: task.name };
+      if (dd) body.daily_dose = parseInt(dd, 10);
+      body.total_pills = tp === '' ? null : parseInt(tp, 10);   // 空 = 清除
+      m.close();
+      GW.whisper('保存中…', true);
+      window.fetch('/api/daily-tasks/meta', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then((r) => r.json()).then((j) => {
+          if (j && j.ok !== false) { GW.refreshCare().then(() => GW.whisper('剂量改好了 · ' + task.name, false)); }
+          else GW.whisper((j && j.error) || '没改成 · 再试一次', false);
+        }).catch(() => GW.whisper('没改成 · 网络不通', false));
+    });
+  };
+
+  /* H5 · 本周完成率:GET /api/daily-tasks/history?name=&days=7 → 打勾天数 + 7 日点阵 */
+  GW.showTaskStats = function (task) {
+    window.fetch('/api/daily-tasks/history?name=' + encodeURIComponent(task.name) + '&days=7')
+      .then((r) => r.json()).then((j) => {
+        const days = (j && j.days) || [];
+        const checked = (j && j.checked_days) || 0;
+        const dots = days.map((d) => {
+          const cls = d.checked === true ? 'on' : (d.checked === false ? 'off' : 'na');
+          const dd = (d.date || '').slice(8);
+          return `<span class="gw-stat-day ${cls}" title="${d.date}">${dd}</span>`;
+        }).join('');
+        const sheet = document.createElement('div'); sheet.className = 'gw-sheet';
+        sheet.innerHTML = `<div class="gw-grip"></div>
+          <div class="gw-sheet-head">${GW.esc(task.name)} · 近 7 天<span class="sub">打勾 ${checked} / 7 天</span></div>
+          <div class="gw-stat-dots">${dots}</div>`;
+        GW.mountModal(sheet);
+      }).catch(() => GW.whisper('拿不到记录 · 稍后再试', false));
+  };
+
+  /* H5 · 删除:确认 → POST /api/daily-tasks/delete(级联清 md+image+meta+intake)→ 重画 */
+  GW.deleteTask = function (task) {
+    GW.gatewayConfirm('删除打卡项「' + task.name + '」?\n\n会清掉它的图标、剂量和打卡记录,当天日记里的这一行也一并删。').then((ok) => {
+      if (!ok) return;
+      GW.whisper('删除中…', true);
+      window.fetch('/api/daily-tasks/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_name: task.name, date: careIso() }) })
+        .then((r) => r.json()).then((j) => {
+          if (j && j.ok !== false) { GW.refreshCare().then(() => GW.whisper('已删除 · ' + task.name, false)); }
+          else GW.whisper((j && j.error) || '没删成 · 再试一次', false);
+        }).catch(() => GW.whisper('没删成 · 网络不通', false));
     });
   };
 
