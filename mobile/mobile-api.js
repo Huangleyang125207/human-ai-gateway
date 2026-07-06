@@ -10,6 +10,9 @@
 // server.py 一行不改;本文件是拦截层,只重写约 10 个端点。
 (function () {
   "use strict";
+  // ★ H1:版本单源 = mobile/VERSION。build-web.sh 一致性 gate 守 VERSION==此常量==Android versionName,
+  //   任一漂移 build 失败。health 返真版本(替代占位 "mobile-mvp"),feedback-sink/心跳可定位真 build。
+  var APP_VERSION = "0.1.39";
 
   // ── 守卫:是否启用拦截 ───────────────────────────────
   var ENABLED =
@@ -1912,7 +1915,7 @@
       return jsonResp({ ready: true, phase: "ready", detail: "", started_at: null, finished_at: null, error: null });
     },
     "GET /api/health": function () {
-      return jsonResp({ ok: true, ts: new Date().toISOString().slice(0, 19), version: "mobile-mvp" });
+      return jsonResp({ ok: true, ts: new Date().toISOString().slice(0, 19), version: APP_VERSION, platform: "mobile" });
     },
     "GET /api/config-status": function () {
       return Store.getSetting("deepseek_key").then(function (k) {

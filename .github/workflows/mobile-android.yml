@@ -1,0 +1,71 @@
+# ★ H1:移动端 Android CI —— 把「本机不可复现的手工出包」降为「可复现的 debug 产物」。
+# 触发:改动 mobile/ 时。跑 = 版本一致性 gate(build-web.sh 内) + cap sync + assembleDebug + 上传 APK。
+# 不签名/不公证/不发布(那些需 Play/Apple 凭证,见 RELEASE_TEMPLATE.md);此 workflow 只保证「能构建」。
+name: mobile-android
+
+on:
+  push:
+    paths: ['mobile/**', '.github/workflows/mobile-android.yml']
+  pull_request:
+    paths: ['mobile/**', '.github/workflows/mobile-android.yml']
+  workflow_dispatch:
+
+jobs:
+  build-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Version consistency gate + assemble web bundle
+        working-directory: mobile
+        run: bash build-web.sh    # 内含 mobile/VERSION == mobile-api APP_VERSION 一致性 gate
+
+      - name: Install Capacitor deps
+        working-directory: mobile/app
+        run: npm install --no-audit --no-fund
+
+      # android/ 是 gitignore 的 Capacitor 生成物 → CI 现场重建,再打本机同款 native patch
+      - name: Regenerate native android project
+        working-directory: mobile/app
+        run: npx cap add android
+
+      - name: Apply native patches (minSdk / abiFilters / version from VERSION)
+        working-directory: mobile
+        run: bash scripts/android-setup.sh "${GITHUB_RUN_NUMBER:-2}"
+
+      - name: Capacitor sync (register local plugins)
+        working-directory: mobile/app
+        run: npx cap sync android
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: assembleDebug
+        working-directory: mobile/app/android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Report version + APK size
+        working-directory: mobile
+        run: |
+          echo "### 📱 mobile debug build" >> "$GITHUB_STEP_SUMMARY"
+          echo "- version: \`$(tr -d ' \t\n\r' < VERSION)\`" >> "$GITHUB_STEP_SUMMARY"
+          APK=app/android/app/build/outputs/apk/debug/app-debug.apk
+          echo "- APK: \`$(du -h "$APK" | cut -f1)\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-${{ github.sha }}
+          path: mobile/app/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
