@@ -706,14 +706,20 @@
   function _bgOcrIndex(date, stem, dataUrl) {
     setTimeout(function () {
       try {
+        // ★ H6:后台索引 OCR 走统一入口。但 upload 后台跑不该悄悄触发云端付费 —
+        //   只在端侧可用时写 ocr_text;无 GMS 时留空(curator 检索少一路,但不背着用户
+        //   烧云端 quota)。用户主动换图标(/api/cutout)那条才允许云端兜底 + 明示。
         var plugin = (typeof window !== "undefined") && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeOcr;
         if (!plugin || !plugin.recognize) return;
-        plugin.recognize({ image: dataUrl, languages: ["zh-Hans", "en-US"] }).then(function (r) {
-          if (!r || !r.text) return;
-          return Store.readUploadMeta(date, stem).then(function (meta) {
-            meta = meta || {};
-            meta.ocr_text = String(r.text).slice(0, 2000);
-            return Store.writeUploadMeta(date, stem, meta);
+        _ocrNativeAvailable(plugin).then(function (ok) {
+          if (!ok) return;   // 无端侧 → 后台不烧云端
+          return plugin.recognize({ image: dataUrl, languages: ["zh-Hans", "en-US"] }).then(function (r) {
+            if (!r || !r.text) return;
+            return Store.readUploadMeta(date, stem).then(function (meta) {
+              meta = meta || {};
+              meta.ocr_text = String(r.text).slice(0, 2000);
+              return Store.writeUploadMeta(date, stem, meta);
+            });
           });
         }).catch(function () {});
       } catch (e) {}
@@ -1121,6 +1127,50 @@
       if (j && j.description) return j.description;
       return "";
     }).catch(function () { return ""; });
+  }
+
+  // ★ H6:统一 OCR 入口 —— 显式探测端侧可用性(不再靠 recognize() 抛异常隐蔽兜),
+  //   无 GMS(ML Kit 不可用)→ 发遥测信号 + 置一次性提示标志(杀掉「静默转云端付费」的"静默"),
+  //   再走云端。端侧可用则直接用。返 { text, engine, degraded }。
+  //   真离线端侧模型(PP-OCR onnx / Tesseract)是 degraded 路径的目标替代,见 native-ocr 插件 TODO。
+  var _ocrProbe = null;               // null=未探测, true/false=端侧可用性缓存
+  function _ocrNativeAvailable(plugin) {
+    if (_ocrProbe !== null) return Promise.resolve(_ocrProbe);
+    if (!plugin || !plugin.available) { _ocrProbe = !!(plugin && plugin.recognize); return Promise.resolve(_ocrProbe); }
+    return plugin.available().then(function (r) { _ocrProbe = !!(r && r.available); return _ocrProbe; })
+      .catch(function () { _ocrProbe = false; return false; });
+  }
+  function _runOcr(dataUrl, urlForCloud) {
+    var plugin = (typeof window !== "undefined") && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeOcr;
+    if (!plugin || !plugin.recognize) {
+      // 浏览器 stub / 无插件:不阻断视觉层
+      return Promise.resolve({ text: "", engine: "BrowserStub", degraded: false });
+    }
+    return _ocrNativeAvailable(plugin).then(function (ok) {
+      if (ok) {
+        return plugin.recognize({ image: dataUrl, languages: ["zh-Hans", "en-US"] })
+          .then(function (r) { return { text: (r && r.text) || "", engine: (r && r.engine) || "native", degraded: false }; })
+          .catch(function () {
+            // 端侧本应可用却抛错 → 兜云端 + 记信号(区别于无 GMS)
+            _ocrDegradedNotice("native-error");
+            return _ocrViaCloud(urlForCloud || null, dataUrl).then(function (t) { return { text: t || "", engine: "CloudVision_fallback", degraded: true }; });
+          });
+      }
+      // 无 GMS:端侧不可用 → 显式走云端 + 可观测(信号 + 一次性 UI 提示)
+      _ocrDegradedNotice("no-gms");
+      return _ocrViaCloud(urlForCloud || null, dataUrl).then(function (t) { return { text: t || "", engine: "CloudVision_fallback", degraded: true }; });
+    });
+  }
+  var _ocrNoticeShown = false;
+  function _ocrDegradedNotice(reason) {
+    try { if (typeof window !== "undefined" && window.emitSignal) window.emitSignal("ocr.cloud_fallback", { reason: reason }); } catch (e) {}
+    if (_ocrNoticeShown) return;        // 一次性,不每张图都打扰
+    _ocrNoticeShown = true;
+    try {
+      if (typeof window !== "undefined" && window.GW && window.GW.whisper) {
+        window.GW.whisper(reason === "no-gms" ? "这台设备没有端侧文字识别,这次用了云端(会走一次云调用)" : "端侧识别没成,这次用了云端", false);
+      }
+    } catch (e) {}
   }
 
   // ── 空白一天模板(打卡段 + 半小时格)— 复刻桌面 _new_day_create 生成算法,输出字节一致 ──
@@ -2227,25 +2277,8 @@
       return dataUrlP.then(function (dataUrl) {
         if (!dataUrl) return jsonResp({ ok: false, error: "attachment 不存在" }, 404);
 
-        // 调 native OCR plugin(真机)/ stub(浏览器)
-        var ocrP;
-        var nativePlugin = (typeof window !== "undefined")
-          ? (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeOcr)
-          : null;
-        if (nativePlugin) {
-          ocrP = nativePlugin.recognize({ image: dataUrl, languages: ["zh-Hans", "en-US"] })
-            .catch(function (e) {
-              // native 失败(无 GMS / 无 iOS Vision)→ 云端 vision OCR 兜底
-              return _ocrViaCloud(url || null, dataUrl).then(function (text) {
-                return { text: text || "", blocks: [], engine: "CloudVision_fallback" };
-              });
-            });
-        } else {
-          // 浏览器:无 native plugin → 走 stub(返空,不阻断 cd 视觉层)
-          ocrP = Promise.resolve({ text: "", blocks: [], engine: "BrowserStub" });
-        }
-
-        return ocrP.then(function (r) {
+        // ★ H6:统一 OCR 入口(显式探测 + 无 GMS 可观测兜底,不再靠异常隐蔽)
+        return _runOcr(dataUrl, url).then(function (r) {
           var pillCount = extractPillCount(r.text);
           // 洞D 修:inline dataURL 时存真图(可渲染),不再存没用的字面量 "inline"
           var p = [Store.setSetting("taskimg/" + name, inlineImage || url || "inline")];
