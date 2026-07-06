@@ -10,7 +10,7 @@ WWW="$HERE/app/www"
 #   gate 只校验同样受控的 mobile-api.js APP_VERSION == VERSION(android/ 是 gitignore 的
 #   Capacitor 生成物,其 versionName 由 scripts/android-setup.sh 从 VERSION 盖章,不在此校验)。
 VERSION="$(tr -d ' \t\n\r' < "$HERE/VERSION")"
-API_VER="$(sed -n 's/.*var APP_VERSION = "\([^"]*\)".*/\1/p' "$HERE/mobile-api.js" | head -1)"
+API_VER="$(grep -E '^[[:space:]]*var APP_VERSION = "' "$HERE/mobile-api.js" | sed -E 's/.*var APP_VERSION = "([^"]*)".*/\1/' | head -1)"
 if [ "$API_VER" != "$VERSION" ]; then
   echo "✗ 版本漂移:mobile/VERSION=$VERSION 但 mobile-api.js APP_VERSION=$API_VER" >&2
   echo "  改 mobile/VERSION 后须同步 mobile-api.js 的 APP_VERSION(Android 版本走 scripts/android-setup.sh 自动盖章)。" >&2

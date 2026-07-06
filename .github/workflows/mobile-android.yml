@@ -42,7 +42,7 @@ jobs:
 
       - name: Apply native patches (minSdk / abiFilters / version from VERSION)
         working-directory: mobile
-        run: bash scripts/android-setup.sh "${GITHUB_RUN_NUMBER:-2}"
+        run: bash scripts/android-setup.sh "${GITHUB_RUN_NUMBER:-0}"   # 脚本内 +10000 底座(复审 R7)
 
       - name: Capacitor sync (register local plugins)
         working-directory: mobile/app
