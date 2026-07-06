@@ -1,24 +1,27 @@
 # gateway · human-ai-schedule 项目 viewer
 
-> 代码在这,但项目定义 + PULSE + 数据约定全在 agents创作平台 那边。
-> session 进 gateway/ 时强制把项目 context 拉过来,防孤儿。
+> 代码 + 项目大脑(meta/brief/发版/皮肤工作流)现在同仓在 docs/。
+> 只有 PULSE 真源 + vault 日记数据还在外部(runtime 耦合),session 进来把它俩拉过来。
 
 ---
 
 ## 项目 context(强制 pre-load,别动)
 
-@/Users/claudecodedezhuanshumac/agents创作平台/agents/human-ai-schedule/CLAUDE.md
+@./docs/PROJECT.md
 @/Users/claudecodedezhuanshumac/agents创作平台/agents/human-ai-schedule/PULSE.md
 
 ---
 
 ## 这里是什么
 
-`~/human-ai-dev/gateway/` = viewer / server / UI 的代码本体。
-所有数据(日记 / 聚合 / PULSE 真源 / 设计 brief)在 `~/agents创作平台/`。
+`~/human-ai-dev/gateway/` = viewer / server / UI 的代码本体 + `docs/` 项目大脑。
+- **项目大脑**(7.6 搬入)→ `docs/`(PROJECT.md meta · DESIGN_BRIEF · RELEASE_TEMPLATE · SKIN_WORKFLOW · USER_PULSE · INDEX · brand/spread/gateway-extension)
+- **PULSE 真源** → `~/agents创作平台/agents/human-ai-schedule/PULSE.md`(runtime 耦合 sync/cron,未搬)
+- **日记 / 聚合数据** → `~/.human-ai/vault/`(真源;`agents创作平台/数据库/valut` 是 5 月冻结镜像勿用)
+- **移动端测试网** → `mobile/parity/`(109 golden oracle,别写即时脚本用固化)
 
 > **加新前端皮肤(page-family skin,复用引擎只换皮)→ 看一眼就会做:**
-> `~/agents创作平台/agents/human-ai-schedule/SKIN_WORKFLOW.md`
+> `docs/SKIN_WORKFLOW.md`
 > 参考实物:`*-paper.html` + `shared/{theme,*-paper}.{js,css}`(纸与灯皮肤,6.13 落地)
 
 ```
