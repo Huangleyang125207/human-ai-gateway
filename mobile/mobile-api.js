@@ -1573,7 +1573,7 @@
     }
   }
   // expose for tests + future overrides
-  if (typeof window !== "undefined") { window.__gwTool = { specs: TOOL_SPECS, dispatch: dispatchTool }; }
+  if (typeof window !== "undefined") { window.__gwTool = { specs: TOOL_SPECS, dispatch: dispatchTool, extractSynth: _extractSynthToolCalls }; }
 
   function pickReply(d) { return d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content; }
 
@@ -1677,6 +1677,23 @@
       .replace(_DSML_INVOKE_STRIP_RE, "")
       .replace(_DSML_TAG_RE, "")
       .replace(/\n{3,}/g, "\n\n");  // 收一下 strip 后多余空行
+  }
+  // ★ H3(对齐 PC _extract_synthetic_tool_calls):DeepSeek 把 tool 当文本吐时,
+  //   从 content 抠出 invoke/param → 真 tool_call 结构,交回 loop 执行(不再只 strip 丢弃动作)。
+  //   args 保持字符串(同 PC;tool handler 各自 parseInt/判定)。
+  var _DSML_INVOKE_RE = /<[｜|]{1,2}DSML[｜|]{1,2}invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/[｜|]{1,2}DSML[｜|]{1,2}invoke>/g;
+  var _DSML_PARAM_RE = /<[｜|]{1,2}DSML[｜|]{1,2}parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/[｜|]{1,2}DSML[｜|]{1,2}parameter>/g;
+  function _extractSynthToolCalls(content) {
+    if (!content || content.indexOf("DSML") < 0) return { stripped: content, calls: [] };
+    var calls = [], m, i = 0;
+    _DSML_INVOKE_RE.lastIndex = 0;
+    while ((m = _DSML_INVOKE_RE.exec(content)) !== null) {
+      var name = m[1].trim(), body = m[2], args = {}, pm;
+      _DSML_PARAM_RE.lastIndex = 0;
+      while ((pm = _DSML_PARAM_RE.exec(body)) !== null) args[pm[1].trim()] = pm[2].trim();
+      calls.push({ id: "call_synth_" + Date.now() + "_" + (i++) + Math.random().toString(36).slice(2, 6), name: name, args: args });
+    }
+    return { stripped: _stripDsml(content), calls: calls };
   }
 
   // 多轮 tool 调用 loop:DeepSeek 返 tool_calls → dispatch → result push 回 → 再调,
@@ -1798,9 +1815,41 @@
             });
             return Promise.all(ps).then(function () { return callRound(round + 1); });
           }
-          // 无 tool_calls = 终态:strip DSML 残留 + claim audit
+          // ★ H3:OpenAI tool_calls 字段为空时,再看 content 里有没有 DSML 伪 tool_call —
+          //   有就抠出来真执行 + 续 loop(对齐 PC),不再只 strip 把动作丢掉。
           var raw = msg.content || "(空回复)";
-          var cleaned = _stripDsml(raw);
+          var synth = _extractSynthToolCalls(raw);
+          if (synth.calls.length && !lastRound) {
+            // 伪 tool_call 的 assistant 消息进 messages(content 用 strip 后的,避免 DSML 再喂回模型)
+            messages.push({ role: "assistant", content: synth.stripped });
+            var sps = synth.calls.map(function (c) {
+              var cap = TOOL_FREQ_CAP[c.name];
+              if (cap != null) {
+                freqCount[c.name] = (freqCount[c.name] || 0) + 1;
+                if (freqCount[c.name] > cap) {
+                  var capMsg = c.name + " 已达上限 (" + cap + " 次/对话),停止继续调";
+                  events.push({ type: "tool_call", id: c.id, name: c.name, args: c.args });
+                  events.push({ type: "tool_result", id: c.id, name: c.name, ok: false, error: capMsg });
+                  messages.push({ role: "tool", tool_call_id: c.id, content: JSON.stringify({ error: capMsg, _freq_capped: true }) });
+                  return Promise.resolve();
+                }
+              }
+              events.push({ type: "tool_call", id: c.id, name: c.name, args: c.args });
+              return dispatchTool(c.name, c.args).then(function (result) {
+                var ok = !(result && result.error);
+                events.push({ type: "tool_result", id: c.id, name: c.name, ok: ok, result: result });
+                messages.push({ role: "tool", tool_call_id: c.id, content: JSON.stringify(result || {}) });
+                if (ok) lastActions.push({ name: c.name, args: c.args, result: result });
+              }).catch(function (err) {
+                var e = String(err && err.message || err);
+                events.push({ type: "tool_result", id: c.id, name: c.name, ok: false, error: e });
+                messages.push({ role: "tool", tool_call_id: c.id, content: JSON.stringify({ error: e }) });
+              });
+            });
+            return Promise.all(sps).then(function () { return callRound(round + 1); });
+          }
+          // 无 tool_calls 也无 synth = 终态:strip DSML 残留 + claim audit
+          var cleaned = synth.stripped;
           var audited = _auditUnauthorizedClaim(cleaned, lastActions);
           events.push({ type: "delta", text: audited });
           events.push({ type: "done", actions: lastActions, model_id: model || "deepseek" });
