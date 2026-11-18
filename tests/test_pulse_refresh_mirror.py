@@ -24,6 +24,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import pulse_routes  # noqa: E402
 
 
 # ── 辅助:在 tmp_path 下造 ~/agents创作平台/agents/<proj>/PULSE.md ───────────
@@ -50,7 +51,7 @@ def test_copies_new_source(monkeypatch, tmp_path, isolated_pulse_paths, stubbed_
     content = "# 项目 foo\n气压 OK\n"
     _make_source(tmp_path, "proj_foo", content)
 
-    result = server.pulse_refresh_mirror()
+    result = pulse_routes.pulse_refresh_mirror()
 
     assert result["scanned"] == 1, "扫到 1 个源"
     assert result["updated"] == 1, "1 个新写入"
@@ -82,7 +83,7 @@ def test_skips_unchanged_dest(monkeypatch, tmp_path, isolated_pulse_paths, stubb
     dest = isolated_pulse_paths.mirror / "proj_same.md"
     dest.write_text(content, encoding="utf-8")
 
-    result = server.pulse_refresh_mirror()
+    result = pulse_routes.pulse_refresh_mirror()
 
     assert result["scanned"] == 1
     assert result["updated"] == 0, "字节一致不该重写"
@@ -99,7 +100,7 @@ def test_updates_changed_dest(monkeypatch, tmp_path, isolated_pulse_paths, stubb
     dest = isolated_pulse_paths.mirror / "proj_bar.md"
     dest.write_text("# 旧版\nts:2026-05-01\n", encoding="utf-8")
 
-    result = server.pulse_refresh_mirror()
+    result = pulse_routes.pulse_refresh_mirror()
 
     assert result["updated"] == 1
     assert result["files"] == ["proj_bar"]
@@ -129,7 +130,7 @@ def test_partial_failure_reports_silent(monkeypatch, tmp_path,
 
     monkeypatch.setattr(server, "_safe_write_text", selective_raise)
 
-    result = server.pulse_refresh_mirror()
+    result = pulse_routes.pulse_refresh_mirror()
 
     assert result["scanned"] == 2
     assert result["updated"] == 1, "只 good 那条成功"
@@ -158,7 +159,7 @@ def test_no_vault_git_when_all_skip(monkeypatch, tmp_path,
     (isolated_pulse_paths.mirror / "proj_a.md").write_text(c1, encoding="utf-8")
     (isolated_pulse_paths.mirror / "proj_b.md").write_text(c2, encoding="utf-8")
 
-    result = server.pulse_refresh_mirror()
+    result = pulse_routes.pulse_refresh_mirror()
 
     assert result["scanned"] == 2
     assert result["updated"] == 0
@@ -176,7 +177,7 @@ def test_root_pulse_picked_up_as_root_stem(monkeypatch, tmp_path,
     root_pulse_dir.mkdir(parents=True, exist_ok=True)
     (root_pulse_dir / "PULSE.md").write_text("# INDEX\n", encoding="utf-8")
 
-    result = server.pulse_refresh_mirror()
+    result = pulse_routes.pulse_refresh_mirror()
 
     assert result["scanned"] == 1
     assert result["updated"] == 1

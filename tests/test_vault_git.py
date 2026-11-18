@@ -23,6 +23,43 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import vault_git  # noqa: E402
 
 
+def test_vault_git_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import vault_git; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=Path(__file__).resolve().parent.parent,
+        check=False,
+    )
+
+    assert result.returncode == 0
+
+
+def test_configured_failure_effects_are_used():
+    reports = []
+    notifications = []
+    old_report = vault_git._REPORT_FAILURE
+    old_push = vault_git._PUSH_NOTIFICATION
+    vault_git.configure_effects(
+        report_failure=lambda *args: reports.append(args),
+        push_notification=lambda *args: notifications.append(args),
+    )
+    try:
+        vault_git._report_silent("git_failed", "detail", {"phase": "add"})
+        vault_git._push_broken_notification("broken")
+    finally:
+        vault_git.configure_effects(
+            report_failure=old_report,
+            push_notification=old_push,
+        )
+
+    assert reports == [("git_failed", "detail", {"phase": "add"})]
+    assert notifications[0][0] == "vault-git-broken"
+
+
 def _git_log_oneline(repo: Path) -> list[str]:
     """Return git log output as list of "hash subject" lines."""
     p = subprocess.run(

@@ -8,13 +8,12 @@ PULSE LARGE refactor P3。从 server.py 抽出 11 个 `_eval_*` + `_classify_eva
 - `_eval_build_messages` 注入 past_boards(跨夜连贯,T4 守)
 - 段次序 = today_md → recent_md → past_boards → pulse → claude_md(T4 顺序契约守)
 
-依赖(函数体内 lazy import 避循环):
-- server.find_today_journal / build_system_prompt / _compute_time_block_hint
-- server.load_config / _safe_write_text / _report_silent_failure / log
-- server._summarize_history / RECENT_KEEP
-- server._load_task_image_map / _load_attachments_index / WATER_CUP_KEY
-- server.DATA_HOME / WIDGETS_DIR / VAULT_DIR
-- pulse_io.PULSE_DIR(已 P2 抽出,这里 lazy 走 server re-export)
+依赖(由组装根以具名 provider 注入):
+- find_today_journal / build_system_prompt / _compute_time_block_hint
+- load_config / _safe_write_text / _report_silent_failure / log
+- history_summary._summarize_history / RECENT_KEEP(7.22 contract 迁移)
+- task image/attachment index + WATER_CUP_KEY
+- DATA_HOME / WIDGETS_DIR / VAULT_DIR / pulse_io.PULSE_DIR
 """
 import json
 import re
@@ -23,20 +22,70 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
-# ── EVAL_LOG_DIR(在 server.py L111 APP_STATE_DIR 之后才能解;走 lazy)──
-# 因为 APP_STATE_DIR 在 server.py 才定义,我们 import 后用。pulse_io 同款做法。
-from server import APP_STATE_DIR
+# ── EVAL_LOG_DIR ─────────────────────────────────────────────────────
+from runtime_paths import APP_STATE_DIR
 
 EVAL_LOG_DIR = APP_STATE_DIR / "eval-log"  # 在 vault 之外 + app-protected → 协作 AI 永不读,用户也别误删
+
+_FIND_JOURNAL = None
+_PULSE_DIR = None
+_LOAD_CONFIG = None
+_LOAD_TASK_IMAGE_MAP = None
+_WATER_CUP_KEY = None
+_DATA_HOME = None
+_WIDGETS_DIR = None
+_VAULT_DIR = None
+_LOAD_ATTACHMENTS_INDEX = None
+_BUILD_SYSTEM_PROMPT = None
+_COMPUTE_TIME_HINT = None
+_SAFE_WRITE_TEXT = None
+_LOGGER = None
+_REPORT_FAILURE = None
+
+
+def configure_effects(
+    *,
+    find_journal,
+    pulse_dir,
+    load_config,
+    load_task_image_map,
+    water_cup_key,
+    data_home,
+    widgets_dir,
+    vault_dir,
+    load_attachments_index,
+    build_system_prompt,
+    compute_time_hint,
+    safe_write_text,
+    logger,
+    report_failure,
+) -> None:
+    global _FIND_JOURNAL, _PULSE_DIR, _LOAD_CONFIG, _LOAD_TASK_IMAGE_MAP
+    global _WATER_CUP_KEY, _DATA_HOME, _WIDGETS_DIR, _VAULT_DIR
+    global _LOAD_ATTACHMENTS_INDEX, _BUILD_SYSTEM_PROMPT, _COMPUTE_TIME_HINT
+    global _SAFE_WRITE_TEXT, _LOGGER, _REPORT_FAILURE
+    _FIND_JOURNAL = find_journal
+    _PULSE_DIR = pulse_dir
+    _LOAD_CONFIG = load_config
+    _LOAD_TASK_IMAGE_MAP = load_task_image_map
+    _WATER_CUP_KEY = water_cup_key
+    _DATA_HOME = data_home
+    _WIDGETS_DIR = widgets_dir
+    _VAULT_DIR = vault_dir
+    _LOAD_ATTACHMENTS_INDEX = load_attachments_index
+    _BUILD_SYSTEM_PROMPT = build_system_prompt
+    _COMPUTE_TIME_HINT = compute_time_hint
+    _SAFE_WRITE_TEXT = safe_write_text
+    _LOGGER = logger
+    _REPORT_FAILURE = report_failure
 
 
 def _eval_load_recent_md(target: datetime, days: int = 7) -> str:
     """读最近 N 天 md(不含今天),拼成一大段。"""
-    from server import find_today_journal
     chunks = []
     for i in range(1, days + 1):
         d = target - timedelta(days=i)
-        f = find_today_journal(d)
+        f = _FIND_JOURNAL(d)
         if f and f.exists():
             chunks.append(f"--- {d.strftime('%Y-%m-%d')} ({f.name}) ---\n"
                           f"{f.read_text(encoding='utf-8')}\n")
@@ -58,11 +107,11 @@ def _eval_load_project_claude_md() -> str:
 
 def _eval_load_pulse_all() -> str:
     """读所有 PULSE.md 拼一起。"""
-    from server import PULSE_DIR
-    if not PULSE_DIR.exists():
+    pulse_dir = _PULSE_DIR()
+    if not pulse_dir.exists():
         return "(no PULSE dir)"
     out = []
-    for f in sorted(PULSE_DIR.glob("*.md")):
+    for f in sorted(pulse_dir.glob("*.md")):
         out.append(f"=== {f.name} ===\n{f.read_text(encoding='utf-8')}")
     return "\n\n".join(out) if out else "(no PULSE files)"
 
@@ -71,20 +120,20 @@ def _eval_scan_feature_signals(target: datetime) -> dict:
     """扫 gateway 全状态,产 raw signals。LLM 据此判断哪个 feature 该 intro(或不 intro)。
     都是廉价的 文件/计数 读,不调任何 API。
     """
-    from server import (
-        load_config, _load_task_image_map, WATER_CUP_KEY, find_today_journal,
-        DATA_HOME, WIDGETS_DIR, VAULT_DIR, PULSE_DIR,
-    )
-    cfg = load_config() or {}
+    cfg = _LOAD_CONFIG() or {}
+    water_cup_key = _WATER_CUP_KEY()
+    data_home = _DATA_HOME()
+    widgets_dir = _WIDGETS_DIR()
+    pulse_dir = _PULSE_DIR()
     sig = {}
 
     # 水杯 / daily-task 图配置
-    image_map = _load_task_image_map()
-    sig["water_cup_image_set"] = bool(image_map.get(WATER_CUP_KEY))
-    sig["daily_task_images_set_count"] = sum(1 for k in image_map if k != WATER_CUP_KEY)
+    image_map = _LOAD_TASK_IMAGE_MAP()
+    sig["water_cup_image_set"] = bool(image_map.get(water_cup_key))
+    sig["daily_task_images_set_count"] = sum(1 for k in image_map if k != water_cup_key)
 
     # daily tasks (从模板 + 今日 md 推算大致数量)
-    today_f = find_today_journal(target)
+    today_f = _FIND_JOURNAL(target)
     if today_f and today_f.exists():
         text = today_f.read_text(encoding="utf-8")
         sig["daily_task_count_today"] = len(re.findall(r"^\s*-\s*\[[ x]\]\s+", text, re.MULTILINE))
@@ -93,14 +142,13 @@ def _eval_scan_feature_signals(target: datetime) -> dict:
 
     # attachments
     try:
-        from server import _load_attachments_index
-        arr = _load_attachments_index()
+        arr = _LOAD_ATTACHMENTS_INDEX()
     except Exception:
         arr = []
     sig["attachments_total"] = len(arr)
 
     # widgets:可用 vs 已启
-    widgets_user_cfg = DATA_HOME / ".user-widgets.json"
+    widgets_user_cfg = data_home / ".user-widgets.json"
     if widgets_user_cfg.exists():
         try:
             cfg_w = json.loads(widgets_user_cfg.read_text(encoding="utf-8"))
@@ -109,23 +157,23 @@ def _eval_scan_feature_signals(target: datetime) -> dict:
             sig["user_widgets_enabled"] = []
     else:
         sig["user_widgets_enabled"] = []
-    if WIDGETS_DIR.exists():
+    if widgets_dir.exists():
         sig["widgets_available"] = sorted([
-            d.name for d in WIDGETS_DIR.iterdir()
+            d.name for d in widgets_dir.iterdir()
             if d.is_dir() and (d / "manifest.json").exists()
         ])
     else:
         sig["widgets_available"] = []
 
     # vault path 是否非默认
-    sig["vault_path"] = str(VAULT_DIR)
+    sig["vault_path"] = str(_VAULT_DIR())
 
     # PULSE
-    pulse_count = len(list(PULSE_DIR.glob("*.md"))) if PULSE_DIR.exists() else 0
+    pulse_count = len(list(pulse_dir.glob("*.md"))) if pulse_dir.exists() else 0
     sig["pulse_files_count"] = pulse_count
 
     # scrapbook
-    sb_dir = DATA_HOME / "scrapbook-images"
+    sb_dir = data_home / "scrapbook-images"
     sig["scrapbook_images_total"] = len(list(sb_dir.glob("*"))) if sb_dir.exists() else 0
 
     # AI 能力是否配通
@@ -142,7 +190,7 @@ def _eval_scan_feature_signals(target: datetime) -> dict:
     tag_counts = {}
     for i in range(7):
         d = target - timedelta(days=i)
-        f = find_today_journal(d)
+        f = _FIND_JOURNAL(d)
         if not (f and f.exists()):
             continue
         text = f.read_text(encoding="utf-8")
@@ -279,14 +327,15 @@ def _eval_build_messages(target: datetime, model_id: str = None) -> list:
     user payload = 维度料。model_id 用于 prompt 里 {model_id} signature 占位符
     替换 — 让 AI 用自己的真实模型 id 署名。
     """
-    from server import build_system_prompt, _compute_time_block_hint, find_today_journal
-    base_sys = build_system_prompt({}, model_id=model_id)  # 保留原本身份
+    base_sys = _BUILD_SYSTEM_PROMPT({}, model_id=model_id)  # 保留原本身份
     # 5.31:eval 也注入 [time-block] + [schedule-voice],让 deepseek 写复盘 entry
     # 时遵守 § H5 voice baseline(否则就写函数名 / endpoint 那种 6 个月后看不懂的)
-    time_hint = _compute_time_block_hint()
-    sys_prompt = base_sys + "\n\n" + time_hint + "\n" + _EVAL_INJECTION
+    time_hint = _COMPUTE_TIME_HINT()
+    # DeepSeek 只命中完全相同的输入前缀。大段稳定复盘规则必须放在每轮变化的
+    # time hint 前面，否则动态时间会让其后的整个 _EVAL_INJECTION 都失去缓存资格。
+    sys_prompt = base_sys + _EVAL_INJECTION + "\n" + time_hint
 
-    today_f = find_today_journal(target)
+    today_f = _FIND_JOURNAL(target)
     today_md = today_f.read_text(encoding="utf-8") if (today_f and today_f.exists()) else "(今天 md 不存在)"
 
     payload = (
@@ -352,7 +401,6 @@ def _eval_persist(target: datetime, parsed: dict) -> Path:
     """落到 ~/.human-ai/data/eval-log/YYYY-MM-DD.md (rendered md,人可读)。
     NOT 进 vault — vault-reading AI 永远看不到。
     """
-    from server import _safe_write_text
     EVAL_LOG_DIR.mkdir(parents=True, exist_ok=True)
     f = EVAL_LOG_DIR / f"{target.strftime('%Y-%m-%d')}.md"
 
@@ -386,13 +434,12 @@ def _eval_persist(target: datetime, parsed: dict) -> Path:
             "",
             fi.get('why_now', ''),
         ]
-    _safe_write_text(f, "\n".join(lines), rotate=True)
+    _SAFE_WRITE_TEXT(f, "\n".join(lines), rotate=True)
     return f
 
 
 def _eval_notify(target: datetime, parsed: dict):
     """macOS 通知。osascript 内置,无需 install。失败静默。"""
-    from server import log, _report_silent_failure
     if not parsed:
         return
     enc = (parsed.get("encouragement") or "").strip()
@@ -405,9 +452,9 @@ def _eval_notify(target: datetime, parsed: dict):
     try:
         subprocess.run(["osascript", "-e", script], timeout=5, check=False)
     except Exception as e:
-        log.warning(f"eval notify failed: {e}")
+        _LOGGER().warning(f"eval notify failed: {e}")
         # 用户没听见 banner 会以为 21:30 eval 没跑 — UX silent miss
-        _report_silent_failure("eval_notify_failed",
+        _REPORT_FAILURE("eval_notify_failed",
             f"{type(e).__name__}: {str(e)[:120]}")
 
 
@@ -419,7 +466,7 @@ def _eval_compress_past_logs(days: int, client, model: str) -> str:
     """读 past N 天 eval-log,超 RECENT_KEEP 的旧条目用 _summarize_history 压。
     现在不调用,留接口给未来 trend-detection 用。
     """
-    from server import RECENT_KEEP, _summarize_history
+    from history_summary import RECENT_KEEP, _summarize_history
     if not EVAL_LOG_DIR.exists():
         return ""
     files = sorted(EVAL_LOG_DIR.glob("*.md"))[-days:]

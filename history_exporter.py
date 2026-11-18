@@ -158,7 +158,12 @@ def load_thread(path: Path) -> list[dict]:
     if not path.exists():
         return []
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict) and data.get("v") == 2 and isinstance(data.get("history"), list):
+            return data["history"]
+        return []
     except Exception:
         return []
 

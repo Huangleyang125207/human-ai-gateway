@@ -2,10 +2,9 @@
 
 Extract Module(ctrl-c-v § 9):eval/留言板 4 endpoint 从 server.py 抽出。
 核心簇拆分 target 3(desktop-only,不在移动 shim)。纯 handler 搬迁 —— 所有 _eval_*
-helper + EVAL_LOG_DIR 早已在 pulse_eval.py(server 顶部 re-export),本模块全走
-function-body lazy `from server import` 拉回(含 re-export 的 pulse_eval 符号)。
+helper + EVAL_LOG_DIR 早已在 pulse_eval.py；本模块由组装根注入具名能力。
 
-留 server/pulse_eval(lazy import):
+由 server/pulse_eval 组装:
 - _eval_build_messages(★past_boards 跨夜注入在这里)/ _eval_build_feature_intro_messages
   / _eval_persist / _eval_notify / _classify_eval_err / EVAL_LOG_DIR(pulse_eval)
 - get_profile / get_client / get_model(LLM core)/ _report_silent_failure / find_today_journal
@@ -21,6 +20,61 @@ from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter(tags=["board"])
 
+_EVAL_LOG_DIR = None
+_DATETIME = None
+_TIMEDELTA = None
+_FIND_TODAY_JOURNAL = None
+_GET_PROFILE = None
+_GET_CLIENT = None
+_GET_MODEL = None
+_CLASSIFY_EVAL_ERR = None
+_REPORT_FAILURE = None
+_BUILD_MESSAGES = None
+_BUILD_FEATURE_INTRO_MESSAGES = None
+_EVAL_PERSIST = None
+_EVAL_NOTIFY = None
+_LOG_CACHE_USAGE = None
+_LOGGER = None
+
+
+def configure_effects(
+    *,
+    eval_log_dir,
+    datetime_provider,
+    timedelta_provider,
+    find_today_journal,
+    get_profile,
+    get_client,
+    get_model,
+    classify_eval_err,
+    report_failure,
+    build_messages,
+    build_feature_intro_messages,
+    eval_persist,
+    eval_notify,
+    log_cache_usage,
+    logger,
+) -> None:
+    global _EVAL_LOG_DIR, _DATETIME, _TIMEDELTA, _FIND_TODAY_JOURNAL
+    global _GET_PROFILE, _GET_CLIENT, _GET_MODEL, _CLASSIFY_EVAL_ERR
+    global _REPORT_FAILURE, _BUILD_MESSAGES, _BUILD_FEATURE_INTRO_MESSAGES
+    global _EVAL_PERSIST, _EVAL_NOTIFY, _LOG_CACHE_USAGE, _LOGGER
+    _EVAL_LOG_DIR = eval_log_dir
+    _DATETIME = datetime_provider
+    _TIMEDELTA = timedelta_provider
+    _FIND_TODAY_JOURNAL = find_today_journal
+    _GET_PROFILE = get_profile
+    _GET_CLIENT = get_client
+    _GET_MODEL = get_model
+    _CLASSIFY_EVAL_ERR = classify_eval_err
+    _REPORT_FAILURE = report_failure
+    _BUILD_MESSAGES = build_messages
+    _BUILD_FEATURE_INTRO_MESSAGES = build_feature_intro_messages
+    _EVAL_PERSIST = eval_persist
+    _EVAL_NOTIFY = eval_notify
+    _LOG_CACHE_USAGE = log_cache_usage
+    _LOGGER = logger
+
 
 # ── GET /api/eval/list ───────────────────────────────────────────────
 @router.get("/api/eval/list")
@@ -33,13 +87,15 @@ def eval_list(n: int = 14, include_missing: bool = False):
     窗口故意窄:只昨天 — cron 偶尔挂(app 没启动)是常见原因,补当天意义清晰;
     再往前拉数据陈旧、AI 生成质量也差。
     """
-    from server import EVAL_LOG_DIR, datetime, timedelta, find_today_journal
-    if not EVAL_LOG_DIR.exists() and not include_missing:
+    eval_log_dir = _EVAL_LOG_DIR()
+    datetime = _DATETIME()
+    timedelta = _TIMEDELTA()
+    if not eval_log_dir.exists() and not include_missing:
         return {"items": []}
     n = max(1, min(60, int(n)))  # clamp 防滥用
     today_str = datetime.now().strftime("%Y-%m-%d")
-    files = (sorted(EVAL_LOG_DIR.glob("????-??-??.md"), key=lambda p: p.name, reverse=True)[:n]
-             if EVAL_LOG_DIR.exists() else [])
+    files = (sorted(eval_log_dir.glob("????-??-??.md"), key=lambda p: p.name, reverse=True)[:n]
+             if eval_log_dir.exists() else [])
     items = []
     for f in files:
         try:
@@ -55,7 +111,7 @@ def eval_list(n: int = 14, include_missing: bool = False):
         y_dt = datetime.now() - timedelta(days=1)
         y_str = y_dt.strftime("%Y-%m-%d")
         existing = {it["date"] for it in items}
-        if y_str not in existing and find_today_journal(y_dt) is not None:
+        if y_str not in existing and _FIND_TODAY_JOURNAL(y_dt) is not None:
             items.append({
                 "date": y_str,
                 "is_today": False,
@@ -72,9 +128,10 @@ def eval_today():
     """返今天(或最近一次)的 eval 复盘原文。
     用于侧边「留言板」tab 渲染:AI 给用户的今晚复盘卡片。
     """
-    from server import EVAL_LOG_DIR, datetime
+    eval_log_dir = _EVAL_LOG_DIR()
+    datetime = _DATETIME()
     today_str = datetime.now().strftime("%Y-%m-%d")
-    today_f = EVAL_LOG_DIR / f"{today_str}.md"
+    today_f = eval_log_dir / f"{today_str}.md"
     if today_f.exists():
         return {
             "date": today_str,
@@ -82,9 +139,9 @@ def eval_today():
             "markdown": today_f.read_text(encoding="utf-8"),
         }
     # 没今天 → 找最近一份
-    if EVAL_LOG_DIR.exists():
+    if eval_log_dir.exists():
         candidates = sorted(
-            EVAL_LOG_DIR.glob("????-??-??.md"),
+            eval_log_dir.glob("????-??-??.md"),
             key=lambda p: p.name, reverse=True,
         )
         if candidates:
@@ -104,10 +161,8 @@ async def eval_test(req: Request):
     body: {date?: "YYYY-MM-DD" (默认今天), model_id?: int}
     NOT persisted — 只返回给 caller 看效果。生产版另起 endpoint 负责 push + log。
     """
-    from server import (datetime, get_profile, get_client, get_model, _classify_eval_err,
-                        _report_silent_failure, _eval_build_messages,
-                        _eval_build_feature_intro_messages, log)
     body = await req.json()
+    datetime = _DATETIME()
     date_str = (body.get("date") or "").strip()
     if date_str:
         try:
@@ -118,13 +173,13 @@ async def eval_test(req: Request):
         target = datetime.now()
 
     model_id = body.get("model_id")
-    profile = get_profile(model_id)
-    client = get_client(profile)
+    profile = _GET_PROFILE(model_id)
+    client = _GET_CLIENT(profile)
     if client is None:
         raise HTTPException(503, "API client not configured")
-    active_model = get_model(profile)
+    active_model = _GET_MODEL(profile)
 
-    async def _call_json(messages):
+    async def _call_json(messages, cache_source):
         """同款 try/fallback 包装。返 (raw_text, parsed_or_none)。
         sync OpenAI 调用丢 threadpool 防阻塞 event loop(详 /api/eval/run 处注释)。
         workflow B #2 闭合:第一次异常按子类型分桶(auth/quota/timeout/format),
@@ -138,20 +193,21 @@ async def eval_test(req: Request):
                     timeout=90,
                 )
             except Exception as e:
-                err_type = _classify_eval_err(e)
-                log.info(f"eval call_1 失败 ({err_type}: {e}), 重试 fallback")
-                _report_silent_failure(err_type,
+                err_type = _CLASSIFY_EVAL_ERR(e)
+                _LOGGER().info(f"eval call_1 失败 ({err_type}: {e}), 重试 fallback")
+                _REPORT_FAILURE(err_type,
                     f"{type(e).__name__}: {str(e)[:120]}",
                     context={"model": active_model, "phase": "test_call_1"})
                 try:
                     return client.chat.completions.create(
                         model=active_model, messages=messages, timeout=90)
                 except Exception as e2:
-                    _report_silent_failure("eval_fallback_call_failed",
+                    _REPORT_FAILURE("eval_fallback_call_failed",
                         f"{type(e2).__name__}: {str(e2)[:120]}",
                         context={"model": active_model, "phase": "test_call_2"})
                     raise
         r = await asyncio.to_thread(_blocking)
+        _LOG_CACHE_USAGE(r, cache_source)
         text = (r.choices[0].message.content or "").strip()
         # 容忍 <think>...</think> 和 ```json fence
         cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
@@ -163,7 +219,7 @@ async def eval_test(req: Request):
             # 留言板会落 _(empty)_ 卡 — 用户次晨看 AI"啥都没说"。最高 UX 影响。
             # 不送 text 原文 — 它是 LLM 对 user 日记的评议,属 consent.js 承诺
             # "不收集对话记录"范围。只送长度元数据够定位"空/短/长非 JSON"。
-            _report_silent_failure("eval_json_parse_failed",
+            _REPORT_FAILURE("eval_json_parse_failed",
                 f"{type(e).__name__}: {str(e)[:80]}",
                 context={"model": active_model,
                          "text_len": len(text or ""),
@@ -171,10 +227,14 @@ async def eval_test(req: Request):
             return text, None
 
     # call 1: 主 eval
-    eval_raw, eval_parsed = await _call_json(_eval_build_messages(target, model_id=active_model))
+    eval_raw, eval_parsed = await _call_json(
+        _BUILD_MESSAGES(target, model_id=active_model), "eval/test-main"
+    )
 
     # call 2: feature_intro 单独
-    fi_raw, fi_parsed = await _call_json(_eval_build_feature_intro_messages(target))
+    fi_raw, fi_parsed = await _call_json(
+        _BUILD_FEATURE_INTRO_MESSAGES(target), "eval/test-feature"
+    )
 
     # merge: eval_parsed 加 feature_intro 字段
     merged = dict(eval_parsed) if eval_parsed else {}
@@ -199,10 +259,8 @@ async def eval_run(req: Request):
     """生产端 — 同 /api/eval/test 跑 2-call,但持久化 + 触发 macOS 通知。
     body: {date?, model_id?}
     """
-    from server import (datetime, get_profile, get_client, get_model, _classify_eval_err,
-                        _report_silent_failure, _eval_build_messages,
-                        _eval_build_feature_intro_messages, _eval_persist, _eval_notify, log)
     body = await req.json() if (await req.body()) else {}
+    datetime = _DATETIME()
     date_str = (body.get("date") or "").strip()
     if date_str:
         try:
@@ -213,13 +271,13 @@ async def eval_run(req: Request):
         target = datetime.now()
 
     model_id = body.get("model_id")
-    profile = get_profile(model_id)
-    client = get_client(profile)
+    profile = _GET_PROFILE(model_id)
+    client = _GET_CLIENT(profile)
     if client is None:
         raise HTTPException(503, "API client not configured")
-    active_model = get_model(profile)
+    active_model = _GET_MODEL(profile)
 
-    async def _call_json(messages):
+    async def _call_json(messages, cache_source):
         # OpenAI SDK 是 sync 的,直接调会阻塞 event loop —— 21:30 eval 跑的时候
         # 整个 server 60-120s 失联(包括 chat endpoint),就是这个锅。丢 threadpool。
         # workflow B #2 闭合:同上 — 异常分桶 + fallback 也包 try。
@@ -230,20 +288,21 @@ async def eval_run(req: Request):
                     response_format={"type": "json_object"},
                     timeout=90)
             except Exception as e:
-                err_type = _classify_eval_err(e)
-                log.info(f"eval call_1 失败 ({err_type}: {e}), 重试 fallback")
-                _report_silent_failure(err_type,
+                err_type = _CLASSIFY_EVAL_ERR(e)
+                _LOGGER().info(f"eval call_1 失败 ({err_type}: {e}), 重试 fallback")
+                _REPORT_FAILURE(err_type,
                     f"{type(e).__name__}: {str(e)[:120]}",
                     context={"model": active_model, "phase": "run_call_1"})
                 try:
                     return client.chat.completions.create(
                         model=active_model, messages=messages, timeout=90)
                 except Exception as e2:
-                    _report_silent_failure("eval_fallback_call_failed",
+                    _REPORT_FAILURE("eval_fallback_call_failed",
                         f"{type(e2).__name__}: {str(e2)[:120]}",
                         context={"model": active_model, "phase": "run_call_2"})
                     raise
         r = await asyncio.to_thread(_blocking)
+        _LOG_CACHE_USAGE(r, cache_source)
         text = (r.choices[0].message.content or "").strip()
         cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
         cleaned = re.sub(r"^```(json)?\s*", "", cleaned).strip()
@@ -253,15 +312,19 @@ async def eval_run(req: Request):
         except Exception as e:
             # 不送 text 原文 — 它是 LLM 对 user 日记的评议,属 consent.js 承诺
             # "不收集对话记录"范围。只送长度元数据够定位"空/短/长非 JSON"。
-            _report_silent_failure("eval_json_parse_failed",
+            _REPORT_FAILURE("eval_json_parse_failed",
                 f"{type(e).__name__}: {str(e)[:80]}",
                 context={"model": active_model,
                          "text_len": len(text or ""),
                          "cleaned_len": len(cleaned or "")})
             return text, None
 
-    eval_raw, eval_parsed = await _call_json(_eval_build_messages(target, model_id=active_model))
-    fi_raw, fi_parsed = await _call_json(_eval_build_feature_intro_messages(target))
+    eval_raw, eval_parsed = await _call_json(
+        _BUILD_MESSAGES(target, model_id=active_model), "eval/run-main"
+    )
+    fi_raw, fi_parsed = await _call_json(
+        _BUILD_FEATURE_INTRO_MESSAGES(target), "eval/run-feature"
+    )
 
     merged = dict(eval_parsed) if eval_parsed else {}
     if fi_parsed and "feature_intro" in fi_parsed:
@@ -269,8 +332,8 @@ async def eval_run(req: Request):
     else:
         merged["feature_intro"] = None
 
-    persisted = _eval_persist(target, merged)
-    _eval_notify(target, merged)
+    persisted = _EVAL_PERSIST(target, merged)
+    _EVAL_NOTIFY(target, merged)
 
     return {
         "ok": True,

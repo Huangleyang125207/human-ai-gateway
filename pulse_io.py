@@ -1,8 +1,7 @@
 """pulse_io — PULSE 子系统的 leaf:数据/IO/解析/校验,无 LLM 调用。
 
 PULSE LARGE refactor P2。从 server.py 抽出,行为零变化。
-依赖 server.py 顶层的 VAULT_DIR / APP_STATE_DIR(在 server.py L83/L111 已定义,
-本模块由 server.py 在 L120 之后 import,VAULT_DIR/APP_STATE_DIR 已在 server.namespace)。
+路径依赖来自无应用组装副作用的 runtime_paths。
 
 包含:
   - 3 个 PULSE 真源路径(env-overrideable):_USER_PULSE_PATH / _PROJECT_PULSE_PATH /
@@ -22,7 +21,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from server import VAULT_DIR, APP_STATE_DIR
+from runtime_paths import APP_STATE_DIR, VAULT_DIR
 
 
 # ── 3 个 PULSE 真源路径(env-overrideable)──────────────────────────────

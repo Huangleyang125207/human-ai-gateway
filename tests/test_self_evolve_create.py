@@ -12,6 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import pulse_io  # noqa: E402
 
 
 GOOD_PULSE = """# USER_PULSE
@@ -66,7 +67,7 @@ def test_user_pulse_created_when_absent(monkeypatch, tmp_path):
     target_md = tmp_path / "USER_PULSE.md"
     assert not target_md.exists()
     monkeypatch.setitem(
-        server._SELF_EVOLVE_TARGETS["user_pulse"], "path", lambda: target_md
+        pulse_io._SELF_EVOLVE_TARGETS["user_pulse"], "path", lambda: target_md
     )
     client = _FakeClient(GOOD_PULSE)
     _wire_llm(monkeypatch, client)
@@ -86,7 +87,7 @@ def test_user_pulse_created_when_absent(monkeypatch, tmp_path):
 def test_project_pulse_still_skips_when_absent(monkeypatch, tmp_path):
     target_md = tmp_path / "PROJECT_PULSE.md"
     monkeypatch.setitem(
-        server._SELF_EVOLVE_TARGETS["project_pulse"], "path", lambda: target_md
+        pulse_io._SELF_EVOLVE_TARGETS["project_pulse"], "path", lambda: target_md
     )
     client = _FakeClient(GOOD_PULSE)
     _wire_llm(monkeypatch, client)
@@ -104,7 +105,7 @@ def test_user_pulse_existing_file_unaffected(monkeypatch, tmp_path):
     target_md = tmp_path / "USER_PULSE.md"
     target_md.write_text(GOOD_PULSE, encoding="utf-8")
     monkeypatch.setitem(
-        server._SELF_EVOLVE_TARGETS["user_pulse"], "path", lambda: target_md
+        pulse_io._SELF_EVOLVE_TARGETS["user_pulse"], "path", lambda: target_md
     )
     updated = GOOD_PULSE.replace("2026-06-11", "2026-06-12")
     client = _FakeClient(updated)

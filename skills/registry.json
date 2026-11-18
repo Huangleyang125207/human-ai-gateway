@@ -1,0 +1,95 @@
+{
+  "version": "1.0",
+  "skills": [
+    {
+      "name": "gateway-journal",
+      "tools": [
+        "read_today_schedule",
+        "list_recent_days",
+        "search_text",
+        "read_text",
+        "patch_journal_block",
+        "insert_journal_block",
+        "append_journal_comment",
+        "delete_journal_entry",
+        "manage_tag_aggregate"
+      ],
+      "references": []
+    },
+    {
+      "name": "gateway-daily-care",
+      "tools": [
+        "manage_daily_task",
+        "check_daily_task",
+        "set_daily_task_meta",
+        "set_daily_task_image",
+        "set_water_cup_image",
+        "get_daily_care_state",
+        "manage_mood"
+      ],
+      "references": []
+    },
+    {
+      "name": "gateway-memo",
+      "tools": [
+        "list_memos",
+        "create_memo",
+        "update_memo",
+        "act_on_memo",
+        "manage_memo_series"
+      ],
+      "references": []
+    },
+    {
+      "name": "gateway-photos",
+      "tools": [
+        "record_image_observation",
+        "vision_classify",
+        "list_my_uploads",
+        "search_my_uploads",
+        "ask_photo_curator",
+        "place_scrapbook_image",
+        "delete_attachment",
+        "manage_scrapbook"
+      ],
+      "references": []
+    },
+    {
+      "name": "gateway-widgets",
+      "tools": [
+        "list_widgets",
+        "search_widget_capabilities",
+        "validate_widget_spec",
+        "install_widget_spec",
+        "set_widget_enabled",
+        "remove_widget"
+      ],
+      "references": []
+    },
+    {
+      "name": "gateway-web-research",
+      "tools": [
+        "web_search",
+        "fetch_url"
+      ],
+      "references": []
+    },
+    {
+      "name": "gateway-runtime",
+      "tools": [
+        "search_skills",
+        "load_skill",
+        "read_skill_resource",
+        "load_protocol"
+      ],
+      "references": []
+    },
+    {
+      "name": "gateway-architecture",
+      "tools": [],
+      "references": [
+        "docs/ARCHITECTURE_LEDGER.md"
+      ]
+    }
+  ]
+}

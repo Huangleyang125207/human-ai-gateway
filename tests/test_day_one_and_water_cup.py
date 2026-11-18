@@ -15,6 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import server  # noqa: E402
+import tool_registry  # noqa: E402
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -112,9 +113,11 @@ def test_new_day_filename_with_existing_vault(isolated_vault):
 
 # ─── T7 · 工具注册:set_water_cup_image 在 images group + dispatcher ────
 
-def test_set_water_cup_image_registered_in_images_group():
-    """删工具会触发本测 — 防 marketplace 改 group 时手滑漏掉。"""
-    assert "set_water_cup_image" in server.TOOL_GROUPS["images"]
+def test_set_water_cup_image_has_host_policy():
+    """删 effect 会触发本测，避免工具绕过宿主策略。"""
+    assert tool_registry.authorize_tool(
+        "set_water_cup_image", {}, {"user_text": "设置水杯图片"},
+    ) is None
 
 
 def test_set_water_cup_image_dispatcher_wired():
@@ -146,8 +149,13 @@ def test_workflow_hint_includes_water_cup_path():
     """vision-pre-router workflow hint 字符串必含水杯引导,不然 DeepSeek 又调不动。
     今天 user dogfood 报"DeepSeek 不调 set_water_cup_image" 的根治。
     """
-    # workflow hint 6.24 随 chat() 抽到 chat_routes.py;源码级断言读两处合并
-    src = (ROOT / "server.py").read_text() + (ROOT / "chat_routes.py").read_text()
+    # workflow hint 6.24 随 chat() 抽到 chat_routes.py;7.22 文案再抽到 prompts/vision_workflow.md
+    # (Extract Module,渲染逻辑留 chat_routes._build_vision_workflow_block)— 源码级断言读三处合并
+    src = (
+        (ROOT / "server.py").read_text()
+        + (ROOT / "chat_routes.py").read_text()
+        + (ROOT / "prompts" / "vision_workflow.md").read_text()
+    )
     # 关键字三连击:'水杯' + 'set_water_cup_image' + 触发词列表
     assert "水杯" in src, "源码必有'水杯'字 — 它在 workflow hint 里"
     assert "set_water_cup_image" in src

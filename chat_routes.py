@@ -4,7 +4,7 @@ Extract Module(ctrl-c-v § 9):本 session 最高风险抽取(extract-with-caveat
 流式 chokepoint 从 server.py 搬出 —— DSML 泄漏闸 / SSE 契约 / 可变状态 / claim 审计这些
 Cannot-break 代码随之搬来,15 条 characterization(test_chat_routes.py)守红线。
 
-留 server.py(lazy from server import):_dispatch_tool/_active_tools/_initial_groups/TOOL_IMPL 等
+由组装根注入:_dispatch_tool/_active_tools/_build_action_context/TOOL_IMPL 等
 tool 引擎(reaches authorship 核心,绝不搬)、build_system_prompt、get_client/profile/model、LLM core、
 attachments 索引簇、vision/ocr。re-export:_audit_unauthorized_claim(test_claim_audit 直调)。
 DSML 正则字节脆弱(U+FF5C)→ 本文件由 server.py 源码逐字提取,非手抄。lazy import 经 AST 精确探测。
@@ -19,7 +19,180 @@ from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from attachment_service import resolve_attachment_url
+from attachments_index import is_ai_visible_attachment
+from image_service_errors import ImageServiceError
+
 router = APIRouter(tags=["chat"])
+
+_LOAD_ATTACHMENTS_INDEX = None
+_ATTACHMENTS_DIR = None
+_OCR_TEXT = None
+_INDEX_UPSERT = None
+_VISION_CLASSIFY_IMAGE = None
+_REPORT_FAILURE = None
+_LOGGER = None
+_DISPATCH_TOOL = None
+_ACTIVE_TOOLS = None
+_LOG_CACHE_USAGE = None
+_ALLOWED_IMAGE_EXT = None
+_MAX_IMAGE_BYTES = None
+_FIND_BY_HASH = None
+_INDEX_ATTACHMENT = None
+_COMPUTE_TIME_HINT = None
+_BUILD_ACTION_CONTEXT = None
+_STRIP_OCR_HISTORY = None
+_TODAY_DATE_STR = None
+_BUILD_SYSTEM_PROMPT = None
+_IMAGE_DATA_URL = None
+_GET_CLIENT = None
+_GET_MODEL = None
+_GET_PROFILE = None
+
+
+def configure_effects(
+    *,
+    load_attachments_index,
+    attachments_dir,
+    ocr_text,
+    index_upsert,
+    vision_classify_image,
+    report_failure,
+    logger,
+    dispatch_tool,
+    active_tools,
+    log_cache_usage,
+    allowed_image_ext,
+    max_image_bytes,
+    find_by_hash,
+    index_attachment,
+    compute_time_hint,
+    build_action_context,
+    strip_ocr_history,
+    today_date_str,
+    build_system_prompt,
+    image_data_url,
+    get_client,
+    get_model,
+    get_profile,
+) -> None:
+    global _LOAD_ATTACHMENTS_INDEX, _ATTACHMENTS_DIR, _OCR_TEXT, _INDEX_UPSERT
+    global _VISION_CLASSIFY_IMAGE, _REPORT_FAILURE, _LOGGER, _DISPATCH_TOOL
+    global _ACTIVE_TOOLS, _LOG_CACHE_USAGE, _ALLOWED_IMAGE_EXT, _MAX_IMAGE_BYTES
+    global _FIND_BY_HASH, _INDEX_ATTACHMENT, _COMPUTE_TIME_HINT
+    global _BUILD_ACTION_CONTEXT, _STRIP_OCR_HISTORY, _TODAY_DATE_STR
+    global _BUILD_SYSTEM_PROMPT, _GET_CLIENT, _GET_MODEL, _GET_PROFILE, _IMAGE_DATA_URL
+    _LOAD_ATTACHMENTS_INDEX = load_attachments_index
+    _ATTACHMENTS_DIR = attachments_dir
+    _OCR_TEXT = ocr_text
+    _INDEX_UPSERT = index_upsert
+    _VISION_CLASSIFY_IMAGE = vision_classify_image
+    _REPORT_FAILURE = report_failure
+    _LOGGER = logger
+    _DISPATCH_TOOL = dispatch_tool
+    _ACTIVE_TOOLS = active_tools
+    _LOG_CACHE_USAGE = log_cache_usage
+    _ALLOWED_IMAGE_EXT = allowed_image_ext
+    _MAX_IMAGE_BYTES = max_image_bytes
+    _FIND_BY_HASH = find_by_hash
+    _INDEX_ATTACHMENT = index_attachment
+    _COMPUTE_TIME_HINT = compute_time_hint
+    _BUILD_ACTION_CONTEXT = build_action_context
+    _STRIP_OCR_HISTORY = strip_ocr_history
+    _TODAY_DATE_STR = today_date_str
+    _BUILD_SYSTEM_PROMPT = build_system_prompt
+    _GET_CLIENT = get_client
+    _GET_MODEL = get_model
+    _GET_PROFILE = get_profile
+    _IMAGE_DATA_URL = image_data_url
+
+
+def _materialize_user_content(text: str, refs) -> tuple[str | list, list[dict]]:
+    """当前轮图片只在传输时物化；History/model_content 永不保存 base64。"""
+    blocks = [{"type": "text", "text": text}]
+    visible = []
+    for ref in refs or []:
+        if not isinstance(ref, dict) or ref.get("kind") != "image":
+            continue
+        payload = ref.get("payload", ref) if isinstance(ref, dict) else {}
+        url = payload.get("url", "") if isinstance(payload, dict) else ""
+        if not url or not is_ai_visible_attachment({"filename": url.rsplit("/", 1)[-1]}):
+            continue
+        try:
+            path = resolve_attachment_url(_ATTACHMENTS_DIR(), url)
+            blocks.append({"type": "image_url", "image_url": {"url": _IMAGE_DATA_URL(path)}})
+            visible.append(ref)
+        except (ImageServiceError, OSError):
+            continue
+    return (blocks if len(blocks) > 1 else text), visible
+
+
+def _multimodal_user_content(text: str, refs) -> str | list:
+    return _materialize_user_content(text, refs)[0]
+
+
+_ATTACHMENT_URL_RE = re.compile(r"/attachments/\d{4}-\d{2}-\d{2}/[^\s\"'<>\\]+")
+_CONTEXT_JSON_RE = re.compile(r"<context>\s*(\{[\s\S]*?\})\s*</context>")
+
+
+def _logical_image_refs_from_text(text: str) -> list[dict]:
+    match = _CONTEXT_JSON_RE.search(text or "")
+    if not match:
+        return []
+    try:
+        context = json.loads(match.group(1))
+    except (TypeError, ValueError):
+        return []
+    return [ref for ref in (context.get("refs") or [])
+            if isinstance(ref, dict) and ref.get("kind") == "image"]
+
+
+def _multimodal_history_content(text: str) -> str | list:
+    """Re-materialize persisted logical attachment refs for byte-stable replay."""
+    return _multimodal_user_content(text, _logical_image_refs_from_text(text))
+# WORKFLOW 文案外置(2026-07-22,与 baseline/protocol_index/tool_catalog 同批 Extract Module):
+# gateway/prompts/vision_workflow.md,{view_date} 占位符渲染。RN 端 chatPretext.ts 的
+# buildVisionHint 部分内容由 promptContract.json(见 gateway/scripts/generate_prompt_contract.py)
+# 生成同步,RN-only 分支(doc OCR 特例措辞等,见 PARITY_HARNESS_2026-07-19.md)保留手写。
+from prompt_builder import _read_prompt as _read_prompt_file
+
+
+# 旧值仅保留给升级中 canonical History / 测试回放的协议识别；运行时 profile
+# 已由 composition root 强制迁到 vision-exp，不再把这些值暴露给 picker。
+_DEEPSEEK_V4_MODELS = {
+    "deepseek-v4-flash-vision-exp", "deepseek-v4-flash", "deepseek-v4-pro",
+}
+
+
+def _thinking_request_kwargs(active_model: str) -> dict:
+    """DeepSeek V4 主对话固定开启 high 思考；其他兼容 provider 不接收私有参数。"""
+    if active_model not in _DEEPSEEK_V4_MODELS:
+        return {}
+    return {
+        "reasoning_effort": "high",
+        "extra_body": {"thinking": {"type": "enabled"}},
+    }
+
+
+def _log_reasoning_observation(reasoning: str, source: str, active_model: str) -> None:
+    """只记录思考是否返回及长度，绝不记录 reasoning_content 正文。"""
+    if active_model not in _DEEPSEEK_V4_MODELS:
+        return
+    try:
+        chars = len(reasoning or "")
+        _LOGGER().info(
+            "[reasoning:%s] requested=enabled effort=high received=%s chars=%d",
+            source, str(chars > 0).lower(), chars,
+        )
+    except Exception:
+        pass
+
+
+def _build_vision_workflow_block(view_date: str) -> str:
+    """渲染 <vision-pre-router> WORKFLOW 段(prompts/vision_workflow.md {view_date} 占位符)。
+    抽自 chat() 内联 f-string(Extract Module,字节级不变 — 见 tests/test_prompt_extraction.py)。
+    """
+    return _read_prompt_file("vision_workflow.md").format(view_date=view_date)
 
 # history 里 thread.js 把 ref 拼成 `[image] filename`(或其他 kind),抓 image 那条
 _HISTORY_IMG_LABEL_RE = re.compile(r'\[image\]\s+([^\n]+?)(?=\n|$)')
@@ -61,53 +234,69 @@ def _trim_history_tool_volume(history: list, max_tool_chars: int) -> list:
             final.append(m)
     return final
 
-def _enrich_history_image_labels(history: list) -> list:
-    from server import _load_attachments_index
-    """history 里 thread.js 把图 ref 拼成 `[image] filename.jpg`,但 AI 视角下
-    filename 通常是 hash(如 `54cacfb2c68036b56b26.jpg`)— 看不出内容,
-    回头引用之前上传过的图时容易凭空捏造话题(5.20 长鑫存储被答成 HK 虚拟货币 = 这条 bug)。
+def _history_image_brief_block(history: list) -> str:
+    """history 里 thread.js 把图 ref 拼成 `[image] filename.jpg`,filename 通常是 hash —
+    AI 看不出内容,回头引用旧图时容易凭空捏造话题(5.20 长鑫存储被答成 HK 虚拟货币)。
 
-    本函数在 server 端拼 LLM prompt 前,把每条 history 里的 `[image] X` 替换成:
-        [image] X (kind: description) OCR 前 120 字: ...
-    数据来自 _attachments_index 的 cache,零额外 LLM 调用。cache miss 时 label 不变。
+    旧方案(_enrich_history_image_labels,7.23 审计 B2 裁决废弃)是逐 turn 用当下 vision
+    cache **改写历史消息里的 label** —— cache 后到会让同一段历史在下一 turn 序列化出
+    不同字节,从该消息起 KV 缓存前缀全废。
+
+    新方案:历史字节冻结,一律不改写;为出现在 history 里的图片生成一个 brief 索引块,
+    由调用方追加进**本 turn 新 user message 尾部**(尾部本来就是新字节,零缓存代价)。
+    cache miss 的图不出现在索引里,下一 turn cache 到了自然补上——只影响尾块,不动前缀。
     """
     if not history:
-        return history
-    idx = _load_attachments_index()
+        return ""
+    labels: list = []
+    seen = set()
+    for m in history:
+        content = m.get("content")
+        if isinstance(content, list):
+            content = next((b.get("text", "") for b in content
+                            if isinstance(b, dict) and b.get("type") == "text"), "")
+        if isinstance(content, str) and "[image]" in content:
+            for mt in _HISTORY_IMG_LABEL_RE.finditer(content):
+                label = mt.group(1).strip()
+                if label not in seen:
+                    seen.add(label)
+                    labels.append(label)
+        if isinstance(content, str):
+            for ref in _logical_image_refs_from_text(content):
+                url = str((ref.get("payload") or {}).get("url") or "")
+                if not url:
+                    continue
+                label = url.rstrip(".,，。)]}").rsplit("/", 1)[-1]
+                if label not in seen:
+                    seen.add(label)
+                    labels.append(label)
+    if not labels:
+        return ""
+    idx = [x for x in _LOAD_ATTACHMENTS_INDEX() if is_ai_visible_attachment(x)]
     by_original = {x.get("original"): x for x in idx if x.get("original")}
     by_filename = {x.get("filename"): x for x in idx if x.get("filename")}
-
-    def _lookup(label: str) -> str:
+    lines = []
+    for label in labels:
         entry = by_original.get(label) or by_filename.get(label)
         if not entry:
-            return f"[image] {label}"
+            continue
         vision = entry.get("vision") or {}
         kind = vision.get("kind")
         desc = vision.get("description", "")
-        ocr = (entry.get("ocr_text") or "")[:120].replace("\n", " ").strip()
-        bits = [f"[image] {label}"]
+        ocr = (entry.get("ocr_text") or vision.get("ocr_text") or vision.get("ocr") or "")[:120].replace("\n", " ").strip()
+        bits = [f"- {label}"]
         if kind and desc:
             bits.append(f"({kind}: {desc})")
         elif desc:
             bits.append(f"({desc})")
         if ocr:
             bits.append(f"OCR前 120 字: {ocr}")
-        return "  ".join(bits)
-
-    out = []
-    for m in history:
-        content = m.get("content")
-        if isinstance(content, str) and "[image]" in content:
-            new_content = _HISTORY_IMG_LABEL_RE.sub(
-                lambda mt: _lookup(mt.group(1).strip()), content
-            )
-            out.append({**m, "content": new_content})
-        else:
-            out.append(m)
-    return out
+        lines.append("  ".join(bits))
+    if not lines:
+        return ""
+    return "<历史图片索引>(系统注入:历史消息里 [image] 文件名对应的内容,引用旧图以此为准,别凭文件名猜)\n" + "\n".join(lines) + "\n</历史图片索引>"
 
 def _refs_to_image_blocks(refs):
-    from server import ATTACHMENTS_DIR, _ocr_text
     """从 context.refs 抽 image,跑 OCR,返回 [{filename, ocr_text}] 列表。
     上层把这个嵌进 user message 文本里给 LLM。
     走 _ocr_text 统一出口(端侧优先,baidu 兜底)。
@@ -117,37 +306,36 @@ def _refs_to_image_blocks(refs):
         if r.get("kind") != "image":
             continue
         url = (r.get("payload") or {}).get("url") or ""
-        m = re.match(r"^/attachments/([^/]+)/([^/]+)$", url)
-        if not m:
+        if not is_ai_visible_attachment({"filename": url.rsplit("/", 1)[-1]}):
             continue
-        f = ATTACHMENTS_DIR / m.group(1) / m.group(2)
-        if not f.exists():
+        try:
+            f = resolve_attachment_url(_ATTACHMENTS_DIR(), url)
+        except ImageServiceError:
             continue
         out.append({
             "filename": (r.get("payload") or {}).get("original") or f.name,
-            "ocr_text": _ocr_text(f),
+            "ocr_text": _OCR_TEXT(f),
         })
     return out
 
 def _refs_to_vision_hints(refs):
-    from server import ATTACHMENTS_DIR, _index_upsert, _load_attachments_index, _qwen_classify_image, _report_silent_failure, log
     """upload-side vision router 的第二步:
     chat 收到 image refs 时,从索引拿 cache vision 结果;cache miss / vision 空 → 现场 sync
-    call 一次 qwen-vl 补上,并回写索引(下次 hit)。
+    call 一次 DeepSeek Vision 补上,并回写索引(下次 hit)。
     返 [{filename, url, vision_dict}],上层拼成 hint 注入 user message。
     """
     out = []
-    idx = _load_attachments_index()
+    idx = _LOAD_ATTACHMENTS_INDEX()
     by_url = {x.get("url"): x for x in idx if x.get("url")}
     for r in refs or []:
         if r.get("kind") != "image":
             continue
         url = (r.get("payload") or {}).get("url") or ""
-        m = re.match(r"^/attachments/([^/]+)/([^/]+)$", url)
-        if not m:
+        if not is_ai_visible_attachment({"filename": url.rsplit("/", 1)[-1]}):
             continue
-        f = ATTACHMENTS_DIR / m.group(1) / m.group(2)
-        if not f.exists():
+        try:
+            f = resolve_attachment_url(_ATTACHMENTS_DIR(), url)
+        except ImageServiceError:
             continue
         entry = by_url.get(url)
         vision = (entry or {}).get("vision") or {}
@@ -156,25 +344,28 @@ def _refs_to_vision_hints(refs):
         # 覆盖对方的字段(原来的 bug:OCR 跑得慢,等它写完时把 vision 冲了)
         if not vision:
             try:
-                vc = _qwen_classify_image(f)
+                vc = _VISION_CLASSIFY_IMAGE(f)
                 if isinstance(vc, dict) and not vc.get("error"):
                     vision = vc
-                    _index_upsert(
-                        m.group(1), m.group(2),
+                    _INDEX_UPSERT(
+                        f.parent.name, f.name,
                         vision=vision,
+                        vision_pending=False,
                         url=url,
-                        original=(r.get("payload") or {}).get("original") or m.group(2),
+                        original=(r.get("payload") or {}).get("original") or f.name,
                         size=f.stat().st_size,
                     )
             except Exception as e:
-                log.warning(f"sync vision failed for {url}: {e}")
+                _LOGGER().warning(f"sync vision failed for {url}: {e}")
                 # vision call 抛 — 不只是返 error,是裸异常逃出。
-                # _qwen_classify_image 内部已 hook 各类 return error,这一条
+                # vision provider 内部已 hook 各类 return error,这一条
                 # 抓的是 import 失败 / SDK 崩 / cache lock 异常这种。
-                _report_silent_failure("vision_hint_inline_exception",
+                _REPORT_FAILURE("vision_hint_inline_exception",
                     f"{type(e).__name__}: {str(e)[:120]}",
                     context={"url": url[-40:] if url else ""})
         if vision:
+            if (entry or {}).get("vision_pending"):
+                _INDEX_UPSERT(f.parent.name, f.name, vision_pending=False)
             # 用户 chip 上的"抠/原"开关传过来的偏好(default true)
             cutout_pref = (r.get("payload") or {}).get("cutout")
             if cutout_pref is None:
@@ -186,6 +377,39 @@ def _refs_to_vision_hints(refs):
                 "user_cutout_pref": bool(cutout_pref),
             })
     return out
+
+
+def _mark_vision_pending(refs) -> list[dict]:
+    image_refs = []
+    for ref in refs or []:
+        if not isinstance(ref, dict) or ref.get("kind") != "image":
+            continue
+        url = (ref.get("payload") or {}).get("url") or ""
+        try:
+            f = resolve_attachment_url(_ATTACHMENTS_DIR(), url)
+        except ImageServiceError:
+            continue
+        _INDEX_UPSERT(f.parent.name, f.name, url=url, vision_pending=True)
+        image_refs.append(ref)
+    return image_refs
+
+
+def retry_pending_vision(limit: int = 3, preferred_urls=None) -> int:
+    """Retry a bounded pending batch; current-turn photos take priority."""
+    preferred = set(preferred_urls or [])
+    pending = [item for item in _LOAD_ATTACHMENTS_INDEX()
+               if is_ai_visible_attachment(item) and item.get("vision_pending") and item.get("url")]
+    pending.sort(key=lambda item: (item.get("url") not in preferred,
+                                   item.get("date", ""), item.get("filename", "")))
+    refs = []
+    for item in pending[:max(0, int(limit))]:
+        if item.get("vision_pending") and item.get("url"):
+            refs.append({"kind": "image", "payload": {
+                "url": item["url"], "original": item.get("original", ""),
+            }})
+    if refs:
+        _refs_to_vision_hints(refs)
+    return len(refs)
 
 # ── chat SSE streaming generator ────────────────────────────────────
 # 事件类型:
@@ -250,11 +474,10 @@ def _extract_synthetic_tool_calls(content: str):
     stripped = _DSML_TAG_RE.sub("", stripped).strip()
     return stripped, calls
 
-def _exec_synth_calls(synth_calls, messages, last_actions, loaded_groups, quota_used):
-    from server import _dispatch_tool
+def _exec_synth_calls(synth_calls, messages, last_actions, action_context, quota_used):
     """执行 synth_calls,把 tool result 写进 messages + last_actions。"""
     for c in synth_calls:
-        result = _dispatch_tool(c["name"], c["args"], loaded_groups, quota_used)
+        result = _DISPATCH_TOOL(c["name"], c["args"], action_context, quota_used)
         last_actions.append({"id": c["id"], "name": c["name"], "args": c["args"], "result": result})
         messages.append({
             "role": "tool",
@@ -299,8 +522,8 @@ def _truncate_tool_result(content: str) -> str:
     omitted = len(content) - _TOOL_RESULT_CAP
     return f"{keep}\n…(truncated, {omitted} chars omitted; re-call tool with narrower args if needed)"
 
-def _stream_final_reply(client, active_model, messages, loaded_groups, quota_used, last_actions):
-    from server import _dispatch_tool, _report_silent_failure
+def _stream_final_reply(client, active_model, messages, action_context, quota_used, last_actions,
+                        turn_start_index=None):
     """单一 chokepoint:流式产出最终回复 + done。**所有**流给前端的模型文本都过这。
 
     内建 DSML 防漏:任一轮 stream 里冒出 ｜｜DSML 假 tool-call,一律 suppress
@@ -316,18 +539,27 @@ def _stream_final_reply(client, active_model, messages, loaded_groups, quota_use
     last_buffer = ""
     emitted = False
     hit_cap = True         # for 正常 break 会置 False;跑满循环没 break = 撞上限
+    if turn_start_index is None:
+        turn_start_index = len(messages)
 
     for _it in range(MAX_DSML_ITERS):
+        round_reasoning = ""
         # ping 保活:thinking 模式下首个 delta 可能要等几十秒,客户端 90s 没字节就 abort
         yield _sse({"type": "ping"})
         try:
+            # tools 同形传入 + tool_choice="none":与 tool round 保持同一段 tools JSON,
+            # 前缀不因"删字段"打废(7.23 审计 A1);行为不变 —— none 下模型只能出文本,
+            # DSML 假 tool-call 照旧走本函数的 extract 兜底。
             stream_resp = client.chat.completions.create(
                 model=active_model, messages=messages, stream=True,
+                tools=_ACTIVE_TOOLS(action_context), tool_choice="none",
+                stream_options={"include_usage": True},
+                **_thinking_request_kwargs(active_model),
             )
         except Exception as e:
             yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
             # #1 用户功能:聊天 LLM 初始调用失败(网络/quota/auth)— 高频且现在只吐 UI 不上报
-            _report_silent_failure("chat_llm_call_failed",
+            _REPORT_FAILURE("chat_llm_call_failed",
                 f"{type(e).__name__}: {str(e)[:120]}",
                 context={"model": active_model, "phase": "stream_start"})
             return
@@ -340,12 +572,15 @@ def _stream_final_reply(client, active_model, messages, loaded_groups, quota_use
         # 90s timer 才 abort。包 try/except → 发 error 事件 + 报 silent-failure 分桶。
         try:
             for chunk in stream_resp:
+                if getattr(chunk, "usage", None):
+                    _LOG_CACHE_USAGE(chunk, "chat/stream-final")
                 if not chunk.choices: continue
                 delta = chunk.choices[0].delta
                 if not delta: continue
                 rc = getattr(delta, "reasoning_content", None)
                 if rc:
                     reasoning_buf += rc
+                    round_reasoning += rc
                 if not delta.content: continue
                 buffer += delta.content
                 if suppress: continue
@@ -361,11 +596,12 @@ def _stream_final_reply(client, active_model, messages, loaded_groups, quota_use
         except Exception as e:
             err_msg = f"stream torn: {type(e).__name__}: {str(e)[:200]}"
             yield _sse({"type": "error", "text": err_msg})
-            _report_silent_failure("chat_stream_torn_down",
+            _REPORT_FAILURE("chat_stream_torn_down",
                 str(e)[:150],
                 context={"model": active_model, "emitted_chars": yielded_len,
                          "buffer_chars": len(buffer)})
             return
+        _log_reasoning_observation(round_reasoning, "chat/stream-final", active_model)
         last_buffer = buffer
 
         if not suppress:
@@ -395,11 +631,11 @@ def _stream_final_reply(client, active_model, messages, loaded_groups, quota_use
                         "function": {"name": c["name"],
                                      "arguments": json.dumps(c["args"], ensure_ascii=False)},
                     } for c in synth_calls]}
-        if reasoning_buf:
-            asst_msg["reasoning_content"] = reasoning_buf
+        if round_reasoning:
+            asst_msg["reasoning_content"] = round_reasoning
         messages.append(asst_msg)
         for c in synth_calls:
-            result = _dispatch_tool(c["name"], c["args"], loaded_groups, quota_used)
+            result = _DISPATCH_TOOL(c["name"], c["args"], action_context, quota_used)
             last_actions.append({"id": c["id"], "name": c["name"], "args": c["args"], "result": result})
             yield _sse({"type": "action", "id": c["id"], "name": c["name"], "args": c["args"], "result": result})
             messages.append({"role": "tool", "tool_call_id": c["id"],
@@ -420,15 +656,22 @@ def _stream_final_reply(client, active_model, messages, loaded_groups, quota_use
     done_payload = {"type": "done", "actions": last_actions, "model_id": active_model}
     if reasoning_buf:
         done_payload["reasoning_content"] = reasoning_buf
+    final_model_message = {"role": "assistant", "content": last_buffer}
+    if round_reasoning:
+        final_model_message["reasoning_content"] = round_reasoning
+    done_payload["model_messages"] = messages[turn_start_index:] + [final_model_message]
     yield _sse(done_payload)
 
-def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_used):
-    from server import _active_tools, _dispatch_tool, _log_cache_usage, _report_silent_failure
+def _chat_stream_generator(client, active_model, messages, action_context, quota_used,
+                           model_content=None):
     """跑跟非 stream 一样的 tool loop,但最后一轮(无 tool_calls 那一次)
     用 stream=True 把 text 一段段 yield 出去。tool 调用之间 yield action 事件。
-    active_tools 每轮重算(load_tool_group 可能改 loaded_groups)。
+    tools schema 每轮保持稳定；ActionPolicy 使用本轮不可变的用户请求上下文。
     所有流式文本出口统一走 _stream_final_reply(单一 chokepoint,DSML 防漏)。
     """
+    if model_content is not None:
+        yield _sse({"type": "request_meta", "model_content": model_content})
+    turn_start_index = len(messages)
     last_actions = []
     MAX_ROUNDS = 10
     for round_idx in range(MAX_ROUNDS):
@@ -436,10 +679,11 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
         # 非最后轮:先非 stream 让模型决定要不要 tool。
         # 最后一轮:不再给 tool,模型必须出文本收尾 —— 统一走 chokepoint 流(内建 DSML 防漏)。
         if is_last_round:
-            yield from _stream_final_reply(client, active_model, messages, loaded_groups, quota_used, last_actions)
+            yield from _stream_final_reply(client, active_model, messages, action_context, quota_used,
+                                           last_actions, turn_start_index)
             return
 
-        # tool round:非 stream;每轮重算 tools(load_tool_group 可能改 loaded_groups)
+        # tool round:非 stream;tools schema 保持稳定
         # 先发个 SSE ping —— 客户端 90s 没新字节就 abort(thread.js:591);
         # 一个轮的 model 阻塞调用可能 30-60s,多轮串起来很容易撞 90s。
         # ping 给 client 一个 byte 重置那个 timer。客户端未知 type 静默忽略,安全。
@@ -447,17 +691,21 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
         try:
             resp = client.chat.completions.create(
                 model=active_model, messages=messages,
-                tools=_active_tools(loaded_groups), tool_choice="auto",
+                tools=_ACTIVE_TOOLS(action_context), tool_choice="auto",
+                **_thinking_request_kwargs(active_model),
             )
         except Exception as e:
             yield _sse({"type": "error", "text": f"{type(e).__name__}: {str(e)[:300]}"})
-            _report_silent_failure("chat_llm_call_failed",
+            _REPORT_FAILURE("chat_llm_call_failed",
                 f"{type(e).__name__}: {str(e)[:120]}",
                 context={"model": active_model, "phase": "tool_loop"})
             return
 
         msg = resp.choices[0].message
-        _log_cache_usage(resp, "chat/stream-tool-round")
+        _log_reasoning_observation(
+            getattr(msg, "reasoning_content", None) or "", "chat/stream-tool-round", active_model
+        )
+        _LOG_CACHE_USAGE(resp, "chat/stream-tool-round")
         asst_msg = msg.model_dump(exclude_none=True)
         asst_msg["role"] = "assistant"
         if not msg.tool_calls:
@@ -480,7 +728,7 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
 
         if synth_calls:
             for c in synth_calls:
-                result = _dispatch_tool(c["name"], c["args"], loaded_groups, quota_used)
+                result = _DISPATCH_TOOL(c["name"], c["args"], action_context, quota_used)
                 last_actions.append({"id": c["id"], "name": c["name"], "args": c["args"], "result": result})
                 yield _sse({"type": "action", "id": c["id"], "name": c["name"], "args": c["args"], "result": result})
                 messages.append({
@@ -494,7 +742,8 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
             # 模型不要 tool 了 — pop 出空 asst,改用 chokepoint 真流(内建 DSML 防漏:
             # 模型这轮若反悔又想调工具 → 吐 DSML 也不会裸漏给前端,会被抠出执行)
             messages.pop()
-            yield from _stream_final_reply(client, active_model, messages, loaded_groups, quota_used, last_actions)
+            yield from _stream_final_reply(client, active_model, messages, action_context, quota_used,
+                                           last_actions, turn_start_index)
             return
 
         # 执行 tools,逐个 yield action 事件
@@ -507,7 +756,7 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
                 args = json.loads(tc.function.arguments or "{}")
             except Exception:
                 pass
-            result = _dispatch_tool(fn, args, loaded_groups, quota_used)
+            result = _DISPATCH_TOOL(fn, args, action_context, quota_used)
             action_payload = {"id": tc.id, "name": fn, "args": args, "result": result}
             last_actions.append(action_payload)
             yield _sse({"type": "action", **action_payload})
@@ -522,7 +771,6 @@ def _chat_stream_generator(client, active_model, messages, loaded_groups, quota_
 
 @router.post("/api/chat/upload-image")
 async def chat_upload_image(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
-    from server import ALLOWED_IMAGE_EXT, ATTACHMENTS_DIR, MAX_IMAGE_BYTES, _find_by_hash, _index_attachment, _index_upsert
     """侧栏拖图上传 — 存到 数据库/valut/attachments/YYYY-MM-DD/。
 
     返回 {url, filename, size}:
@@ -534,11 +782,13 @@ async def chat_upload_image(file: UploadFile = File(...), background_tasks: Back
     if not file.filename:
         raise HTTPException(400, "no filename")
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-    if ext not in ALLOWED_IMAGE_EXT:
-        raise HTTPException(400, f"unsupported ext '.{ext}'. allowed: {sorted(ALLOWED_IMAGE_EXT)}")
+    allowed_image_ext = _ALLOWED_IMAGE_EXT()
+    if ext not in allowed_image_ext:
+        raise HTTPException(400, f"unsupported ext '.{ext}'. allowed: {sorted(allowed_image_ext)}")
     data = await file.read()
-    if len(data) > MAX_IMAGE_BYTES:
-        raise HTTPException(413, f"file too large ({len(data)} bytes > {MAX_IMAGE_BYTES})")
+    max_image_bytes = _MAX_IMAGE_BYTES()
+    if len(data) > max_image_bytes:
+        raise HTTPException(413, f"file too large ({len(data)} bytes > {max_image_bytes})")
     if len(data) == 0:
         raise HTTPException(400, "empty file")
 
@@ -546,7 +796,7 @@ async def chat_upload_image(file: UploadFile = File(...), background_tasks: Back
     # url + 跳过 OCR/vision call,既省空间也避免 curator 把同图返多次("找狗"返 5 张
     # 一模一样客厅照那条 5.16 bug 的根治)。
     sha = hashlib.sha256(data).hexdigest()
-    existing = _find_by_hash(sha)
+    existing = _FIND_BY_HASH(sha)
     if existing and existing.get("url"):
         return {
             "url": existing["url"],
@@ -558,7 +808,7 @@ async def chat_upload_image(file: UploadFile = File(...), background_tasks: Back
         }
 
     today = datetime.now().strftime("%Y-%m-%d")
-    day_dir = ATTACHMENTS_DIR / today
+    day_dir = _ATTACHMENTS_DIR() / today
     day_dir.mkdir(parents=True, exist_ok=True)
     # 文件名:时间戳-rand.ext,保留原名做备注但不进路径(避免奇怪字符)
     stamp = datetime.now().strftime("%H%M%S")
@@ -568,7 +818,7 @@ async def chat_upload_image(file: UploadFile = File(...), background_tasks: Back
     # 同步 upsert 最小 record(hash + url + size):防同字节连续 upload 的 race —
     # 不然 #2 在 #1 的后台 OCR 还没跑完时去 _find_by_hash 找不到东西就误判 新图。
     # OCR 仍走后台不阻塞响应。
-    _index_upsert(
+    _INDEX_UPSERT(
         today, saved_name,
         url=f"/attachments/{today}/{saved_name}",
         hash=sha,
@@ -576,7 +826,9 @@ async def chat_upload_image(file: UploadFile = File(...), background_tasks: Back
         original=file.filename,
     )
     if background_tasks is not None:
-        background_tasks.add_task(_index_attachment, today, saved_name, file.filename, len(data), sha)
+        background_tasks.add_task(
+            _INDEX_ATTACHMENT, today, saved_name, file.filename, len(data), sha
+        )
     return {
         "url": f"/attachments/{today}/{saved_name}",
         "filename": saved_name,
@@ -586,8 +838,7 @@ async def chat_upload_image(file: UploadFile = File(...), background_tasks: Back
     }
 
 @router.post("/api/chat")
-async def chat(req: Request):
-    from server import _active_tools, _compute_time_block_hint, _dispatch_tool, _initial_groups, _log_cache_usage, _strip_ocr_from_history, _today_date_str, build_system_prompt, get_client, get_model, get_profile
+async def chat(req: Request, background_tasks: BackgroundTasks):
     body = await req.json()
     context = body.get("context", {})
     user_msg = body.get("message", "")
@@ -595,109 +846,40 @@ async def chat(req: Request):
     model_id = body.get("model_id")  # 前端 picker 选的 profile id
     stream_mode = bool(body.get("stream"))
 
-    profile = get_profile(model_id)
-    client = get_client(profile)
+    profile = _GET_PROFILE(model_id)
+    client = _GET_CLIENT(profile)
     if client is None:
         raise HTTPException(503, "API client not configured. See /api/config-status.")
+    active_model = _GET_MODEL(profile)
+    thinking_history = bool(_thinking_request_kwargs(active_model))
 
-    ctx_str = json.dumps(context, ensure_ascii=False, indent=2)
-    time_hint = _compute_time_block_hint()
+    time_hint = _COMPUTE_TIME_HINT()
     # 用户当前浏览的日期(从 thread.js context.view_date 来)。fallback 到 today。
     # AI 落 scrapbook / patch_journal_block 默认必须用这一天 — 不是 today,
     # 不是 hint 里的"now"日期(可能 user 在历史天浏览,now 跟 view_date 不同)。
-    view_date = (context or {}).get("view_date") or _today_date_str()
+    view_date = (context or {}).get("view_date") or _TODAY_DATE_STR()
     view_date_hint = f"[view-date] 用户当前浏览: {view_date}(YYYY-MM-DD) — scrapbook / patch_journal_block 的 date 参数默认必传这个,不是 today。"
 
-    # 先做 OCR + vision-pre-router,把结果 hoist 到 user_msg 之前
-    # (原本拼在末尾,AI 读到用户那句"贴一下"先回复,常常跳过尾部 hint → 不调工具)
-    ocr_results = _refs_to_image_blocks(context.get("refs", []))
-    vision_hints = _refs_to_vision_hints(context.get("refs", []))
-
-    pre_sections = []  # 拼在 user_msg 前面的工作流块
-
-    if vision_hints:
-        v_lines = ["<vision-pre-router 已分类 — 立即按 WORKFLOW 走,不要先回复用户文字>"]
-        for h in vision_hints:
-            v = h["vision"]
-            kind = v.get("kind", "?")
-            desc = v.get("description", "")
-            brand = v.get("brand", "")
-            suggested = v.get("suggested_action", "")
-            ocr_likely = v.get("ocr_likely", False)
-            pill_count = v.get("pill_count", 0)
-            user_cut = h.get("user_cutout_pref", True)
-            v_lines.append(
-                f"图片 [{h['filename']}] ({h['url']}):\n"
-                f"  · kind={kind} | 描述={desc} | 品牌={brand or '-'}\n"
-                f"  · OCR有文字={ocr_likely} | 颗数={pill_count or '-'}\n"
-                f"  · 建议下游路径: {suggested or '-'}\n"
-                f"  · 用户抠图偏好: {'抠' if user_cut else '原图(用户已点开关 — cutout=false 必传)'}"
-            )
-        v_lines.append("</vision-pre-router 已分类>")
-        v_lines.append(
-            f"\nWORKFLOW(image + scrapbook 类 hint — 不再 pin-by-default,先判 user 意图):\n"
-            f"\n"
-            f"  STEP A · 判 pin 意图(从用户消息文字 + entry ref 两路看):\n"
-            f"    explicit-pin   = 消息含 '贴/po/放/记下/留个底/上墙/钉/pin' 或 entry ref [date time] → 走 pin path\n"
-            f"    explicit-discuss = 消息含 '看看/识别/这是/好不好/是啥/什么/帮我看/读一下/读下/ocr/认一下' → 走 discuss path\n"
-            f"    ambiguous      = 无文字 / 含糊话(如 '哈哈'/'今天的'/'诶') / 讨论意图但没明确触发词 → 走 ask path\n"
-            f"\n"
-            f"  ── pin path ──\n"
-            f"    通用图(scrapbook):\n"
-            f"      1. 已有 vision hint — 不要再调 vision_classify\n"
-            f"      2. 若消息已含 entry ref [date time] → 直接拿 anchor_time + date,跳到 4\n"
-            f"      3. 否则: read_today_schedule(date='{view_date}') → 按 hint 描述匹配 entry → 拿 anchor_time\n"
-            f"         匹配不出来才反问 '贴到哪段?'\n"
-            f"      4. place_scrapbook_image(attachment_url=..., date='{view_date}',\n"
-            f"         anchor_time='HH:MM', cutout=<按用户抠图偏好>)\n"
-            f"      5. 一句话告诉用户贴到了哪段(例: '贴到 12:30 那条午饭旁边了')\n"
-            f"    特例 · kind=doc + ocr_likely=true:\n"
-            f"      用 patch_journal_block 把 OCR 文本写进当前块,**不调** place_scrapbook_image\n"
-            f"      (pin 一份文档通常是想留文字版,不是留图)\n"
-            f"\n"
-            f"  ── discuss path ──\n"
-            f"    通用图: 直接根据 hint 描述 + 用户问题回复,**不调** place_scrapbook_image。\n"
-            f"            回复末尾可加一句 '想贴到日记上的话告诉我' — 留 escape hatch。\n"
-            f"    特例 · kind=doc + ocr_likely=true:\n"
-            f"      根据 <图片 OCR 识别结果> 段的文本总结/回答用户的问题,**不写入日记**。\n"
-            f"      回复末尾加 '想把这段文字记到日记上的话告诉我' — escape hatch。\n"
-            f"\n"
-            f"  ── ask path ──\n"
-            f"    通用图:\n"
-            f"      1. 一句话描述你从 hint 看到的内容(例: '看到一份羊排紫米饭的午餐')\n"
-            f"      2. 跟一句 '要贴到日记上吗?要的话我贴在 X 块旁边' — X 是按 hint 匹配的 entry\n"
-            f"      3. **什么都不调**,等用户答\n"
-            f"    特例 · kind=doc + ocr_likely=true:\n"
-            f"      1. 一句话描述看到的文档(例: '看到一份戴尔财报截图')\n"
-            f"      2. 跟一句 '要我读出内容跟你聊,还是直接贴到日记上?'\n"
-            f"      3. **什么都不调**,等用户答\n"
-            f"\n"
-            f"  特殊类型分流(覆盖上面三 path):\n"
-            f"    用户消息含'水杯/我的杯/喝水图标/这是我的水杯/打卡水杯' → DIY 水杯打卡图,一步:\n"
-            f"      set_water_cup_image(attachment_url='...') — 直接调,不要先调 vision_classify。\n"
-            f"      调完一句话回:'水杯设上了,8 杯水打卡区会用你这只杯' 之类。\n"
-            f"\n"
-            f"    kind=supplement → 这是补剂打卡,三步连做(别只设图不勾):\n"
-            f"      ① read_today_schedule(date='{view_date}') 拿 daily task 列表,按描述/品牌匹配是哪个;\n"
-            f"         匹配不出来才列出来反问用户挑哪个\n"
-            f"      ② set_daily_task_image(task_name, attachment_url) — 把照片设成该 task 的打卡图标\n"
-            f"      ③ check_daily_task(task_name, checked=true) — 勾上今天的打卡"
-        )
-        pre_sections.append("\n".join(v_lines))
-
-    if ocr_results:
-        ocr_section_lines = ["<图片 OCR 识别结果>"]
-        for r in ocr_results:
-            text = r["ocr_text"] or "(图中无可识别文字 / OCR 未配置)"
-            ocr_section_lines.append(f"\n图片 [{r['filename']}]:\n```\n{text}\n```")
-        ocr_section_lines.append("</图片 OCR 识别结果>")
-        pre_sections.append("\n".join(ocr_section_lines))
-
-    pre_block = ("\n\n".join(pre_sections) + "\n\n") if pre_sections else ""
+    refs = context.get("refs", [])
+    image_refs = _mark_vision_pending(refs)
+    # The persisted/renderable attachment set may also contain cutout caches.  They
+    # stay available to UI tools, but must not be disclosed in an AI turn context.
+    safe_context = {
+        **context,
+        "refs": [ref for ref in refs if not isinstance(ref, dict) or ref.get("kind") != "image"] + image_refs,
+    }
+    ctx_str = json.dumps(safe_context, ensure_ascii=False, indent=2)
+    # 主模型会直接看本轮图片并调用 record_image_observation；响应完成后每轮只
+    # 清 3 个 pending。本轮图片优先，剩余额度顺带渐进补齐升级前的存量照片。
+    background_tasks.add_task(
+        retry_pending_vision, 3,
+        [(ref.get("payload") or {}).get("url") for ref in image_refs],
+    )
+    workflow = (_build_vision_workflow_block(view_date) + "\n\n") if image_refs else ""
     full_user_text = (
         f"{time_hint}\n{view_date_hint}\n\n"
         f"<context>\n{ctx_str}\n</context>\n\n"
-        f"{pre_block}"
+        f"{workflow}"
         f"{user_msg}"
     )
 
@@ -706,26 +888,53 @@ async def chat(req: Request):
     # 之前丢这些导致 AI 每轮 re-call read_today_schedule 等只读工具,cache 频繁 miss。
     # 上限: TOOL_HISTORY_CAP 个 tool result 字符总量,超了从最早的开始扔。
     cleaned_history = []
+    retired_tool_call_ids = set()
     for m in history:
         role = m.get("role")
         if role == "user":
             content = m.get("content")
             if not content:
                 continue
-            content = _strip_ocr_from_history(content)
-            cleaned_history.append({"role": "user", "content": content})
+            if not m.get("_canonical"):
+                content = _STRIP_OCR_HISTORY(content)
+            cleaned_history.append({"role": "user", "content": _multimodal_history_content(content)})
         elif role == "assistant":
             content = m.get("content") or ""
             entry = {"role": "assistant", "content": content}
+            if m.get("_canonical") and m.get("reasoning_content"):
+                entry["reasoning_content"] = m.get("reasoning_content")
             # 保 tool_calls — 没它,下条 tool 消息会被 DeepSeek 拒(must follow tool_calls)
             tcs = m.get("tool_calls")
             if tcs and isinstance(tcs, list):
-                entry["tool_calls"] = tcs
+                kept = []
+                for tc in tcs:
+                    fn = ((tc or {}).get("function") or {}).get("name") if isinstance(tc, dict) else ""
+                    if fn == "load_tool_group":
+                        retired_tool_call_ids.add((tc or {}).get("id", ""))
+                    else:
+                        kept.append(tc)
+                # V4 thinking 的工具轮必须带首次返回的原始 reasoning_content。
+                # 升级前/非 canonical 历史没有它，整组降级为普通 assistant 文本并跳过
+                # 对应 tool result，不能伪造 CoT 或把残缺协议发给 provider。
+                replay_safe = (
+                    not thinking_history
+                    or (
+                        bool(m.get("_canonical"))
+                        and isinstance(m.get("reasoning_content"), str)
+                        and bool(m.get("reasoning_content"))
+                    )
+                )
+                if kept and replay_safe:
+                    entry["tool_calls"] = kept
+                elif kept:
+                    retired_tool_call_ids.update(
+                        (tc or {}).get("id", "") for tc in kept if isinstance(tc, dict)
+                    )
             cleaned_history.append(entry)
         elif role == "tool":
             content = m.get("content") or ""
             tcid = m.get("tool_call_id") or ""
-            if not tcid:
+            if not tcid or tcid in retired_tool_call_ids:
                 continue   # 没 id 关联不上 assistant.tool_calls,DeepSeek 拒
             # 每条 tool 结果再 truncate 一次 (避免历史里堆几条 5K MD 的)
             content = _truncate_tool_result(content)
@@ -737,14 +946,16 @@ async def chat(req: Request):
     # 注意不能扔单独的 assistant.tool_calls (会孤儿)— 跟它配对的 tool 一起扔。
     cleaned_history = _trim_history_tool_volume(cleaned_history, max_tool_chars=24000)
 
-    # 把 history 里裸的 [image] filename 换成带 vision/OCR brief 的形式 —
-    # 防止 AI 回头引用过去上传过的图时凭空捏造话题。cache miss 时 label 保持原样。
-    cleaned_history = _enrich_history_image_labels(cleaned_history)
+    # 历史图片 brief:7.23 起不再改写历史消息(B2,历史字节冻结保 KV 前缀),
+    # 改为把索引块追加进本 turn 新 user message 尾部(尾缀注入铁律)。
+    img_index_block = _history_image_brief_block(cleaned_history)
+    if img_index_block:
+        full_user_text = f"{full_user_text}\n\n{img_index_block}"
 
-    active_model = get_model(profile)
-    sys_prompt = build_system_prompt(context, model_id=active_model)
+    sys_prompt = _BUILD_SYSTEM_PROMPT(context, model_id=active_model)
 
-    # decision: chat 路径不再做 sliding-window 摘要(client MAX_HISTORY=100 已截)。
+    # decision: chat 路径不再做 sliding-window 摘要；client 由 Compact checkpoint
+    # 派生“摘要 + 最近原始轮次”，不截断用户可回看的完整 History。
     # DeepSeek prompt cache hit input ~$0.0036/M token,no-compress 全发用稳定 prefix
     # 比 compress 重算 summary 便宜 ~17×。详细论证 see 5.21 21:18 实测命中率。
     # _summarize_history fn 留着给 eval/board 路径用。
@@ -753,18 +964,29 @@ async def chat(req: Request):
     messages = [{"role": "system", "content": sys_prompt}]
     for m in recent:
         messages.append(m)
-    messages.append({"role": "user", "content": full_user_text})
+    current_content, visible_image_refs = _materialize_user_content(full_user_text, image_refs)
+    messages.append({"role": "user", "content": current_content})
 
-    # lazy tool loading:bootstrap(read+meta)默认在;write 类按 user msg / refs 自动 load,
-    # 或 model 调 load_tool_group 主动 load。loaded_groups 是 mutable set,会被 _dispatch_tool
-    # 改写,所以本轮算 active_tools 之后,后面每轮都重新算一遍。
-    loaded_groups = _initial_groups(user_msg, context)
-    quota_used = {}  # per-chat-turn tool 用量,跟 loaded_groups 一样跨 round 共享
+    # ActionPolicy 只做宿主完整性检查（例如图片必须本轮可见）；领域写入不再从
+    # 用户措辞推断授权。tool output 不得伪造可见图片引用。
+    recent_user_texts = []
+    for m in cleaned_history:
+        if m.get("role") != "user":
+            continue
+        content = m.get("content", "")
+        if isinstance(content, list):
+            content = next((b.get("text", "") for b in content
+                            if isinstance(b, dict) and b.get("type") == "text"), "")
+        recent_user_texts.append(content)
+    policy_context = {**context, "refs": visible_image_refs}
+    action_context = _BUILD_ACTION_CONTEXT(user_msg, policy_context, recent_user_texts)
+    quota_used = {}  # per-chat-turn tool 用量
 
     # ── streaming 模式:SSE 事件流(action / delta / done / error)──
     if stream_mode:
         return StreamingResponse(
-            _chat_stream_generator(client, active_model, messages, loaded_groups, quota_used),
+            _chat_stream_generator(client, active_model, messages, action_context, quota_used,
+                                   model_content=full_user_text),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -776,12 +998,14 @@ async def chat(req: Request):
     for round_idx in range(MAX_ROUNDS):
         is_last_round = (round_idx == MAX_ROUNDS - 1)
         try:
-            kwargs = {"model": active_model, "messages": messages}
-            if not is_last_round:
-                # 每轮重算 — load_tool_group 上一轮可能改了 loaded_groups
-                kwargs["tools"] = _active_tools(loaded_groups)
-                kwargs["tool_choice"] = "auto"
-            # 最后一轮:不传 tools / tool_choice → 模型必须给文本
+            # tools 数组每轮同形传入；宿主策略在 dispatch 前独立检查 side effect。
+            # 最后一轮不删 tools 字段而是 tool_choice="none" 逼文本 —— 删整段 tools JSON
+            # 会把该轮请求前缀从 tools 起全部打废(KV 缓存失效),"none" 只动几个字节。
+            # 行为等价:模型同样无法调用工具(7.23 前缀稳定性审计 A1)。
+            kwargs = {"model": active_model, "messages": messages,
+                      "tools": _ACTIVE_TOOLS(action_context),
+                      "tool_choice": "auto" if not is_last_round else "none",
+                      **_thinking_request_kwargs(active_model)}
             # sync OpenAI 调用丢 threadpool — 不阻塞 asyncio event loop,
             # eval/board 类同时跑的 endpoint 不再被锁死(详 5.21 21:30 事故)
             resp = await asyncio.to_thread(client.chat.completions.create, **kwargs)
@@ -801,7 +1025,10 @@ async def chat(req: Request):
                 },
             )
         msg = resp.choices[0].message
-        _log_cache_usage(resp, "chat/non-stream")
+        _log_reasoning_observation(
+            getattr(msg, "reasoning_content", None) or "", "chat/non-stream", active_model
+        )
+        _LOG_CACHE_USAGE(resp, "chat/non-stream")
         # 用 model_dump 完整转,保留所有 provider 特有字段(尤其 DeepSeek V4 Pro 的
         # reasoning_content,thinking 模式下下一轮必须回传,否则 400)
         asst_msg = msg.model_dump(exclude_none=True)
@@ -827,7 +1054,7 @@ async def chat(req: Request):
         messages.append(asst_msg)
 
         if synth_calls:
-            _exec_synth_calls(synth_calls, messages, last_actions, loaded_groups, quota_used)
+            _exec_synth_calls(synth_calls, messages, last_actions, action_context, quota_used)
             continue
 
         if not msg.tool_calls:
@@ -848,7 +1075,7 @@ async def chat(req: Request):
                 continue
             fn = tc.function.name
             args = json.loads(tc.function.arguments or "{}")
-            result = _dispatch_tool(fn, args, loaded_groups, quota_used)
+            result = _DISPATCH_TOOL(fn, args, action_context, quota_used)
             tool_results.append({"id": tc.id, "name": fn, "args": args, "result": result})
             messages.append({
                 "role": "tool",
@@ -867,9 +1094,18 @@ async def chat(req: Request):
     # msg.content 还含原始 DSML 文本 → 多打一次 bonus 拿干净 reply
     if messages and messages[-1].get("role") == "tool":
         try:
+            # 同一批 A1 修复:这个 bonus 收尾调用之前漏了 tools/tool_choice,是删字段打废
+            # 前缀的原样漏网(跟主 loop 末轮同一个 messages 前缀,同样得同形传 tools + none)。
             bonus = await asyncio.to_thread(client.chat.completions.create,
-                                            model=active_model, messages=messages)
-            _log_cache_usage(bonus, "chat/non-stream-bonus")
+                                            model=active_model, messages=messages,
+                                            tools=_ACTIVE_TOOLS(action_context), tool_choice="none",
+                                            **_thinking_request_kwargs(active_model))
+            _log_reasoning_observation(
+                getattr(bonus.choices[0].message, "reasoning_content", None) or "",
+                "chat/non-stream-bonus",
+                active_model,
+            )
+            _LOG_CACHE_USAGE(bonus, "chat/non-stream-bonus")
             final_reply = (bonus.choices[0].message.content or "").strip()
         except Exception as e:
             final_reply = f"(tool loop 用完;synthesis call 失败:{type(e).__name__})"

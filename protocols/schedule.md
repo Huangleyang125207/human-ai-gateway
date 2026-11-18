@@ -186,7 +186,7 @@ inline 注保留 disclosure 的功能,不违 § H4 形式。
 
 ### vision-pre-router(用户上传图自动分类机制)
 
-用户每次拖图,server 跑 vision LLM(qwen3-vl)并把结果作为
+用户每次拖图,server 用同一把 DeepSeek key 跑视觉模型并把结果作为
 `<vision-pre-router 已分类>` 块注入 user message **前面**(不是末尾),
 紧接一段 `WORKFLOW:` 给你具体的工具调用步骤。
 

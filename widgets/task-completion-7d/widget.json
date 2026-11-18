@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "id": "task-completion-7d",
+  "title": "七日打卡",
+  "slot": "care",
+  "data": {
+    "capability": "daily_tasks.completion_summary",
+    "params": {
+      "days": 7
+    }
+  },
+  "view": {
+    "type": "metric_sparkline",
+    "metric": {
+      "path": "summary.rate",
+      "format": "percent"
+    },
+    "caption": {
+      "path": "summary.caption"
+    },
+    "series": {
+      "path": "days",
+      "value": "rate"
+    }
+  }
+}

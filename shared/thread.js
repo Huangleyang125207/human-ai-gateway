@@ -12,10 +12,10 @@
 
 (function () {
   const THREAD_KEY = "gateway.thread.history.v1";
+  const COMPACT_KEY = "gateway.thread.compact.v1";
   const MTIME_KEY = "gateway.thread.synced_mtime.v1";  // 本地缓存所基于的 server mtime
+  const DIRTY_KEY = "gateway.thread.unsaved.v1";
   const MODEL_KEY = "gateway.thread.model_id.v1";
-  const MAX_HISTORY = 100;      // 发给 server 的总条数;server 取最近 20 原文,更早的做摘要
-  const PERSIST_LIMIT = 200;    // localStorage 最多存 N 条
 
   // 本地日期 YYYY-MM-DD,从不为 null。fallback for view_date,跨过午夜也始终是真今天
   function todayLocalISO() {
@@ -41,6 +41,7 @@
   // ── state ────────────────────────────────────────────
   const state = {
     history: loadHistory(),   // [{role: 'user'|'assistant', content, refs?: [...]}]
+    compactCheckpoint: loadCompactCheckpoint(),
     pending: [],              // [{kind, label, payload}]
     open: false,
     apiOk: null,
@@ -50,11 +51,25 @@
   let lastServerMtime = (function () {
     try { return Number(localStorage.getItem(MTIME_KEY)) || 0; } catch { return 0; }
   })();
+  let localDirty = (function () {
+    try { return localStorage.getItem(DIRTY_KEY) === "1"; } catch { return false; }
+  })();
+  function _setDirty(value) {
+    localDirty = !!value;
+    try {
+      if (localDirty) localStorage.setItem(DIRTY_KEY, "1");
+      else localStorage.removeItem(DIRTY_KEY);
+    } catch {}
+  }
   function _persistMtime() {
     try { localStorage.setItem(MTIME_KEY, String(lastServerMtime)); } catch {}
   }
   function _persistLocal() {
-    try { localStorage.setItem(THREAD_KEY, JSON.stringify(state.history.slice(-PERSIST_LIMIT))); } catch {}
+    try {
+      localStorage.setItem(THREAD_KEY, JSON.stringify(state.history));
+      if (state.compactCheckpoint) localStorage.setItem(COMPACT_KEY, JSON.stringify(state.compactCheckpoint));
+      else localStorage.removeItem(COMPACT_KEY);
+    } catch {}
     _persistMtime();
   }
   function _rerender() {
@@ -69,46 +84,132 @@
       const raw = localStorage.getItem(THREAD_KEY);
       if (!raw) return [];
       const arr = JSON.parse(raw);
-      return Array.isArray(arr) ? arr.slice(-PERSIST_LIMIT) : [];
+      return Array.isArray(arr) ? arr : [];
     } catch { return []; }
   }
+  function normalizeCompactCheckpoint(value, historyLength = state?.history?.length || 0) {
+    if (!value || typeof value !== "object") return null;
+    const summary = String(value.summary || "").trim();
+    const through = value.through;
+    const at = String(value.at || "");
+    if (!summary || !Number.isInteger(through) || through < 0 || through > historyLength || Number.isNaN(Date.parse(at))) return null;
+    return { summary, through, at };
+  }
+  function loadCompactCheckpoint() {
+    try {
+      return normalizeCompactCheckpoint(JSON.parse(localStorage.getItem(COMPACT_KEY) || "null"), loadHistory().length);
+    } catch { return null; }
+  }
+  function modelContextFromHistory(history, checkpoint) {
+    const compact = normalizeCompactCheckpoint(checkpoint, history.length);
+    if (!compact) return history.slice();
+    return [
+      { role: "assistant", content: `[系统整理摘要]\n${compact.summary}`, _isCompactSummary: true },
+      ...history.slice(compact.through),
+    ];
+  }
+  function messageKey(message) {
+    if (message && typeof message.ts === "string" && message.ts) return `${message.role || ""}|${message.ts}`;
+    return null;
+  }
+  function mergeHistories(serverHistory, localHistory) {
+    const merged = serverHistory.map((message) => ({ ...message }));
+    const keyed = new Map();
+    const unkeyedCounts = new Map();
+    merged.forEach((message, index) => {
+      const key = messageKey(message);
+      if (key) keyed.set(key, index);
+      else {
+        const raw = JSON.stringify(message);
+        unkeyedCounts.set(raw, (unkeyedCounts.get(raw) || 0) + 1);
+      }
+    });
+    const consumedUnkeyed = new Map();
+    for (const message of localHistory) {
+      const key = messageKey(message);
+      if (key && keyed.has(key)) {
+        const index = keyed.get(key);
+        merged[index] = { ...merged[index], ...message };
+        continue;
+      }
+      if (!key) {
+        const raw = JSON.stringify(message);
+        const consumed = consumedUnkeyed.get(raw) || 0;
+        if (consumed < (unkeyedCounts.get(raw) || 0)) {
+          consumedUnkeyed.set(raw, consumed + 1);
+          continue;
+        }
+      }
+      if (key) keyed.set(key, merged.length);
+      merged.push({ ...message });
+    }
+    return merged;
+  }
+  let saveChain = Promise.resolve();
+  let saveEpoch = 0;
+  let saveRevision = 0;
   function saveHistory() {
     // 1. localStorage(离线缓存 + 同源跨 tab storage event)
     try {
       localStorage.setItem(
         THREAD_KEY,
-        JSON.stringify(state.history.slice(-PERSIST_LIMIT))
+        JSON.stringify(state.history)
       );
+      if (state.compactCheckpoint) localStorage.setItem(COMPACT_KEY, JSON.stringify(state.compactCheckpoint));
+      else localStorage.removeItem(COMPACT_KEY);
     } catch {}
     // 2. server(跨浏览器 / 跨设备真相源)
     //    带 base_mtime 做 CAS:server 若发现期间有人写过(mtime 变了)→ 409,
     //    说明本 tab 的 state 陈旧,绝不能覆盖 → 改为拉取 server 最新(防 5.26 那种事故)
-    fetch("/api/thread/save", {
-      method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ history: state.history.slice(-PERSIST_LIMIT), base_mtime: lastServerMtime }),
-    }).then(async r => {
-      if (r.status === 409) {
-        console.warn("[thread] save 冲突(base_mtime 陈旧)— server 有更新状态,放弃覆盖,改拉 server");
-        await forceReloadFromServer();
-        return;
+    const historySnapshot = JSON.stringify(state.history);
+    const compactSnapshot = state.compactCheckpoint ? { ...state.compactCheckpoint } : null;
+    const epoch = saveEpoch;
+    const revision = ++saveRevision;
+    _setDirty(true);
+    saveChain = saveChain.catch(() => false).then(async () => {
+      if (epoch !== saveEpoch) return false;
+      try {
+        const r = await fetch("/api/thread/save", {
+          method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ history: JSON.parse(historySnapshot), compact: compactSnapshot, base_mtime: lastServerMtime }),
+        });
+        if (r.status === 409) {
+          console.warn("[thread] save 冲突(base_mtime 陈旧)— 合并 server 与本地未同步消息");
+          // 409 前排队的快照都建立在同一份陈旧状态上，禁止它们拿新 mtime 继续覆盖。
+          saveEpoch += 1;
+          await forceReloadFromServer({ preserveLocal: true });
+          setTimeout(() => { if (localDirty) void saveHistory(); }, 0);
+          return false;
+        }
+        if (!r.ok) return false;
+        const d = await r.json();
+        if (d && d.mtime) { lastServerMtime = d.mtime; _persistMtime(); }
+        if (revision === saveRevision) _setDirty(false);
+        return true;
+      } catch {
+        return false;
       }
-      const d = await r.json();
-      if (d && d.mtime) { lastServerMtime = d.mtime; _persistMtime(); }
-    }).catch(() => {});  // 离线 / server down 都不阻塞
+    });  // 离线 / server down 都不阻塞 UI，但调用方可以等待布尔结果
+    return saveChain;
   }
 
-  async function forceReloadFromServer() {
-    // 冲突后无条件采纳 server(它 mtime 更新 = 更 canonical)。
-    // 本 tab 的内容仍留在 localStorage 兜底,不会凭空消失。
+  async function forceReloadFromServer({ preserveLocal = false } = {}) {
     try {
       const r = await fetch("/api/thread/history");
       const d = await r.json();
+      if (d.status === "corrupt") {
+        console.warn("[thread] server 报 thread-history 损坏，拒绝把空响应当真");
+        _showCorruptModal(d);
+        return false;
+      }
       const hist = Array.isArray(d.history) ? d.history : [];
-      state.history = hist.slice(-PERSIST_LIMIT);
+      state.history = preserveLocal ? mergeHistories(hist, state.history) : hist;
+      state.compactCheckpoint = normalizeCompactCheckpoint(d.compact, hist.length);
       lastServerMtime = d.mtime || 0;
       _persistLocal();
       _rerender();
-    } catch {}
+      return true;
+    } catch { return false; }
   }
 
   async function syncFromServer() {
@@ -117,8 +218,15 @@
     try {
       const r = await fetch("/api/thread/history");
       const d = await r.json();
+      if (d.status === "corrupt") {
+        _showCorruptModal(d);
+        return false;
+      }
       const mtime = d.mtime || 0;
-      if (mtime <= lastServerMtime) return false;  // server 没更新
+      if (mtime <= lastServerMtime) {
+        if (localDirty) void saveHistory();
+        return false;  // server 没更新；本地 dirty 仍需补写
+      }
       const hist = Array.isArray(d.history) ? d.history : [];
       // 唯一例外:server 推进到「空」但本地有内容 → 疑似文件被误删/污染,
       // 不采纳空、也不 push(避免覆盖战),只 warn,留人工处理。
@@ -126,10 +234,13 @@
         console.warn("[thread] server 推进到空但本地有历史 — 疑似 server 文件异常,暂不同步");
         return false;
       }
-      state.history = hist.slice(-PERSIST_LIMIT);
+      const preserveLocal = localDirty;
+      state.history = preserveLocal ? mergeHistories(hist, state.history) : hist;
+      state.compactCheckpoint = normalizeCompactCheckpoint(d.compact, hist.length);
       lastServerMtime = mtime;
       _persistLocal();
       _rerender();
+      if (preserveLocal) void saveHistory();
       return true;
     } catch { return false; }
   }
@@ -156,16 +267,24 @@
       const serverHist = Array.isArray(d.history) ? d.history : [];
       const serverMtime = d.mtime || 0;
 
+      if (serverMtime === lastServerMtime && localDirty) {
+        void saveHistory();
+        return;
+      }
+
       if (serverMtime > lastServerMtime) {
         if (serverHist.length === 0 && state.history.length > 0) {
           console.warn("[thread] server 空但本地有历史 — 不采纳空,push 本地救场");
           saveHistory();
           return;
         }
-        state.history = serverHist.slice(-PERSIST_LIMIT);
+        const preserveLocal = localDirty;
+        state.history = preserveLocal ? mergeHistories(serverHist, state.history) : serverHist;
+        state.compactCheckpoint = normalizeCompactCheckpoint(d.compact, serverHist.length);
         lastServerMtime = serverMtime;
         _persistLocal();
         _rerender();
+        if (preserveLocal) void saveHistory();
       } else if (serverMtime === 0 && state.history.length > 0) {
         saveHistory();  // server 没文件 / 首次 → push 本地
       } else if (lastServerMtime > serverMtime && state.history.length > 0) {
@@ -210,12 +329,28 @@
     `;
     document.body.appendChild(overlay);
     overlay.querySelector(".thread-corrupt-fresh").addEventListener("click", () => {
-      // start-fresh:把本地 state 清掉,让 saveHistory 推一个空 list (会过 server 端 CAS)
-      state.history = [];
-      lastServerMtime = 0;
-      _persistLocal();
-      _rerender();
-      overlay.remove();
+      void (async () => {
+        const button = overlay.querySelector(".thread-corrupt-fresh");
+        button.disabled = true;
+        button.textContent = "新建中…";
+        try {
+          const r = await fetch("/api/thread/start-fresh", { method: "POST" });
+          if (!r.ok) throw new Error(await r.text());
+          const d = await r.json();
+          state.history = [];
+          state.compactCheckpoint = null;
+          lastServerMtime = d.mtime || 0;
+          saveEpoch += 1;
+          _setDirty(false);
+          _persistLocal();
+          _rerender();
+          overlay.remove();
+        } catch (error) {
+          alert(`新开失败: ${error}`);
+          button.disabled = false;
+          button.textContent = "新开一段";
+        }
+      })();
     });
     const restoreBtn = overlay.querySelector(".thread-corrupt-restore");
     if (restoreBtn) {
@@ -243,7 +378,7 @@
           overlay.remove();
           // 触发一次 sync 拿最新 history
           lastServerMtime = 0;
-          await loadHistory();
+          await forceReloadFromServer();
         } catch (e) {
           alert(`恢复失败: ${e}`);
           restoreBtn.disabled = false;
@@ -488,6 +623,64 @@
     return window.gatewayMd ? window.gatewayMd(cleaned) : escapeHtml(cleaned).replace(/\n/g, "<br>");
   }
 
+  async function copyMessageText(text) {
+    const value = String(text || "");
+    if (!value) return false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(value);
+          window.gateway?.whisper?.("已复制");
+          return true;
+        } catch (_) {
+          // Tauri/WKWebView may expose Async Clipboard but deny it; fall through.
+        }
+      }
+      const area = document.createElement("textarea");
+      area.value = value;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      const copied = document.execCommand("copy");
+      area.remove();
+      if (!copied) throw new Error("clipboard unavailable");
+      window.gateway?.whisper?.("已复制");
+      return true;
+    } catch (_) {
+      window.gateway?.whisper?.("复制失败 · 再试一次");
+      return false;
+    }
+  }
+
+  function copyGlyph(copied = false) {
+    return copied
+      ? `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.8 8.4 6.2 11.5 13.2 4.5"/></svg>`
+      : `<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="2" width="8.5" height="9" rx="1.8"/><rect class="front" x="2.5" y="5" width="8.5" height="9" rx="1.8"/></svg>`;
+  }
+
+  // PATTERN: message action — quiet icon with transient success state
+  // USE WHEN: every message needs a direct action without adding a persistent text pill
+  function createCopyButton(text, label = "复制这条消息") {
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "t-copy";
+    copy.innerHTML = copyGlyph();
+    copy.setAttribute("aria-label", label);
+    copy.title = label;
+    copy.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      if (!await copyMessageText(text)) return;
+      copy.classList.add("copied");
+      copy.innerHTML = copyGlyph(true);
+      setTimeout(() => {
+        copy.classList.remove("copied");
+        copy.innerHTML = copyGlyph();
+      }, 1000);
+    });
+    return copy;
+  }
+
   function renderRefsCard(refs) {
     if (!refs || !refs.length) return "";
     return refs.map(r => {
@@ -534,6 +727,43 @@
     });
   }
 
+  function reasoningTextForMessage(m) {
+    const protocolReasoning = Array.isArray(m?.model_messages)
+      ? m.model_messages
+          .filter(frame => frame?.role === "assistant" && typeof frame.reasoning_content === "string")
+          .map(frame => frame.reasoning_content.trim())
+          .filter(Boolean)
+      : [];
+    if (protocolReasoning.length) return protocolReasoning.join("\n\n");
+    return typeof m?.reasoning_content === "string" ? m.reasoning_content.trim() : "";
+  }
+
+  // PATTERN: chat — reasoning disclosure
+  // USE WHEN: provider 返回本轮 reasoning_content,默认折叠,用户按需查看
+  // COPY THIS: 正文只用 textContent,不要把 provider 文本拼进 innerHTML
+  function appendReasoningDisclosure(messageEl, reasoning) {
+    const text = String(reasoning || "").trim();
+    if (!messageEl || !text || messageEl.querySelector(".t-reasoning")) return;
+    const details = document.createElement("details");
+    details.className = "t-reasoning";
+    const summary = document.createElement("summary");
+    summary.textContent = "查看思考过程";
+    const body = document.createElement("div");
+    body.className = "t-reasoning-body";
+    body.textContent = text;
+    const header = document.createElement("div");
+    header.className = "t-reasoning-head";
+    header.appendChild(summary);
+    header.appendChild(createCopyButton(text, "复制思考过程"));
+    details.appendChild(header);
+    details.appendChild(body);
+    details.addEventListener("toggle", () => {
+      summary.textContent = details.open ? "收起思考过程" : "查看思考过程";
+    });
+    const answer = messageEl.querySelector(".body");
+    messageEl.insertBefore(details, answer || null);
+  }
+
   function appendMsg(m) {
     const el = document.createElement("div");
     el.className = `t-msg ${m.role === "user" ? "user" : "ai"}`;
@@ -542,6 +772,8 @@
       ${renderRefsCard(m.refs)}
       <div class="body">${renderText(m.content)}</div>
     `;
+    if (m.role === "assistant") appendReasoningDisclosure(el, reasoningTextForMessage(m));
+    el.appendChild(createCopyButton(m.content));
     stream.appendChild(el);
     scrollToBottom();
   }
@@ -594,8 +826,11 @@
   window.addEventListener("storage", (e) => {
     if (e.key === THREAD_KEY) {
       state.history = loadHistory();
+      state.compactCheckpoint = loadCompactCheckpoint();
       stream.innerHTML = "";
       for (const m of state.history) appendMsg(m);
+    } else if (e.key === COMPACT_KEY) {
+      state.compactCheckpoint = loadCompactCheckpoint();
     } else if (e.key === MODEL_KEY) {
       const newId = e.newValue || "";
       if (newId !== activeModelId) {
@@ -697,41 +932,43 @@
         view_date: window.gateway?.journal?.current?.date || todayLocalISO(),
         refs: sentRefs.map(r => ({ kind: r.kind, label: r.label, payload: r.payload })),
       };
-      // 0.1.4 起: assistant 消息里附带 _actions 数组 (本轮所有 tool 调用 + 结果),
-      // 这里展开成 OpenAI/DeepSeek 期望的 assistant.tool_calls + role:tool 多条。
-      // 不这样做的话工具结果丢失,AI 下轮重复 call 同一只读工具 → cache miss 飙升。
-      const recentMsgs = state.history.slice(-MAX_HISTORY - 1, -1);
+      // 新轮优先逐字重放 model_messages；升级前 _actions 缺少 V4 thinking 的原始
+      // reasoning_content，只能降级成不可执行摘要，不能伪造 assistant/tool 协议。
+      const recentMsgs = modelContextFromHistory(state.history.slice(0, -1), state.compactCheckpoint);
+      const RETIRED_HISTORY_TOOLS = new Set(["load_tool_group"]);
       const history = [];
       for (const m of recentMsgs) {
         if (m.role === "user") {
+          if (m.model_content) {
+            history.push({ role: "user", content: m.model_content, _canonical: true });
+            continue;
+          }
           const content = m.refs && m.refs.length
             ? `(用户指着这些):\n${m.refs.map(r => `[${r.kind}] ${r.label}`).join("\n")}\n\n${m.content}`
             : m.content;
           history.push({ role: "user", content });
         } else if (m.role === "assistant") {
-          const acts = (m._actions || []).filter(a => a && a.id);
+          const replayMessages = Array.isArray(m.model_messages)
+            ? m.model_messages.filter(x => x && (x.role === "assistant" || x.role === "tool"))
+            : [];
+          const replaySafe = replayMessages.length && replayMessages.every(x =>
+            x.role !== "assistant" || !Array.isArray(x.tool_calls) || !x.tool_calls.length ||
+            (typeof x.reasoning_content === "string" && x.reasoning_content.length > 0)
+          );
+          if (replaySafe) {
+            history.push(...replayMessages.map(x => ({ ...x, _canonical: true })));
+            continue;
+          }
+          const acts = (m._actions || []).filter(a => a && a.id && !RETIRED_HISTORY_TOOLS.has(a.name));
           if (acts.length) {
-            // 1) assistant 带 tool_calls (content 可空)
+            // 升级前 _actions 没有原始 reasoning_content。V4 thinking 下不能伪造为
+            // assistant.tool_calls + tool，只保留不可执行的升级前历史摘要。
+            const done = acts.map(a => `${a.name}${a.result && a.result.error ? " ✗" : " ✓"}`).join(", ");
+            const prefix = m.content ? `${m.content}\n` : "";
             history.push({
               role: "assistant",
-              content: m.content || "",
-              tool_calls: acts.map(a => ({
-                id: a.id,
-                type: "function",
-                function: {
-                  name: a.name,
-                  arguments: typeof a.args === "string" ? a.args : JSON.stringify(a.args || {}),
-                },
-              })),
+              content: `${prefix}[系统记录:升级前历史摘要，该轮真实执行了工具: ${done}。此标记不可执行，新动作必须发起真正的 tool_call]`,
             });
-            // 2) 每个 tool 调用一条 role:tool 结果
-            for (const a of acts) {
-              history.push({
-                role: "tool",
-                tool_call_id: a.id,
-                content: typeof a.result === "string" ? a.result : JSON.stringify(a.result),
-              });
-            }
           } else {
             history.push({ role: "assistant", content: m.content });
           }
@@ -767,7 +1004,12 @@
           let data;
           try { data = JSON.parse(line.slice(6)); } catch { continue; }
 
-          if (data.type === "delta") {
+          if (data.type === "request_meta") {
+            if (typeof data.model_content === "string" && data.model_content) {
+              userMsg.model_content = data.model_content;
+              saveHistory();
+            }
+          } else if (data.type === "delta") {
             if (!streamMsgEl) {
               removeProcessing();
               streamMsgEl = appendStreamingMsg();
@@ -789,7 +1031,10 @@
             }
             scrollToBottom();
           } else if (data.type === "action") {
-            const summary = `tool · ${data.name} → ${JSON.stringify(data.result).slice(0, 140)}`;
+            const actionLabel = data.name === "record_image_observation"
+              ? "整理图片索引"
+              : `tool · ${data.name} → ${JSON.stringify(data.result).slice(0, 140)}`;
+            const summary = actionLabel;
             appendAction(summary);
             // 累计本轮 actions,done 时 attach 到 assistant 消息
             if (data.id) {
@@ -797,8 +1042,11 @@
                 id: data.id, name: data.name, args: data.args, result: data.result,
               });
             }
-            if (/^(add|patch)_widget$/.test(data.name) && !data.result?.error) {
-              appendAction("扩展已保存 · 刷新页面查看效果");
+            if (data.name === "install_widget_spec" && !data.result?.error) {
+              appendAction("小组件已安装");
+              document.dispatchEvent(new Event("gateway:widget-spec-installed"));
+            } else if (/^(add|patch)_widget$/.test(data.name) && !data.result?.error) {
+              appendAction("旧版扩展已保存 · 刷新页面查看效果");
             }
             if (TASK_MUTATING.test(data.name) && !data.result?.error) needTaskRefresh = true;
             if (SCHEDULE_MUTATING.test(data.name) && !data.result?.error) needScheduleRefresh = true;
@@ -828,8 +1076,21 @@
             const meta = { ts: nowISO() };
             if (data.reasoning_content) meta.reasoning_content = data.reasoning_content;
             if (data.model_id) meta.model_id = data.model_id;
-            // 0.1.4: 本轮所有 tool 调用累计到 _actions,下轮 send 时展开成 tool_calls/role:tool
-            if (turnActions.length) meta._actions = turnActions.slice();
+            const modelMessages = Array.isArray(data.model_messages)
+              ? data.model_messages.filter(x => x && (x.role === "assistant" || x.role === "tool"))
+              : [];
+            const reasoning = reasoningTextForMessage({
+              model_messages: modelMessages,
+              reasoning_content: data.reasoning_content,
+            });
+            if (reasoning && !streamMsgEl) {
+              streamMsgEl = appendStreamingMsg();
+              streamMsgEl.classList.remove("streaming");
+            }
+            appendReasoningDisclosure(streamMsgEl, reasoning);
+            if (modelMessages.length) meta.model_messages = modelMessages;
+            // 旧服务没有 canonical transcript 时才落完整 _actions，供兼容路径重建协议。
+            if (turnActions.length && !modelMessages.length) meta._actions = turnActions.slice();
             if (accumText) {
               state.history.push({ role: "assistant", content: accumText, ...meta });
               saveHistory();
@@ -839,6 +1100,10 @@
                 : data.actions.map(a => a.name).join(", ");
               const summary = `(上轮执行了操作,但没有文字说明)`;
               state.history.push({ role: "assistant", content: summary, ...meta });
+              saveHistory();
+            } else if (reasoning) {
+              // 极端空答也保留思考折叠区；否则当前能看、重启后却消失。
+              state.history.push({ role: "assistant", content: "", ...meta });
               saveHistory();
             }
           }
@@ -927,6 +1192,12 @@
     close: () => setOpen(false),
     toggle,
     isOpen: () => state.open,
+    prefill: (text) => {
+      input.value = String(text || "");
+      input.dispatchEvent(new Event("input"));
+      setOpen(true);
+      input.focus();
+    },
     pushAI: (text) => {
       const m = { role: "assistant", content: text, ts: nowISO() };
       state.history.push(m);
@@ -936,22 +1207,30 @@
     history: () => state.history.slice(),
     clear: () => {
       state.history = [];
+      state.compactCheckpoint = null;
       saveHistory();
       stream.innerHTML = "";
     },
-    // workflow #13 闭合:compact 后用 replaceHistory 收口,内部走 saveHistory CAS
-    // 防 5.26 那种事故(localStorage 直写 → 跨 tab initSync 用 server 全量覆盖本地 compact)。
-    // 任何外部模块改 thread.history 都走这一个 API,localStorage.setItem(THREAD_KEY) 旁路被废
-    replaceHistory: (newHistory) => {
-      state.history = Array.isArray(newHistory) ? newHistory.slice() : [];
-      // 重渲染 DOM
-      stream.innerHTML = "";
-      for (const m of state.history) appendMsg(m);
-      saveHistory();  // 走 CAS,base_mtime 不变就 ok,变了 forceReloadFromServer 救
+    modelContext: () => modelContextFromHistory(state.history, state.compactCheckpoint),
+    compactCheckpoint: () => state.compactCheckpoint ? { ...state.compactCheckpoint } : null,
+    setCompactCheckpoint: async (checkpoint) => {
+      const next = normalizeCompactCheckpoint(checkpoint, state.history.length);
+      if (!next) return false;
+      const previous = state.compactCheckpoint;
+      state.compactCheckpoint = next;
+      const saved = await saveHistory();
+      if (!saved && state.compactCheckpoint === next) {
+        state.compactCheckpoint = previous;
+        _persistLocal();
+      }
+      return saved;
     },
   };
   window.gateway.whisper = whisper;
   window.gatewayToast = whisper; // back-compat shim for old code
+  document.addEventListener("gateway:ai-intent", (event) => {
+    window.gateway.thread.prefill(event.detail && event.detail.text);
+  });
 
   // ── resizer:拖左边缘改 sidebar 宽度,持久化到 localStorage ──
   (function wireResizer() {

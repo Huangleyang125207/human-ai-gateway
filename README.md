@@ -20,7 +20,7 @@
 
 **AI 隐形。** 不霸屏,右键任意元素跟它说话。需要才出现。
 
-**单 API,本地优先。** 一个 key 解锁全部,数据全在你机器上,云端只走 LLM 推理。
+**单 API，本地优先。** 日记、对话和附件保存在设备上。使用 AI 功能时，设备把本次推理所需的上下文和图片直接发给 DeepSeek，费用计入你自己的 API 账户。
 
 ## 功能
 
@@ -38,10 +38,7 @@
 - **macOS**(Apple Silicon):`Gateway_x.y.z_aarch64.dmg` 拖进 `/Applications` — Apple Developer 签名 + notarized,无 Gatekeeper 警告
 - **Windows**(x64):`Gateway-Setup-x.y.z-x64.exe` 双击装,自动加开始菜单 + 卸载列表 — **未做代码签名**,首次运行 Windows Defender SmartScreen 会拦,点 _"更多信息 → 仍要运行"_ 即可。杀软误报装不上时可下 `Gateway-windows-x64.zip` 解压跑(不依赖 installer)
 
-启动后浏览器自动开,填两个 key:
-
-- **DeepSeek**:`platform.deepseek.com`(对话)
-- **阿里云百炼**:`bailian.console.aliyun.com`(视觉)
+首次启动后，在设置里填写一把个人 DeepSeek API Key，对话和看图共用。如果之前用的是内测设备令牌，升级后需填写个人 Key。[DeepSeek API 密钥管理](https://platform.deepseek.com/api_keys)
 
 数据在 `~/.human-ai/vault/`(可用 Obsidian 同时打开)。
 
@@ -66,13 +63,15 @@ build-win.bat
 
 ## 架构
 
-Tauri 桌面壳 → PyInstaller sidecar(FastAPI)→ 本地 vault + SQLite + DeepSeek + 阿里云百炼。
+Tauri 桌面壳 → PyInstaller sidecar(FastAPI)→ 本地 vault + SQLite + DeepSeek。
 
 前端 vanilla JS,无 npm / build step。
 
+需要重构或排障时，先读 [文档入口](docs/INDEX.md)；全仓架构、风险与演进清单在 [架构清册](docs/ARCHITECTURE_LEDGER.md)。原生移动端的独立开发入口在 [`../gateway-rn/docs/README.md`](../gateway-rn/docs/README.md)。
+
 ## 隐私
 
-Gateway 默认收集匿名错误码 + 使用心跳,帮我们改进软件。两个都可在 设置 → 数据 → 云上报 关闭。**不收**任何 vault 内容、聊天、文件名。详见 [PRIVACY.md](PRIVACY.md)。
+AI 推理会使用日记片段、对话历史、工具结果或所选照片。桌面匿名诊断单独征求同意，可在「设置 → 数据 → 云上报」中关闭。详见 [隐私政策](PRIVACY.md)。
 
 ## License
 

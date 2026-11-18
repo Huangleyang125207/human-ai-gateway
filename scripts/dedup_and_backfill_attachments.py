@@ -22,8 +22,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-# server 必须先 import 才能拿 _qwen_classify_image / ATTACHMENTS_DIR 这些
+# server 必须先 import 才能拿 _deepseek_classify_image / ATTACHMENTS_DIR 这些
 import server  # noqa: E402
+from attachment_service import resolve_attachment_path, resolve_attachment_url  # noqa: E402
+from image_service_errors import ImageServiceError  # noqa: E402
+
+
+def resolve_index_item(item):
+    try:
+        return resolve_attachment_path(
+            server.ATTACHMENTS_DIR,
+            item.get("date"),
+            item.get("filename"),
+        )
+    except (AttributeError, ImageServiceError):
+        return None
 
 
 def sha256_file(p: Path) -> str:
@@ -43,9 +56,9 @@ def step1_hash_backfill(arr, apply: bool):
     for x in arr:
         if x.get("hash"):
             continue
-        p = server.ATTACHMENTS_DIR / x["date"] / x["filename"]
-        if not p.exists():
-            print(f"  miss: {x['date']}/{x['filename']} (file 丢)")
+        p = resolve_index_item(x)
+        if p is None:
+            print(f"  miss/unsafe: {x.get('date')}/{x.get('filename')}")
             continue
         todo.append((x, p))
     print(f"  待补 hash: {len(todo)} 条")
@@ -108,13 +121,12 @@ def step2_dedup(arr, apply: bool, purge_files: bool):
         dupes_dir.mkdir(parents=True, exist_ok=True)
         moved = 0
         for old_url in keep_url_remap:
-            import re as _re
-            m = _re.match(r"^/attachments/([^/]+)/([^/]+)$", old_url or "")
-            if not m:
+            try:
+                src = resolve_attachment_url(server.ATTACHMENTS_DIR, old_url)
+            except ImageServiceError:
                 continue
-            src = server.ATTACHMENTS_DIR / m.group(1) / m.group(2)
             if src.exists():
-                dst = dupes_dir / f"{m.group(1)}_{m.group(2)}"
+                dst = dupes_dir / f"{src.parent.name}_{src.name}"
                 shutil.move(str(src), str(dst))
                 moved += 1
         print(f"  ✓ index 缩 {len(to_remove)} 条,物理文件 {moved} 个搬到 _dupes/")
@@ -129,8 +141,8 @@ def step3_vision_backfill(arr, apply: bool, only_count: int | None = None):
     for x in arr:
         if (x.get("vision") or {}).get("description"):
             continue
-        p = server.ATTACHMENTS_DIR / x["date"] / x["filename"]
-        if not p.exists():
+        p = resolve_index_item(x)
+        if p is None:
             continue
         todo.append((x, p))
     print(f"  待跑 vision: {len(todo)} 条")
@@ -142,7 +154,7 @@ def step3_vision_backfill(arr, apply: bool, only_count: int | None = None):
     ok, fail = 0, 0
     for i, (x, p) in enumerate(todo, 1):
         try:
-            res = server._qwen_classify_image(p)
+            res = server._deepseek_classify_image(p)
             if isinstance(res, dict) and not res.get("error"):
                 x["vision"] = res
                 ok += 1

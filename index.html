@@ -3,8 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<!-- 移动端本地后端拦截层(?mobile=1 或 Capacitor 下启用;桌面惰性)。必须最先加载以劫持 fetch。 -->
-<script src="./mobile/mobile-api.js"></script>
 <title>gateway · 半时辰复盘</title>
 <link rel="icon" type="image/svg+xml" href="./brand/logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -170,6 +168,7 @@
 <script src="./shared/consent.js?v=20260603a" defer></script>
 <script src="./shared/compact-ring.js?v=20260605a" defer></script>
 <script src="./shared/update-banner.js?v=20260605a" defer></script>
+<script src="./shared/widget-spec-renderer.js?v=20260811a" defer></script>
 <script src="./shared/widget-loader.js?v=20260518c" defer></script>
 <!-- pretext (ESM) — 文字绕图,bug 2 用。
      本地 vendor(原 esm.sh/@chenglou/pretext@0.0.7)。远程 CDN import 在 Tauri WebKit

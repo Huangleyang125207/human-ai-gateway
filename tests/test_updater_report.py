@@ -2,6 +2,7 @@
 # USE WHEN: 验 /api/updater/report 只报真异常(check Err / COS有新版但check说none)
 # TESTED IN: gateway (2026-06-11)
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -9,13 +10,51 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import notification_routes  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_notification_routes_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import notification_routes; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=ROOT,
+        check=False,
+    )
+
+    assert result.returncode == 0
+
+
+def test_push_uses_shared_queue_and_call_time_persistence(monkeypatch):
+    pending = []
+    persisted = []
+    monkeypatch.setattr(server, "_PENDING_NOTIFICATIONS", pending)
+    monkeypatch.setattr(
+        server,
+        "_persist_pending_notification",
+        lambda item: persisted.append(item),
+    )
+
+    server._push_notification(
+        "vault-schema-migrated",
+        "done",
+        {"version": 2},
+    )
+
+    assert pending[0]["kind"] == "vault-schema-migrated"
+    assert persisted == pending
 
 
 def test_ver_tuple():
-    assert server._ver_tuple("0.1.34") == (0, 1, 34)
-    assert server._ver_tuple("200:0.1.33") == (200, 1, 33) or server._ver_tuple("0.1.33") == (0, 1, 33)
-    assert server._ver_tuple("garbage") is None
-    assert server._ver_tuple("") is None
+    assert notification_routes._ver_tuple("0.1.34") == (0, 1, 34)
+    assert notification_routes._ver_tuple("200:0.1.33") == (200, 1, 33) or notification_routes._ver_tuple("0.1.33") == (0, 1, 33)
+    assert notification_routes._ver_tuple("garbage") is None
+    assert notification_routes._ver_tuple("") is None
 
 
 @pytest.fixture

@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "id": "memo-reference",
+  "title": "备忘",
+  "slot": "care",
+  "data": {
+    "capability": "memo.overview",
+    "params": {"limit": 4}
+  },
+  "view": {
+    "type": "memo_list",
+    "items": {"path": "items"},
+    "caption": {"path": "caption"},
+    "empty_text": "还没有备忘",
+    "add_label": "添加备忘"
+  }
+}

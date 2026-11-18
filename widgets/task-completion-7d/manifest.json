@@ -1,0 +1,11 @@
+{
+  "name": "task-completion-7d",
+  "title": "七日打卡",
+  "description": "最近 7 天所有日常任务的完成率，只读聚合 Markdown 顶部打卡区。",
+  "audience": "需要观察日常节奏的人",
+  "category": "diary-core",
+  "status": "stable",
+  "default_loaded": true,
+  "slot": "top-strip",
+  "spec": "widget.json"
+}

@@ -21,6 +21,7 @@ from fastapi import HTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import pulse_io  # noqa: E402
 
 from conftest import VALID_PULSE  # noqa: E402
 
@@ -110,7 +111,7 @@ def test_two_attempts_all_fail_bucketed_and_raises_500(
 
     # HTTP 500 + detail 含 cfg name
     assert exc_info.value.status_code == 500
-    cfg_name = server._SELF_EVOLVE_TARGETS["user_pulse"]["name"]
+    cfg_name = pulse_io._SELF_EVOLVE_TARGETS["user_pulse"]["name"]
     assert cfg_name in str(exc_info.value.detail), \
         f"500 detail 应含 cfg name '{cfg_name}',实际 {exc_info.value.detail!r}"
 

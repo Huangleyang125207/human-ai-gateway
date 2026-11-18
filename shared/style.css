@@ -559,6 +559,32 @@ body { transition: padding-right 0.45s cubic-bezier(0.2, 0.7, 0.2, 1); }
 .thread.on { right: 0; }
 /* 对话框内容自由复制:保证会话文本在 WKWebView 里可选中 + Cmd/右键复制(app 别处仍可 user-select:none) */
 .thread .body, .thread .body *, .thread .ref-text { -webkit-user-select: text; user-select: text; }
+.t-copy {
+  align-self: flex-start;
+  appearance: none;
+  width: 28px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--ink-4);
+  cursor: pointer;
+  margin-top: 1px;
+  padding: 4px 6px;
+  opacity: 0;
+  user-select: none;
+  transition: color .16s ease, opacity .16s ease;
+}
+.t-copy svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.35; stroke-linecap: round; stroke-linejoin: round; }
+.t-copy svg .front { fill: #fbf6ec; }
+.t-msg:hover > .t-copy, .t-copy:hover, .t-copy:focus-visible { color: var(--ink-2); opacity: .72; }
+.t-copy.copied { color: var(--peach); opacity: 1; }
+.t-msg.user > .t-copy { align-self: flex-end; }
+.t-reasoning-head { min-height: 28px; display: flex; align-items: center; gap: 2px; }
+.t-reasoning-head .t-copy { margin-top: 0; }
+.t-reasoning[open] .t-reasoning-head .t-copy,
+.t-reasoning-head:hover .t-copy { opacity: .5; }
 /* 左边缘抓手 — IDE 式拖拽改宽度 */
 .thread-resizer {
   position: absolute; left: -3px; top: 0; bottom: 0;
@@ -865,6 +891,39 @@ body.thread-resizing { transition: none; }
 .t-msg .body { color: var(--ink); white-space: pre-wrap; }
 .t-msg.ai .body { color: var(--ink-2); }
 
+.t-reasoning {
+  margin: 2px 0 4px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+}
+.t-reasoning summary {
+  width: max-content;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font: 11px/1.8 var(--sans);
+  letter-spacing: 0.02em;
+}
+.t-reasoning summary::-webkit-details-marker { display: none; }
+.t-reasoning summary::after {
+  content: "⌄";
+  display: inline-block;
+  width: 14px;
+  margin-left: 6px;
+  color: var(--ink-3);
+  text-align: center;
+}
+.t-reasoning[open] summary::after { content: "⌃"; }
+.t-reasoning-body {
+  margin: 4px 0 5px;
+  padding-left: 10px;
+  border-left: 2px solid var(--line-2);
+  color: var(--ink-3);
+  white-space: pre-wrap;
+  font: 13px/1.7 var(--serif);
+}
+
 /* AI 在 chat 里返的图 → 缩略图,不撑满气泡;点击开 lightbox 看大图 */
 .t-msg .body img {
   max-width: 180px;
@@ -950,16 +1009,18 @@ body.thread-resizing { transition: none; }
   width: 28px; height: 28px; border-radius: 6px; object-fit: cover;
   display: block;
 }
+/* 抠图开关药丸:不抠=灰 pill、抠=绿 pill(原棕色 8px 小按钮太不起眼被当"消失",改显眼胶囊) */
 .pending-ref .cut-toggle {
-  font: 10px var(--sans); cursor: pointer;
-  background: transparent; border: 1px solid var(--ink-4);
-  color: var(--ink-4); border-radius: 8px;
-  padding: 1px 6px; line-height: 1.4; margin: 0 2px 0 0;
+  font: 10px var(--sans); font-weight: 600; cursor: pointer;
+  background: #9a938a; border: 1px solid #9a938a;
+  color: #fffaf0; border-radius: 999px;
+  padding: 2px 9px; line-height: 1.4; margin: 0 2px 0 0;
+  transition: background 0.15s, border-color 0.15s;
 }
 .pending-ref .cut-toggle.on {
-  background: #b87a4f; border-color: #b87a4f; color: #fffaf0;
+  background: #5f8a4c; border-color: #5f8a4c; color: #fffaf0;
 }
-.pending-ref .cut-toggle:hover { filter: brightness(0.95); }
+.pending-ref .cut-toggle:hover { filter: brightness(1.05); }
 .t-ref-image { padding: 4px 8px; }
 .t-ref-image .ref-thumb {
   width: 36px; height: 36px; border-radius: 6px; object-fit: cover;
@@ -3468,4 +3529,268 @@ body.thread-resizing { transition: none; }
 @keyframes compact-ring-pulse {
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.18); opacity: 0.75; }
+}
+
+/* WidgetSpec v1: fixed metric + sparkline renderer, shared with the RN view model. */
+.widget-spec-metric-sparkline {
+  min-width: 150px;
+  padding: 2px 0 8px;
+  color: var(--ink, #3a3026);
+}
+.widget-spec-title {
+  color: var(--ink-soft, #9a8a70);
+  font: 600 10.5px/1.4 Inter, sans-serif;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.widget-spec-metric {
+  margin-top: 6px;
+  font: 500 28px/1.1 "Noto Serif SC", serif;
+  font-variant-numeric: tabular-nums;
+}
+.widget-spec-caption {
+  margin-top: 3px;
+  color: var(--ink-soft, #9a8a70);
+  font: 12px/1.5 Inter, sans-serif;
+}
+.widget-spec-series {
+  height: 30px;
+  margin-top: 8px;
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+}
+.widget-spec-bar {
+  width: 8px;
+  min-height: 3px;
+  border-radius: 4px 4px 1px 1px;
+  background: var(--vermilion, #b14a2b);
+  opacity: 0.78;
+}
+.widget-spec-bar.is-empty {
+  background: var(--ink-faint, #c2b298);
+  opacity: 0.45;
+}
+.widget-spec-memo-list {
+  min-width: min(360px, 86vw);
+  padding: 2px 0 8px;
+  color: var(--ink, #3a3026);
+}
+.widget-spec-memos {
+  margin-top: 8px;
+  border-top: 1px solid var(--line-soft, rgba(99, 79, 52, 0.15));
+}
+.widget-spec-memo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line-soft, rgba(99, 79, 52, 0.15));
+  color: inherit;
+}
+.widget-spec-memo.is-overdue {
+  color: var(--vermilion, #b14a2b);
+}
+.widget-spec-memo-copy {
+  display: block;
+}
+.widget-spec-memo-done {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--line-strong, rgba(99, 79, 52, 0.35));
+  border-radius: 50%;
+  background: var(--paper-bright, #fffaf0);
+  cursor: pointer;
+}
+.widget-spec-memo-done:hover {
+  border-color: var(--vermilion, #b14a2b);
+  box-shadow: inset 0 0 0 4px var(--warm-glow, rgba(177, 74, 43, 0.12));
+}
+.widget-spec-memo-edit {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.widget-spec-memo-text {
+  font: 500 14px/1.55 "Noto Serif SC", serif;
+}
+.widget-spec-memo-meta,
+.widget-spec-empty {
+  margin-top: 2px;
+  color: var(--ink-soft, #9a8a70);
+  font: 11px/1.5 Inter, sans-serif;
+}
+.widget-spec-memo-add {
+  margin-top: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vermilion, #b14a2b);
+  font: 12px/1.5 Inter, sans-serif;
+  cursor: pointer;
+}
+
+.memo-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(58, 48, 38, 0.36);
+  backdrop-filter: blur(3px);
+}
+.memo-editor {
+  width: min(520px, 100%);
+  max-height: min(88vh, 720px);
+  overflow-y: auto;
+  padding: 10px 24px 26px;
+  border: 1px solid var(--line-soft, rgba(99, 79, 52, 0.15));
+  border-radius: 22px 22px 16px 16px;
+  background: var(--paper-bright, #fffaf0);
+  color: var(--ink, #3a3026);
+  box-shadow: 0 24px 70px rgba(58, 48, 38, 0.24);
+  animation: memo-editor-rise 180ms ease-out;
+}
+@keyframes memo-editor-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.memo-editor-grip {
+  width: 38px;
+  height: 4px;
+  margin: 0 auto 16px;
+  border-radius: 3px;
+  background: var(--line-strong, rgba(99, 79, 52, 0.32));
+}
+.memo-editor-title {
+  margin-bottom: 14px;
+  font: 500 21px/1.4 "Noto Serif SC", serif;
+}
+.memo-editor-field {
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+.memo-editor-label,
+.memo-editor-section-label {
+  margin: 16px 0 7px;
+  color: var(--ink-soft, #9a8a70);
+  font: 600 10.5px/1.4 Inter, sans-serif;
+  letter-spacing: 1.1px;
+}
+.memo-editor-text,
+.memo-editor-input {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--line-soft, rgba(99, 79, 52, 0.18));
+  border-radius: 12px;
+  outline: none;
+  background: var(--paper, #fbf4e7);
+  color: var(--ink, #3a3026);
+}
+.memo-editor-text:focus,
+.memo-editor-input:focus {
+  border-color: var(--umber, #876646);
+  box-shadow: 0 0 0 3px rgba(135, 102, 70, 0.1);
+}
+.memo-editor-text {
+  min-height: 88px;
+  resize: vertical;
+  padding: 12px 13px;
+  font: 15px/1.6 "Noto Serif SC", serif;
+}
+.memo-editor-input {
+  min-height: 44px;
+  padding: 0 11px;
+  font: 13px/1.4 Inter, sans-serif;
+}
+.memo-editor-when {
+  display: grid;
+  grid-template-columns: 1fr 132px;
+  gap: 10px;
+}
+.memo-editor-notify {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 18px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line-soft, rgba(99, 79, 52, 0.15));
+  border-bottom: 1px solid var(--line-soft, rgba(99, 79, 52, 0.15));
+}
+.memo-editor-notify-title {
+  font: 14px/1.5 "Noto Serif SC", serif;
+}
+.memo-editor-hint,
+.memo-editor-ai-hint {
+  margin-top: 2px;
+  color: var(--ink-soft, #9a8a70);
+  font: 11px/1.5 "Kaiti SC", serif;
+}
+.memo-editor-error {
+  min-height: 18px;
+  margin-top: 8px;
+  color: var(--vermilion, #b14a2b);
+  font: 12px/1.5 "Kaiti SC", serif;
+}
+.memo-editor-save {
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  border-radius: 24px;
+  background: var(--ink, #3a3026);
+  color: var(--paper-bright, #fffaf0);
+  font: 600 14px/1.4 Inter, sans-serif;
+  cursor: pointer;
+}
+.memo-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.memo-editor-action {
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid var(--line-soft, rgba(99, 79, 52, 0.18));
+  border-radius: 20px;
+  background: transparent;
+  color: var(--ink, #3a3026);
+  font: 12px/1.4 Inter, sans-serif;
+  cursor: pointer;
+}
+.memo-editor-action.is-danger {
+  color: var(--vermilion, #b14a2b);
+}
+.memo-editor-ai {
+  margin-top: 20px;
+  padding: 16px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line-soft, rgba(99, 79, 52, 0.15));
+  background: transparent;
+  color: var(--ink, #3a3026);
+  font: 14px/1.5 "Kaiti SC", serif;
+  cursor: pointer;
+}
+.memo-editor button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+@media (max-width: 560px) {
+  .memo-editor-backdrop { padding: 0; }
+  .memo-editor { border-radius: 22px 22px 0 0; }
+  .memo-editor-when { grid-template-columns: 1fr 112px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .memo-editor { animation: none; }
 }

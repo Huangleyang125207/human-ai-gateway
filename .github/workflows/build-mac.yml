@@ -2,8 +2,8 @@ name: Build & Release Mac (Tauri + auto-update)
 
 # ✓ 这是发版主路径(详 RELEASE.md "A · CI 主路径")。
 #   tag v* push 触发,自动 notarize(用 secrets) + 上 GH Release + 推 COS。
-#   Mac 用户走 Tauri updater 拉到;Win 那侧由 build-win.yml(branches:[main])同步,
-#   所以发版前要 push main + push tag 两步。
+#   Mac 用户走 Tauri updater 拉到；同一个 tag 也触发 build-win.yml，双平台
+#   分别上传 COS updater 和同一份 draft GitHub Release。
 # 备选:scripts/release-mac-local.sh --push(本机 build,只发 Mac,Win 不同步,只紧急时用)。
 on:
   push:
@@ -33,19 +33,29 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Python deps + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-test.txt
+          pip install rapidocr-onnxruntime rembg==2.0.61 pyinstaller
+
+      - name: Test runtime + generated contract freshness
+        run: |
+          python -m pytest -q
+          node --test tests/frontend/*.mjs
+
       - name: Install Rust + tauri-cli
-        # 用 rustup 装 stable + 加 aarch64-apple-darwin target;tauri-cli 走 cargo install
+        # 测试闸通过后才支付 Rust/Tauri 冷安装成本。
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
           source "$HOME/.cargo/env"
           rustup target add aarch64-apple-darwin
           cargo install tauri-cli --version "^2.0" --locked
-
-      - name: Install Python deps + PyInstaller
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install rapidocr-onnxruntime rembg==2.0.61 pyinstaller
 
       - name: Prepare .venv-build (build-sidecar.sh 依赖这个 venv)
         # 本地开发场景 venv 由 build-mac-pyinstaller.sh 建好,CI 上需要 inline 重做一次

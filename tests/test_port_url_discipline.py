@@ -14,6 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import server  # noqa: E402
+import vision_tools  # noqa: E402
 
 
 # host[:port] 形如 http(s)://(localhost|127.0.0.1)[:NNNN]
@@ -38,6 +39,23 @@ def test_abs_local_url_regex_self_check():
     assert ABS_LOCAL_URL.search("http://localhost:4321/x")
     assert ABS_LOCAL_URL.search("https://127.0.0.1:18080")
     assert ABS_LOCAL_URL.search("http://localhost/api")  # 不带端口也算
+
+
+def test_system_routes_reject_non_http_and_set_no_cache():
+    from fastapi.testclient import TestClient
+
+    client = TestClient(server.app)
+    rejected = client.post(
+        "/api/open-external",
+        json={"url": "file:///etc/passwd"},
+    )
+    root = client.get("/")
+
+    assert rejected.status_code == 400
+    assert root.status_code == 200
+    assert root.headers["cache-control"] == (
+        "no-cache, no-store, must-revalidate"
+    )
     assert not ABS_LOCAL_URL.search("/attachments/2026/x.jpg")
     assert not ABS_LOCAL_URL.search("file:///tmp/x")
 
@@ -203,7 +221,7 @@ def test_curator_items_url_normalized_relative(monkeypatch, tmp_path):
     sys_file.write_text("profile placeholder")
     monkeypatch.setattr(server, "CURATOR_SYSTEM_PATH", sys_file)
 
-    out = server.tool_ask_photo_curator({"query": "找我家狗的照片"})
+    out = vision_tools.tool_ask_photo_curator({"query": "找我家狗的照片"})
     assert "items" in out, f"curator 返回缺 items 字段: {out}"
     assert out["items"], f"curator items 空: {out}"
     for it in out["items"]:

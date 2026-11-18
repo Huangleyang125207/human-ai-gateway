@@ -63,7 +63,6 @@ if exist "%ICO%" set "ICON_FLAG=--icon %ICO%"
     --workpath "%GATEWAY_DIR%\build" ^
     %ICON_FLAG% ^
     --add-data "index.html;." ^
-    --add-data "day.html;." ^
     --add-data "reset.html;." ^
     --add-data "history.html;." ^
     --add-data "consent.html;." ^
@@ -74,6 +73,9 @@ if exist "%ICO%" set "ICON_FLAG=--icon %ICO%"
     --add-data "vendor;vendor" ^
     --add-data "brand;brand" ^
     --add-data "protocols;protocols" ^
+    --add-data "prompts;prompts" ^
+    --add-data "skills;skills" ^
+    --add-data "docs/ARCHITECTURE_LEDGER.md;docs" ^
     --add-data ".gateway-config.example.json;." ^
     --add-data "vault_config.py;." ^
     --add-data "vault_git.py;." ^

@@ -60,6 +60,15 @@ _BASELINE_MAX_FILES = 5000
 _REPO_INIT_LOCK = threading.Lock()
 
 _NOOP_REASONS = {"no_git", "init_failed", "no_changes"}
+_REPORT_FAILURE = None
+_PUSH_NOTIFICATION = None
+
+
+def configure_effects(*, report_failure, push_notification) -> None:
+    """组装根注入可选反馈 effect；独立脚本/测试未组装时保持静默。"""
+    global _REPORT_FAILURE, _PUSH_NOTIFICATION
+    _REPORT_FAILURE = report_failure
+    _PUSH_NOTIFICATION = push_notification
 
 
 def _git_available() -> bool:
@@ -153,11 +162,11 @@ def _exceeds_baseline_limit(vault_dir: Path) -> bool:
 
 
 def _report_silent(error_type: str, message: str = "", context: dict = None):
-    """lazy 调 server._report_silent_failure 避免循环 import。
-    vault_git 由 server 在 thread 里调用,触发时 server 已 fully loaded。"""
+    """失败反馈不得反向依赖应用组装根。"""
+    if _REPORT_FAILURE is None:
+        return
     try:
-        from server import _report_silent_failure
-        _report_silent_failure(error_type, message, context)
+        _REPORT_FAILURE(error_type, message, context)
     except Exception:
         pass  # 反馈通道自己挂了不报错(避免递归)
 
@@ -165,9 +174,10 @@ def _report_silent(error_type: str, message: str = "", context: dict = None):
 def _push_broken_notification(detail: str):
     """A-H13: vault_git 连续失败到达阈值,弹用户必看的通知。
     audit chain 静默断 = 训练语料 + 日记追溯都没了,用户不知是大事。"""
+    if _PUSH_NOTIFICATION is None:
+        return
     try:
-        from server import _push_notification
-        _push_notification(
+        _PUSH_NOTIFICATION(
             "vault-git-broken",
             f"vault 自动 commit 连续失败 — audit chain 暂停。检查 git 状态或重启 gateway。详: {detail[:120]}",
             {"detail": detail[:300]},

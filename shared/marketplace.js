@@ -3,7 +3,7 @@
  * 入口: header 的 ⚙ icon (id="marketBtn")
  * 两 tab:
  *   1. 插件市场 — widget catalog,GET /api/widgets/catalog
- *   2. API 钥匙 — DeepSeek (chat) + 阿里云百炼 (vision) + 百度抠图 (可选) 配置,GET /api/setup/current
+ *   2. API 钥匙 — DeepSeek (chat + vision) + 百度抠图 (可选) 配置,GET /api/setup/current
  *   3. 数据 — 训练语料浏览/导出(history.html)+ 训练授权(consent.html)+ 云上报开关(/api/telemetry/consent)
  */
 
@@ -256,7 +256,7 @@
     const themeNow = (window.gatewayTheme && window.gatewayTheme.get()) || "system";
     const skinNow = (window.gatewaySkin && window.gatewaySkin.get()) || "classic";
     body.innerHTML = `
-      <div class="market-hint">本地服务,密钥只存储在你的电脑上,不会发送给第三方。任何输入框 paste 完点旁边按钮即可保存/测试。</div>
+      <div class="market-hint">DeepSeek API Key 保存在本机，AI 请求直连 DeepSeek。</div>
 
       <section class="setup-section" id="skinSection">
         <h3>皮肤</h3>
@@ -278,39 +278,15 @@
       </section>
 
       <section class="setup-section setup-section-primary">
-        <h3>① 说话的 · <span class="setup-role">DeepSeek 直连</span></h3>
+        <h3>① 对话与视觉 · <span class="setup-role">DeepSeek 直连</span></h3>
         <div class="setup-howto">
-          跟你聊天、写日记的 AI。<b>直接到 DeepSeek 官方充值。</b>
-          <br><br>
-          V4 Pro 现在永久 <b>2.5 折</b>(原价的 1/4),10-20 元够用很久。
-          <ol>
-            <li>访问 <a href="https://platform.deepseek.com/" target="_blank" rel="noopener">platform.deepseek.com</a> 注册/登录</li>
-            <li>左侧菜单 <b>API Keys</b> → <b>Create new API key</b></li>
-            <li>充值</li>
-            <li>复制 sk-... 粘贴到下方,测试通过即可</li>
-          </ol>
+          对话和识图使用你自己的 DeepSeek API Key，由你的 DeepSeek 账户计费。
         </div>
-        <div id="keysModels"></div>
-        <button class="key-add-btn" id="keysAddModel">+ 添加模型</button>
-      </section>
-
-      <section class="setup-section">
-        <h3>② 眼睛 · <span class="setup-role">阿里云百炼（提供图片识别）</span></h3>
-        <div class="setup-howto setup-howto-secondary">
-          根据指引获取阿里云百炼 API,为你的 DeepSeek 装上眼睛。
-          <ol>
-            <li>访问 <a href="https://www.aliyun.com/benefit/scene/ai-discount" target="_blank" rel="noopener">aliyun.com / AI 优惠场景</a> 注册,百炼新用户每个模型送 <b>100 万 token / 90 天</b></li>
-            <li>进 <a href="https://bailian.console.aliyun.com/" target="_blank" rel="noopener">百炼控制台</a> → 开通服务(免费)</li>
-            <li>左侧 <b>API-KEY</b> → 创建</li>
-            <li>每张图 ~0.03 分(qwen3-vl-flash 实测),10 元能识约 3.6 万张;新用户 100 万免费 token 够识 ~800 张</li>
-            <li>免费额度用完后 → <a href="https://expense.console.aliyun.com/finance/recharge" target="_blank" rel="noopener">阿里云充值入口</a></li>
-          </ol>
-        </div>
-        ${keyRow("百炼 · API 密钥", "dashscope_api_key", cfg.dashscope_api_key, "sk-... · bailian.console.aliyun.com")}
+        <div class="key-row"><label class="key-label" for="marketDeepSeekKey">DeepSeek API Key</label><input class="key-input" id="marketDeepSeekKey" type="password" autocomplete="off" spellcheck="false" placeholder="${cfg.has_deepseek_api_key ? "已保存；粘贴新密钥可更换" : "粘贴你的 DeepSeek API Key"}"><button class="km-save" id="marketDeepSeekSave">保存</button><span class="key-status" id="marketDeepSeekStatus"></span></div>
       </section>
 
       <details class="setup-details setup-section">
-        <summary>③ 百度抠图(可选 · 折叠) — Win/Linux 用户兜底</summary>
+        <summary>② 百度抠图(可选 · 折叠) — Win/Linux 用户兜底</summary>
         <div class="setup-howto setup-howto-secondary">
           macOS 优先用系统 Subject Lift(本地、免费、220ms)。<b>只在 Win/Linux 上跑 + 抠图质量不够时才填。</b>
           新用户:跳过这一段。
@@ -320,17 +296,33 @@
       </details>
     `;
 
-    const allModels = cfg.models || [];
-    hiddenVisionModels = allModels.filter(isVisionModel);
-    renderModels(allModels.filter(m => !isVisionModel(m)));
-    document.getElementById("keysAddModel").addEventListener("click", () => addModel());
+    const deepSeekSave = body.querySelector("#marketDeepSeekSave");
+    deepSeekSave.addEventListener("click", async () => {
+      const input = body.querySelector("#marketDeepSeekKey");
+      const key = input.value.trim();
+      const status = body.querySelector("#marketDeepSeekStatus");
+      if (!key) {
+        status.textContent = cfg.has_deepseek_api_key ? "保留已保存的密钥" : "请填写 DeepSeek API Key";
+        return;
+      }
+      status.textContent = "保存中⋯";
+      deepSeekSave.disabled = true;
+      const ok = await saveSinglePartial({ api_key: key });
+      deepSeekSave.disabled = false;
+      status.textContent = ok ? "✓ 已保存" : "✕ 保存失败";
+      if (ok) {
+        cfg.has_deepseek_api_key = true;
+        input.value = "";
+        input.placeholder = "已保存；粘贴新密钥可更换";
+      }
+    });
 
-    // dashscope / baidu key inputs auto-save on blur
+    // 百度 key inputs auto-save on blur
     [...body.querySelectorAll("input.key-input")].forEach(inp => {
       inp.addEventListener("blur", async () => {
         const k = inp.dataset.key;
         const v = inp.value.trim();
-        if (k.startsWith("baidu_") || k === "dashscope_api_key") {
+        if (k?.startsWith("baidu_")) {
           await saveSinglePartial({[k]: v});
           flashStatus(inp.closest(".key-row"), "✓ 已存");
         }
@@ -362,106 +354,15 @@
     `;
   }
 
-  let editingModels = [];
-  // vision models (base_url 含 dashscope) 不出现在 ① chat list,但 save 时保留
-  let hiddenVisionModels = [];
-  const isVisionModel = (m) => (m.base_url || "").includes("dashscope");
-  function renderModels(models) {
-    editingModels = models.map(m => ({...m}));
-    const wrap = document.getElementById("keysModels");
-    if (!wrap) return;
-    wrap.innerHTML = "";
-    if (!editingModels.length) {
-      wrap.innerHTML = `<div class="market-empty">还没添加模型，点下面 + 添加</div>`;
-      return;
-    }
-    editingModels.forEach((m, i) => {
-      const row = document.createElement("div");
-      row.className = "key-model-row";
-      row.innerHTML = `
-        <div class="key-model-head">
-          <input class="km-label" value="${escape(m.label || "")}" placeholder="标签">
-          <button class="km-del" title="删">✕</button>
-        </div>
-        <input class="km-base" value="${escape(m.base_url || "")}" placeholder="base_url">
-        <input class="km-model" value="${escape(m.model || "")}" placeholder="model id">
-        <input class="km-key" type="password" value="${escape(m.api_key || "")}" placeholder="api_key">
-        <div class="key-model-actions">
-          <button class="km-test">测试</button>
-          <button class="km-save">保存全部 LLM</button>
-          <span class="key-status"></span>
-        </div>
-      `;
-      const inputs = row.querySelectorAll("input");
-      const [labI, baseI, modI, keyI] = inputs;
-      labI.addEventListener("input", () => editingModels[i].label = labI.value);
-      baseI.addEventListener("input", () => editingModels[i].base_url = baseI.value);
-      modI.addEventListener("input", () => editingModels[i].model = modI.value);
-      keyI.addEventListener("input", () => editingModels[i].api_key = keyI.value);
-      row.querySelector(".km-del").addEventListener("click", () => {
-        editingModels.splice(i, 1);
-        renderModels(editingModels);
-      });
-      row.querySelector(".km-test").addEventListener("click", () => testModel(i, row));
-      row.querySelector(".km-save").addEventListener("click", () => saveAllModels(row));
-      wrap.appendChild(row);
-    });
-  }
-
-  function addModel() {
-    editingModels.push({label: "", base_url: "", model: "", api_key: ""});
-    renderModels(editingModels);
-  }
-
-  async function testModel(idx, row) {
-    const m = editingModels[idx];
-    const status = row.querySelector(".key-status");
-    status.textContent = "测试中⋯";
-    try {
-      const r = await fetch("/api/setup/test", {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({label: m.label, base_url: m.base_url, model: m.model, api_key: m.api_key}),
-      });
-      const d = await r.json();
-      status.textContent = d.ok ? "✓ 通过" : ("✕ " + (d.reason || ""));
-      status.className = "key-status " + (d.ok ? "ok" : "err");
-    } catch (e) {
-      status.textContent = "✕ " + e.message;
-      status.className = "key-status err";
-    }
-  }
-
-  async function saveAllModels(row) {
-    const status = row.querySelector(".key-status");
-    status.textContent = "保存中⋯";
-    try {
-      // 自动给没 id 的生成 id
-      const cleaned = editingModels.filter(m => m.label && m.base_url && m.api_key && m.model).map((m, i) => ({
-        ...m,
-        id: m.id || (m.label.toLowerCase().replace(/\s+/g, "-") || `p${i}`),
-      }));
-      // 合并 ① 列表里的 chat 模型 + 隐藏的 vision 模型(避免 save 时把 vision 删了)
-      const merged = [...cleaned, ...hiddenVisionModels];
-      const r = await fetch("/api/setup/save-partial", {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({models: merged}),
-      });
-      const d = await r.json();
-      status.textContent = d.ok ? "✓ 已保存" : ("✕ " + (d.detail || ""));
-      status.className = "key-status " + (d.ok ? "ok" : "err");
-    } catch (e) {
-      status.textContent = "✕ " + e.message;
-      status.className = "key-status err";
-    }
-  }
-
   async function saveSinglePartial(obj) {
     try {
-      await fetch("/api/setup/save-partial", {
+      const r = await fetch("/api/setup/save-partial", {
         method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify(obj),
       });
-    } catch (e) { console.warn("partial save failed", e); }
+      const d = await r.json();
+      return !!d.ok;
+    } catch (e) { console.warn("partial save failed", e); return false; }
   }
 
   function flashStatus(row, msg) {

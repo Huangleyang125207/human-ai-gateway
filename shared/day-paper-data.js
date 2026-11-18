@@ -709,7 +709,8 @@
         var piece = sec.querySelector(".piece");
         if (!piece || piece.querySelector('.sticker[data-id="' + it.id + '"]')) return;
         var fig = document.createElement("div");
-        fig.className = "sticker landing";
+        // cutout!==false(含老数据缺字段)视为抠图 → .cut 去相框;明确 cutout===false(原图)保留拍立得框
+        fig.className = "sticker landing" + (it.cutout !== false ? " cut" : "");
         fig.setAttribute("data-id", it.id || "");
         fig.title = "双击取下";
         fig.innerHTML = '<img src="' + esc(it.src) + '" alt="贴纸">';

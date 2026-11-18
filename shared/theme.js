@@ -26,7 +26,7 @@
   // index.html 排在 day.html 前 → classicTwin(day-paper) 反查回 index.html(切回 classic 落首页)。
   var TWINS = {
     "index.html": "day-paper.html",    // classic 首页=当天日记 ↔ paper 开门见当天
-    "day.html": "day-paper.html",      // 遗留 day.html(无人链)也指向 day-paper
+    "day.html": "day-paper.html",      // 遗留 day.html(无人链)也指向 day-paper;已归档 archive/day.html
     "history.html": "history-paper.html",
     "": "day-paper.html",              // 根路径 = 当天单日
   };

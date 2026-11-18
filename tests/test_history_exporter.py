@@ -158,6 +158,29 @@ def test_join_context_empty():
     assert ctx["context_method"] == "empty"
 
 
+def test_load_thread_accepts_legacy_list_and_v2_envelope(tmp_path):
+    messages = [{"role": "user", "content": "保留我"}]
+    legacy = tmp_path / "legacy.json"
+    legacy.write_text(json.dumps(messages, ensure_ascii=False), encoding="utf-8")
+    assert he.load_thread(legacy) == messages
+
+    v2 = tmp_path / "v2.json"
+    v2.write_text(json.dumps({
+        "v": 2,
+        "history": messages,
+        "compact": {"summary": "前情", "through": 0, "at": "2026-08-19T00:00:00Z"},
+    }, ensure_ascii=False), encoding="utf-8")
+    assert he.load_thread(v2) == messages
+
+
+def test_load_thread_rejects_bad_v2_shape_without_crashing_join(tmp_path):
+    path = tmp_path / "bad-v2.json"
+    path.write_text(json.dumps({"v": 2, "history": "not-a-list"}), encoding="utf-8")
+    thread = he.load_thread(path)
+    assert thread == []
+    assert he.join_context("2026-08-19T00:00:00Z", thread)["context_method"] == "empty"
+
+
 # ─── T7 · export 端到端 ──────────────────────────────────────
 
 def test_export_writes_all_files(vault_with_commits, tmp_path):

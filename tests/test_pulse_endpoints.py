@@ -16,6 +16,7 @@
 #   POST /api/pulse/compact-summary       — 200 字摘要
 #   POST /api/pulse/refresh-mirror        — vault PULSE → app-state mirror
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -23,6 +24,20 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+
+
+def test_pulse_routes_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import pulse_routes; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=Path(__file__).resolve().parent.parent,
+        check=False,
+    )
+    assert result.returncode == 0
 
 
 # ── T1: dashboard GET /api/pulse ─────────────────────────────────────

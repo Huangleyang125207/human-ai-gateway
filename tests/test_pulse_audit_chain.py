@@ -18,6 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import pulse_io  # noqa: E402
 
 
 # ── _self_evolve_run 真路径调 vault_git ───────────────────────────────
@@ -86,7 +87,7 @@ def test_self_evolve_skips_vault_git_when_path_outside_vault(
 
     # 重新指向 vault 外的路径(覆盖 fixture 的默认 user 路径)
     monkeypatch.setitem(
-        server._SELF_EVOLVE_TARGETS["user_pulse"], "path", lambda: outside_path)
+        pulse_io._SELF_EVOLVE_TARGETS["user_pulse"], "path", lambda: outside_path)
     monkeypatch.setattr(server, "_USER_PULSE_PATH", outside_path, raising=False)
 
     # sanity:确认在 vault 外

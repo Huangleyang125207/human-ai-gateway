@@ -11,6 +11,7 @@
 # 改 server 属性即生效)。注意:_startup 内部调的是 *mig._create_migration_llm*,要 stub 得打 mig。
 
 import asyncio
+import subprocess
 import sys
 from pathlib import Path
 
@@ -19,6 +20,20 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
 import migration_routes as mig  # noqa: E402
+
+
+def test_migration_routes_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import migration_routes; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=Path(__file__).resolve().parent.parent,
+        check=False,
+    )
+    assert result.returncode == 0
 
 
 @pytest.fixture(autouse=True)

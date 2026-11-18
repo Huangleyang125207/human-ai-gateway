@@ -7,10 +7,11 @@
 #       因为它用 server._thread_save_is_stale + HTTP)。本文件补它没覆盖的两块:
 #   - GET /api/thread/history:空 / 正常 / 损坏→modal(★5.17 Cannot-break:空 [] 不能当真覆盖)
 #   - POST /api/thread/restore-from-bak:roundtrip / bad index / missing bak
-# helper(_thread_history_mtime_ms / _thread_save_is_stale)+ THREAD_HISTORY_PATH + _THREAD_LOCK
-# 抽出时 *留 server.py*,handler 走 lazy from server import → patch server.X 仍命中。
+# server provider 在请求时组装 ThreadHistoryService，patch server.X 仍命中；
+# thread_routes/thread_history 本身不得导入 server。
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +20,21 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+
+
+def test_thread_modules_do_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import thread_history, thread_routes; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=Path(__file__).resolve().parent.parent,
+        check=False,
+    )
+
+    assert result.returncode == 0
 
 
 @pytest.fixture
@@ -50,6 +66,24 @@ def test_history_happy_returns_list_and_mtime(client, th):
     assert d["history"] == hist
     assert d["mtime"] > 0
     assert "status" not in d  # 正常不带 corrupt 标记
+
+
+def test_history_v2_returns_full_history_and_compact_checkpoint(client, th):
+    hist = [{"role": "user", "content": str(i)} for i in range(240)]
+    compact = {"summary": "前情", "through": 230, "at": "2026-08-19T00:00:00+00:00"}
+    th.path.write_text(json.dumps({"v": 2, "history": hist, "compact": compact}, ensure_ascii=False), encoding="utf-8")
+    d = client.get("/api/thread/history").json()
+    assert d["history"] == hist
+    assert d["compact"] == compact
+
+
+def test_save_v2_keeps_all_messages_and_checkpoint(client, th):
+    hist = [{"role": "user", "content": str(i)} for i in range(240)]
+    compact = {"summary": "前情", "through": 230, "at": "2026-08-19T00:00:00+00:00"}
+    r = client.post("/api/thread/save", json={"history": hist, "compact": compact, "base_mtime": 0})
+    assert r.status_code == 200
+    stored = json.loads(th.path.read_text(encoding="utf-8"))
+    assert stored == {"v": 2, "history": hist, "compact": compact}
 
 
 def test_history_corrupt_returns_modal_payload_and_rings(client, th, monkeypatch):
@@ -96,6 +130,22 @@ def test_restore_missing_bak_404(client, th):
     assert client.post("/api/thread/restore-from-bak", json={"bak_index": 3}).status_code == 404
 
 
+def test_start_fresh_archives_corrupt_file_and_writes_empty_v2(client, th):
+    th.path.write_text("{broken", encoding="utf-8")
+    r = client.post("/api/thread/start-fresh")
+    assert r.status_code == 200
+    assert json.loads(th.path.read_text(encoding="utf-8")) == {"v": 2, "history": [], "compact": None}
+    assert any(p.name.startswith(th.path.name + ".corrupted.") for p in th.dir.iterdir())
+
+
+def test_start_fresh_refuses_to_erase_valid_history(client, th):
+    original = [{"role": "user", "content": "keep"}]
+    th.path.write_text(json.dumps(original), encoding="utf-8")
+    r = client.post("/api/thread/start-fresh")
+    assert r.status_code == 409
+    assert json.loads(th.path.read_text(encoding="utf-8")) == original
+
+
 # ── inline adversarial 补 gap(小簇,inline 替 workflow)───────────────
 
 def test_corrupt_with_no_baks_returns_empty_baks_not_crash(client, th, monkeypatch):
@@ -111,3 +161,12 @@ def test_save_rejects_non_list_history_400(client, th):
     """history 不是 list → 400(契约边界;抽出'好心'try/except 不能悄改成 200 静默不写)。"""
     assert client.post("/api/thread/save", json={"history": "oops"}).status_code == 400
     assert client.post("/api/thread/save", json={}).status_code == 400
+
+
+def test_save_rejects_checkpoint_outside_history(client, th):
+    r = client.post("/api/thread/save", json={
+        "history": [{"role": "user", "content": "one"}],
+        "compact": {"summary": "bad", "through": 2, "at": "2026-08-19T00:00:00Z"},
+    })
+    assert r.status_code == 400
+    assert not th.path.exists()

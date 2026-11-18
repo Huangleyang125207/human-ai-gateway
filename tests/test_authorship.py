@@ -12,6 +12,7 @@
 #   T6 _insert_block 必 stamp 调用方 @marker 到新 H2
 #   T7 _append_comment_to_block 原内容一字不动,只 append
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,23 +21,41 @@ import pytest
 # 让 import server 找到模块(tests 在 gateway/tests/ 下)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import journal_core  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_journal_core_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import journal_core; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=ROOT,
+        check=False,
+    )
+
+    assert result.returncode == 0
 
 
 # ─── T1 · _check_author 是 pure function ────────────────────────────
 
 def test_check_author_user_marker():
-    assert server._check_author("## #思考 早醒 @user") == "user"
+    assert journal_core._check_author("## #思考 早醒 @user") == "user"
 
 def test_check_author_ai_marker():
-    assert server._check_author("## #投资 #协作 KV cache 闭环 @ai") == "ai"
+    assert journal_core._check_author("## #投资 #协作 KV cache 闭环 @ai") == "ai"
 
 def test_check_author_no_marker_defaults_user():
     """无标记 → @user(失败安全:旧 entry 默认保护,不能被 AI 改)"""
-    assert server._check_author("## #思考 早醒") == "user"
+    assert journal_core._check_author("## #思考 早醒") == "user"
 
 def test_check_author_marker_anywhere_in_line():
     """marker 在 tag 之前也认(虽然 convention 是行末)"""
-    assert server._check_author("## @ai #投资 something") == "ai"
+    assert journal_core._check_author("## @ai #投资 something") == "ai"
 
 
 # ─── 共用 fixture ────────────────────────────────────────────────────
@@ -96,11 +115,18 @@ def test_patch_block_ai_refuses_user_block(journal_both):
 # ─── T3 · _patch_block author=ai ALLOWS @ai 块 ───────────────────────
 
 def test_patch_block_ai_allows_ai_block(journal_both):
-    """AI 可以改自己的 @ai 块。"""
+    """AI 可以改自己的 @ai 块。
+
+    new_md 改了 H2 标题，需要 allow_h2_rename=True——6058a2c 加的
+    H2-rename 防御闸（5.29 防御）与本测试要验的 authorship 边界正交，
+    本测试原先没传这个 flag，是该 commit 之后测试断言过期，不是
+    authorship 实现的 bug。
+    """
     result = server._patch_block(
         journal_both, "10:00",
         "## #投资 #协作 重写过 @ai\n新内容。",
         author="ai",
+        allow_h2_rename=True,
     )
     assert "error" not in result, f"expected success, got: {result}"
     text = journal_both.read_text(encoding="utf-8")

@@ -3,6 +3,7 @@
 #           多 record(5.16 哈士奇站客厅 1 张照片被存成 5 record 的回归防御)
 # TESTED IN: gateway (2026-06-03)
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -12,6 +13,21 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import server  # noqa: E402
+
+
+def test_attachment_index_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import attachments_index; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=ROOT,
+        check=False,
+    )
+
+    assert result.returncode == 0
 
 
 @pytest.fixture

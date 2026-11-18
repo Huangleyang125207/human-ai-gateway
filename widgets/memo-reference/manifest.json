@@ -1,0 +1,11 @@
+{
+  "name": "memo-reference",
+  "title": "备忘",
+  "description": "GUI 与 AI 共用同一状态的单次与周期备忘录。",
+  "audience": "希望用自然语言管理提醒的人",
+  "category": "diary-core",
+  "status": "stable",
+  "default_loaded": false,
+  "slot": "top-strip",
+  "spec": "widget.json"
+}

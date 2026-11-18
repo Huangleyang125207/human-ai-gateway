@@ -144,6 +144,15 @@
   border: 1px solid var(--hairline); border-radius: 3px;
   padding: 0.15em 0.6em; display: inline-flex; align-items: center; gap: 0.3em;
 }
+/* 抠图开关药丸(纸皮肤原本没这按钮样式=浏览器默认灰白,被当"消失"):不抠=灰 pill、抠=绿 pill */
+.pending-ref .cut-toggle {
+  font-family: var(--font-kai); font-size: 10px; font-weight: 600; cursor: pointer;
+  background: #9a938a; border: 1px solid #9a938a; color: #fffaf0;
+  border-radius: 999px; padding: 2px 9px; line-height: 1.35; margin: 0 1px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.pending-ref .cut-toggle.on { background: #5f8a4c; border-color: #5f8a4c; color: #fffaf0; }
+.pending-ref .cut-toggle:hover { filter: brightness(1.05); }
 
 /* ── 输入行 ───────────────────────────────────────── */
 .thread-input-row {

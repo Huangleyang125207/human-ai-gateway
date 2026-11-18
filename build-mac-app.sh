@@ -15,6 +15,8 @@ cd "$(dirname "$0")"
 GATEWAY_DIR="$(pwd)"
 DIST="$GATEWAY_DIR/dist"
 BUILD="$DIST/.build"
+APP_VERSION="$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' src-tauri/tauri.conf.json | head -1)"
+[ -n "$APP_VERSION" ] || { echo "✗ 无法读取应用版本"; exit 1; }
 
 # 工具 check
 for cmd in sips iconutil hdiutil; do
@@ -61,7 +63,7 @@ rm "$BUILD/iconset.iconset/icon_64x64.png" "$BUILD/iconset.iconset/icon_1024x102
 iconutil -c icns "$BUILD/iconset.iconset" -o "$APP/Contents/Resources/Gateway.icns"
 
 # 3. Info.plist
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -69,8 +71,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key>             <string>Gateway</string>
     <key>CFBundleDisplayName</key>      <string>Gateway</string>
     <key>CFBundleIdentifier</key>       <string>ai.human-ai.gateway</string>
-    <key>CFBundleVersion</key>          <string>0.4</string>
-    <key>CFBundleShortVersionString</key><string>0.4</string>
+    <key>CFBundleVersion</key>          <string>${APP_VERSION}</string>
+    <key>CFBundleShortVersionString</key><string>${APP_VERSION}</string>
     <key>CFBundlePackageType</key>      <string>APPL</string>
     <key>CFBundleSignature</key>        <string>????</string>
     <key>CFBundleExecutable</key>       <string>Gateway</string>

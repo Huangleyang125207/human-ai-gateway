@@ -89,7 +89,9 @@ def test_local_cutout_path_normalizes_cache(tmp_path, monkeypatch):
     """
     # 建一个假的 attachment 目录结构
     monkeypatch.setattr(server, "ATTACHMENTS_DIR", tmp_path / "attachments")
-    bucket = tmp_path / "attachments" / "test-bucket"
+    # 附件 resolver 的安全合同要求 bucket 是合法 YYYY-MM-DD；本测试只隔离
+    # cutout normalize 行为，不应靠非法路径绕过真实入口约束。
+    bucket = tmp_path / "attachments" / "2026-08-19"
     bucket.mkdir(parents=True)
     src = bucket / "ksm66.jpg"
     src.write_bytes(b"fake jpg content")  # 内容无关,只要 file exists
@@ -103,7 +105,7 @@ def test_local_cutout_path_normalizes_cache(tmp_path, monkeypatch):
     import cutout_local
     with patch.object(cutout_local, "cutout_local", return_value=fake_cutout_png):
         path, err = server._get_or_create_processed_attachment(
-            "/attachments/test-bucket/ksm66.jpg"
+            "/attachments/2026-08-19/ksm66.jpg"
         )
 
     assert err is None, f"unexpected err: {err}"

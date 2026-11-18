@@ -10,6 +10,7 @@
 #   - 用 UUID sentinel 防字符串污染假阳性
 #   - 加 strict < target boundary case(明天 vs 今天)
 
+import subprocess
 import sys
 import uuid
 from datetime import datetime
@@ -19,6 +20,21 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import pulse_eval  # noqa: E402
+
+
+def test_pulse_eval_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import pulse_eval; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=Path(__file__).resolve().parent.parent,
+        check=False,
+    )
+    assert result.returncode == 0
 
 
 @pytest.fixture
@@ -47,7 +63,7 @@ def test_past_boards_injected_into_user_payload(eval_log_with_history):
     """_eval_build_messages 的 user payload 必须含过去 5 天每条 sentinel"""
     log_dir, sentinels = eval_log_with_history
     target = datetime(2026, 6, 18)  # 今天
-    messages = server._eval_build_messages(target, model_id="test-model")
+    messages = pulse_eval._eval_build_messages(target, model_id="test-model")
 
     # 必须是 [system, user] 两条
     assert len(messages) == 2
@@ -69,7 +85,7 @@ def test_past_boards_excludes_target_day(eval_log_with_history):
         f"今天的 board: {today_sentinel}\n", encoding="utf-8")
 
     target = datetime(2026, 6, 18)
-    messages = server._eval_build_messages(target, model_id="test-model")
+    messages = pulse_eval._eval_build_messages(target, model_id="test-model")
     user_payload = messages[1]["content"]
     assert today_sentinel not in user_payload, \
         "past_boards 严格小于 target 那条契约被破 — target 当天不该出现"
@@ -92,14 +108,14 @@ def test_past_boards_strict_less_than_boundary(isolated_pulse_paths, monkeypatch
         monkeypatch.setattr(mod, "_eval_load_project_claude_md", lambda *a, **k: "(no claude md)", raising=False)
 
     # target=06-18 → 含 17,不含 18/19
-    msgs = server._eval_build_messages(datetime(2026, 6, 18))
+    msgs = pulse_eval._eval_build_messages(datetime(2026, 6, 18))
     p = msgs[1]["content"]
     assert sentinels["2026-06-17"] in p
     assert sentinels["2026-06-18"] not in p, "target 当天必排除(<)"
     assert sentinels["2026-06-19"] not in p, "未来日期当然排除"
 
     # target=06-19 → 含 17 + 18,不含 19
-    msgs = server._eval_build_messages(datetime(2026, 6, 19))
+    msgs = pulse_eval._eval_build_messages(datetime(2026, 6, 19))
     p = msgs[1]["content"]
     assert sentinels["2026-06-17"] in p
     assert sentinels["2026-06-18"] in p, "昨天必含"
@@ -117,7 +133,7 @@ def test_no_past_boards_returns_placeholder(isolated_pulse_paths, monkeypatch):
         monkeypatch.setattr(mod, "_eval_load_project_claude_md", lambda *a, **k: "(no claude md)", raising=False)
 
     target = datetime(2026, 6, 18)
-    messages = server._eval_build_messages(target)
+    messages = pulse_eval._eval_build_messages(target)
     user_payload = messages[1]["content"]
     # 占位字符串(在 _eval_load_past_boards 内定义)
     assert ("(target 之前没有历史 eval)" in user_payload or
@@ -127,7 +143,24 @@ def test_no_past_boards_returns_placeholder(isolated_pulse_paths, monkeypatch):
 def test_past_boards_section_header_present(eval_log_with_history):
     """user payload 里必须有 '过去 7 晚...留言板原文' 这个 section 标签 — LLM 靠它定位"""
     target = datetime(2026, 6, 18)
-    messages = server._eval_build_messages(target)
+    messages = pulse_eval._eval_build_messages(target)
     user_payload = messages[1]["content"]
     assert "过去 7 晚" in user_payload
     assert "留言板原文" in user_payload
+
+
+def test_eval_stable_instructions_precede_dynamic_time_hint(
+    isolated_pulse_paths, monkeypatch
+):
+    """DeepSeek prefix cache: large stable eval rules must come before per-call time."""
+    monkeypatch.setattr(pulse_eval, "_BUILD_SYSTEM_PROMPT", lambda *a, **k: "BASE-STABLE")
+    monkeypatch.setattr(pulse_eval, "_COMPUTE_TIME_HINT", lambda: "DYNAMIC-TIME")
+    monkeypatch.setattr(pulse_eval, "_FIND_JOURNAL", lambda *a, **k: None)
+    monkeypatch.setattr(pulse_eval, "_eval_load_recent_md", lambda *a, **k: "recent")
+    monkeypatch.setattr(pulse_eval, "_eval_load_pulse_all", lambda: "pulse")
+    monkeypatch.setattr(pulse_eval, "_eval_load_project_claude_md", lambda: "project")
+
+    system = pulse_eval._eval_build_messages(datetime(2026, 6, 18))[0]["content"]
+
+    assert system.startswith("BASE-STABLE")
+    assert system.index("[21:30 复盘时刻") < system.index("DYNAMIC-TIME")
