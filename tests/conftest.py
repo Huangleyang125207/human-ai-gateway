@@ -23,7 +23,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
-
+import pulse_io  # noqa: E402
 
 # ── LLM 假货:capture-spy 版 ─────────────────────────────────────────
 
@@ -91,6 +91,15 @@ def fake_chat():
 
 
 @pytest.fixture
+def isolated_home(monkeypatch, tmp_path):
+    """Make pathlib resolve a synthetic home on Unix and Windows."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    return home
+
+
+@pytest.fixture
 def isolated_pulse_paths(monkeypatch, tmp_path):
     """所有 PULSE 真源路径 + mirror 路径 + EVAL_LOG_DIR 都隔离到 tmp。
 
@@ -109,11 +118,11 @@ def isolated_pulse_paths(monkeypatch, tmp_path):
 
     # ① 关键:patch dict item — dict 是引用,跨模块共享,P2 后仍生效
     monkeypatch.setitem(
-        server._SELF_EVOLVE_TARGETS["user_pulse"], "path", lambda: user_p)
+        pulse_io._SELF_EVOLVE_TARGETS["user_pulse"], "path", lambda: user_p)
     monkeypatch.setitem(
-        server._SELF_EVOLVE_TARGETS["project_pulse"], "path", lambda: proj_p)
+        pulse_io._SELF_EVOLVE_TARGETS["project_pulse"], "path", lambda: proj_p)
     monkeypatch.setitem(
-        server._SELF_EVOLVE_TARGETS["agent_context"], "path", lambda: agent_p)
+        pulse_io._SELF_EVOLVE_TARGETS["agent_context"], "path", lambda: agent_p)
     # ② 兜底:module-level 常量(直接读这些的代码用,不经 lambda)
     # raising=False 防 P2 后 server.py 真把这些常量删了(本来期望 re-export 但万一漏)
     monkeypatch.setattr(server, "_USER_PULSE_PATH", user_p, raising=False)

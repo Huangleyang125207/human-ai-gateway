@@ -19,11 +19,12 @@ import base64
 import io
 import json
 import logging
-import re
 from pathlib import Path
 
 import requests
 
+from attachment_service import resolve_attachment_url
+from image_service_errors import ImageServiceError
 from ocr import _get_access_token  # 复用 token 缓存
 
 # B-#6: silent-failure sink, server.py 启动时注入
@@ -237,8 +238,8 @@ def baidu_cutout_image(file_path: Path | str, api_key: str, secret_key: str) -> 
 
 # ── dispatcher 层 ─ 从 server.py 抽出(行为零变化) ──────────────────
 # 上层 attachment URL → 缓存 → 端侧抠图链(macOS Subject Lift / rembg)→ 百度兜底 → 原图。
-# 跟 server.py 解耦:外部依赖(ATTACHMENTS_DIR/load_config)走函数体内 lazy import 避循环;
-# silent-failure 走本模块的 _emit_failure(server 启动时已注入 sink)。
+# 附件目录和配置读取通过窄参数注入；silent-failure 走本模块的
+# _emit_failure(server 启动时已注入 sink)。
 
 
 def _cutout_keys(cfg: dict) -> tuple:
@@ -250,20 +251,23 @@ def _cutout_keys(cfg: dict) -> tuple:
     return api, sec
 
 
-def _get_or_create_processed_attachment(attachment_url: str, cutout: bool = True):
+def _get_or_create_processed_attachment(
+    attachment_url: str,
+    cutout: bool = True,
+    *,
+    attachments_dir,
+    load_config,
+):
     """统一图像处理路径。
     cutout=True(默认): 端侧优先 — macOS Subject Lift / rembg → 百度兜底 → 原图
     cutout=False: 直接返原图路径(不抠)。
     抠图全失败时 silent fallback 原图,不抛错 — UX 不能因为抠图挂掉整个上传链路。
     返 (Path, None) 成功,(None, error_msg) 失败。
     """
-    from server import ATTACHMENTS_DIR, load_config
-    m = re.match(r"^/attachments/([^/]+)/([^/]+)$", (attachment_url or "").strip())
-    if not m:
-        return None, f"bad attachment_url: {attachment_url}"
-    src = ATTACHMENTS_DIR / m.group(1) / m.group(2)
-    if not src.exists():
-        return None, f"attachment not found: {attachment_url}"
+    try:
+        src = resolve_attachment_url(attachments_dir, attachment_url)
+    except ImageServiceError as exc:
+        return None, f"bad attachment_url: {attachment_url} ({exc.detail})"
     if not cutout:
         return src, None
 

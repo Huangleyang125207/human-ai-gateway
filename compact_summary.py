@@ -3,11 +3,7 @@
 从 server.py 抽出。endpoint(`/api/pulse/compact-summary`)留在 server.py,
 本模块只持有 prompt + 同步 LLM call 的 worker。
 
-依赖(函数体内 lazy import 避循环):
-  - server.get_profile          — 选 deepseek-v4-flash/pro
-  - server.get_client           — 拿 OpenAI 兼容 client
-  - server._report_silent_failure — 失败上报(workflow #23 闭合,不再裸 except)
-  - server.log                  — logger
+profile/client/report/logger 通过窄参数注入；server 保留兼容入口。
 """
 
 
@@ -24,19 +20,25 @@ _COMPACT_SUMMARY_PROMPT = """这是一段刚被压进 md 的对话。
 返一段散文,不带标题,不带 ``` 包裹。"""
 
 
-def compact_summary_run(conversation: str) -> str:
+def compact_summary_run(
+    conversation: str,
+    *,
+    get_profile,
+    get_client,
+    report_failure,
+    logger,
+) -> str:
     """同步 LLM call,给 to_thread 包。返摘要文本。
     workflow #23 闭合:失败接 silent-failure 通道,不再裸 except 让前端误以为 ok。
     """
-    from server import get_profile, get_client, _report_silent_failure, log
     profile = get_profile("deepseek-v4-flash") or get_profile("deepseek-v4-pro") or get_profile()
     if not profile:
-        _report_silent_failure("compact_summary_no_profile",
+        report_failure("compact_summary_no_profile",
                                "deepseek 模型未配置,summary 跳过")
         return ""
     client = get_client(profile)
     if client is None:
-        _report_silent_failure("compact_summary_no_client",
+        report_failure("compact_summary_no_client",
                                "deepseek client 起不来,summary 跳过")
         return ""
     prompt = _COMPACT_SUMMARY_PROMPT.format(conversation=conversation)
@@ -50,8 +52,8 @@ def compact_summary_run(conversation: str) -> str:
         )
         return (resp.choices[0].message.content or "").strip()
     except Exception as e:
-        log.warning(f"compact summary 失败: {e}")
-        _report_silent_failure("compact_summary_llm_call_failed",
+        logger.warning(f"compact summary 失败: {e}")
+        report_failure("compact_summary_llm_call_failed",
                                f"{type(e).__name__}: {e}",
                                {"conversation_chars": len(conversation)})
         return ""

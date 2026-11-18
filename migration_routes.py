@@ -6,8 +6,8 @@ _MigrationLLM 工厂、启动 hook _startup_v0125_md_migration、参考文件引
 legacy schema rewriter _run_schema_migration_if_needed + attempts 防狂拺。
 ★Cannot-break:横幅 replay→live→done(断了用户看到卡死横幅)+ schema 数据安全门(不动 vault 真源)。
 server helper(get_client/_safe_write_text/vault_git/_get_schema_version/_self_evolve_run/路径常量/
-_VAULT_REFERENCE_TARGETS<-lambda 闭包绑 server 全局故留 server)全留 server,本模块走 function-body
-lazy from server import。startup 三函数 re-export 回 server 供 startup hook 调。
+_VAULT_REFERENCE_TARGETS<-lambda 闭包绑 server 全局故留 server)由组装根以具名 provider
+注入。startup 三函数 re-export 回 server 供 startup hook 调。
 characterization:tests/test_migration_glue.py(10)。
 """
 from __future__ import annotations
@@ -22,6 +22,80 @@ from fastapi.responses import StreamingResponse
 
 router = APIRouter(tags=["migration"])
 
+_GET_CLIENT = None
+_GET_MODEL = None
+_GET_PROFILE = None
+_APP_VERSION = None
+_GATEWAY_DIR = None
+_VAULT_DIR = None
+_APP_STATE_DIR = None
+_LOGGER = None
+_REFERENCE_TARGETS = None
+_PUSH_NOTIFICATION = None
+_SAFE_WRITE_TEXT = None
+_VAULT_GIT = None
+_SCHEMA_MIGRATION_PROMPT = None
+_CLASSIFY_EVAL_ERR = None
+_ENSURE_SCHEMA_HEADER = None
+_GET_EVOLVE_LOCK = None
+_GET_SCHEMA_VERSION = None
+_MIGRATION_LLM_CALL = None
+_VALIDATE_MIGRATION_OUTPUT = None
+_DATE = None
+_REPORT_FAILURE = None
+
+
+def configure_effects(
+    *,
+    get_client,
+    get_model,
+    get_profile,
+    app_version,
+    gateway_dir,
+    vault_dir,
+    app_state_dir,
+    logger,
+    reference_targets,
+    push_notification,
+    safe_write_text,
+    vault_git,
+    schema_migration_prompt,
+    classify_eval_err,
+    ensure_schema_header,
+    get_evolve_lock,
+    get_schema_version,
+    migration_llm_call,
+    validate_migration_output,
+    date_provider,
+    report_failure,
+) -> None:
+    global _GET_CLIENT, _GET_MODEL, _GET_PROFILE, _APP_VERSION
+    global _GATEWAY_DIR, _VAULT_DIR, _APP_STATE_DIR, _LOGGER
+    global _REFERENCE_TARGETS, _PUSH_NOTIFICATION, _SAFE_WRITE_TEXT, _VAULT_GIT
+    global _SCHEMA_MIGRATION_PROMPT, _CLASSIFY_EVAL_ERR, _ENSURE_SCHEMA_HEADER
+    global _GET_EVOLVE_LOCK, _GET_SCHEMA_VERSION, _MIGRATION_LLM_CALL
+    global _VALIDATE_MIGRATION_OUTPUT, _DATE, _REPORT_FAILURE
+    _GET_CLIENT = get_client
+    _GET_MODEL = get_model
+    _GET_PROFILE = get_profile
+    _APP_VERSION = app_version
+    _GATEWAY_DIR = gateway_dir
+    _VAULT_DIR = vault_dir
+    _APP_STATE_DIR = app_state_dir
+    _LOGGER = logger
+    _REFERENCE_TARGETS = reference_targets
+    _PUSH_NOTIFICATION = push_notification
+    _SAFE_WRITE_TEXT = safe_write_text
+    _VAULT_GIT = vault_git
+    _SCHEMA_MIGRATION_PROMPT = schema_migration_prompt
+    _CLASSIFY_EVAL_ERR = classify_eval_err
+    _ENSURE_SCHEMA_HEADER = ensure_schema_header
+    _GET_EVOLVE_LOCK = get_evolve_lock
+    _GET_SCHEMA_VERSION = get_schema_version
+    _MIGRATION_LLM_CALL = migration_llm_call
+    _VALIDATE_MIGRATION_OUTPUT = validate_migration_output
+    _DATE = date_provider
+    _REPORT_FAILURE = report_failure
 _migration_log: list[dict] = []
 
 _migration_consumers: list[asyncio.Queue] = []
@@ -165,7 +239,6 @@ class _MigrationLLM:
         return json.loads(text)
 
     async def call_rewrite(self, plan_item: dict) -> str:
-        from server import GATEWAY_DIR
         user_file = Path(plan_item["user_file"])
         template_name = plan_item.get("target_template", "")
         try:
@@ -173,7 +246,7 @@ class _MigrationLLM:
         except Exception as e:
             raise RuntimeError(f"read user_file fail: {e}")
         # 找对应 template — 假设 bundle_dir/templates/<name>
-        template_path = GATEWAY_DIR / "templates" / template_name if template_name else None
+        template_path = _GATEWAY_DIR() / "templates" / template_name if template_name else None
         if template_path and template_path.exists():
             try:
                 template_text = template_path.read_text(encoding="utf-8")
@@ -203,18 +276,16 @@ class _MigrationLLM:
         return text.strip()
 
 def _create_migration_llm():
-    from server import get_client, get_model
     """工厂:有 key 时返 _MigrationLLM 实例,没有返 None。
     None 时 startup hook 跳过迁移,记一次 log 不告警。
     """
-    client = get_client()
+    client = _GET_CLIENT()
     if client is None:
         return None
-    model = get_model()
+    model = _GET_MODEL()
     return _MigrationLLM(client, model)
 
 async def _startup_v0125_md_migration():
-    from server import APP_VERSION, GATEWAY_DIR, VAULT_DIR, log
     """v0.1.25 起的 MD 迁移 startup hook。
 
     spawn 一个后台 task 跑 migration_plan.run_migration。
@@ -225,26 +296,26 @@ async def _startup_v0125_md_migration():
     try:
         import migration_plan  # 延迟 import 避免 server.py 模块加载顺序问题
     except Exception as e:
-        log.warning(f"migration_plan import fail: {e}")
+        _LOGGER().warning(f"migration_plan import fail: {e}")
         return
 
     llm = _create_migration_llm()
     if llm is None:
-        log.info("[v0.1.25 migration] LLM 没配置,跳过迁移")
+        _LOGGER().info("[v0.1.25 migration] LLM 没配置,跳过迁移")
         return
 
     state_dir = Path.home() / ".human-ai"
     try:
         await migration_plan.run_migration(
-            app_version=APP_VERSION,
-            bundle_dir=GATEWAY_DIR,
-            vault_dir=VAULT_DIR,
+            app_version=_APP_VERSION(),
+            bundle_dir=_GATEWAY_DIR(),
+            vault_dir=_VAULT_DIR(),
             state_dir=state_dir,
             llm_client=llm,
             progress_callback=push_migration_event,
         )
     except Exception as e:
-        log.warning(f"[v0.1.25 migration] 顶层异常: {e}")
+        _LOGGER().warning(f"[v0.1.25 migration] 顶层异常: {e}")
         # 兜底:推 migration_done(had_errors=True)让 SSE 客户端能收尾
         try:
             await push_migration_event({
@@ -259,22 +330,21 @@ async def _startup_v0125_md_migration():
             pass
 
 def _bundled_reference_dir() -> Path:
-    from server import GATEWAY_DIR
     """bundle 内 reference 目录;PyInstaller --add-data 进 GATEWAY_DIR/reference。"""
-    return GATEWAY_DIR / "reference"
+    return _GATEWAY_DIR() / "reference"
 
 def _ensure_vault_reference_files() -> dict:
-    from server import VAULT_DIR, _VAULT_REFERENCE_TARGETS, _push_notification, _safe_write_text, log, vault_git
     """startup 拷贝 reference 进 vault — 缺才补,已存在一字节不动(用户数据安全)。
     新拷的文件走 vault_git.commit_after_write(#17)留 audit chain。
     """
     bundle_dir = _bundled_reference_dir()
     if not bundle_dir.is_dir():
         return {"skipped": "bundle reference dir 不在"}
-    VAULT_DIR.mkdir(parents=True, exist_ok=True)
+    vault_dir = _VAULT_DIR()
+    vault_dir.mkdir(parents=True, exist_ok=True)
     result = {}
     newly_copied: list[Path] = []
-    for key, cfg in _VAULT_REFERENCE_TARGETS.items():
+    for key, cfg in _REFERENCE_TARGETS().items():
         dst = cfg["vault_path"]()
         if dst.exists():
             result[key] = "exists"
@@ -285,7 +355,7 @@ def _ensure_vault_reference_files() -> dict:
             continue
         try:
             # atomic write,防 startup 中途崩留半文件
-            _safe_write_text(dst, src.read_text(encoding="utf-8"), rotate=False)
+            _SAFE_WRITE_TEXT(dst, src.read_text(encoding="utf-8"), rotate=False)
             result[key] = f"copied to {dst}"
             newly_copied.append(dst)
         except Exception as e:
@@ -293,15 +363,15 @@ def _ensure_vault_reference_files() -> dict:
     # 批量 vault_git commit
     if newly_copied:
         try:
-            vault_git.commit_after_write(
-                VAULT_DIR,
+            _VAULT_GIT().commit_after_write(
+                vault_dir,
                 f"reference bootstrap: {', '.join(p.name for p in newly_copied)}",
                 author="system",
                 paths=newly_copied,
             )
         except Exception as e:
-            log.warning(f"vault_git commit reference 失败: {e}")
-        _push_notification(
+            _LOGGER().warning(f"vault_git commit reference 失败: {e}")
+        _PUSH_NOTIFICATION(
             "vault-reference-bootstrapped",
             f"vault 已落地 {len(newly_copied)} 份起点 reference",
             {"files": [p.name for p in newly_copied]},
@@ -311,11 +381,9 @@ def _ensure_vault_reference_files() -> dict:
 _MIGRATION_ATTEMPTS_CACHE: dict = {}
 
 def _migration_attempts_path() -> Path:
-    from server import APP_STATE_DIR
-    return APP_STATE_DIR / "data" / ".schema-migration-attempts.json"
+    return _APP_STATE_DIR() / "data" / ".schema-migration-attempts.json"
 
 def _read_migration_attempts() -> dict:
-    from server import log
     """优先读文件,失败退 module cache(防 disk 读错重置计数)。"""
     p = _migration_attempts_path()
     if p.exists():
@@ -327,11 +395,10 @@ def _read_migration_attempts() -> dict:
                     data[k] = v
             return data
         except Exception as e:
-            log.warning(f"read migration attempts 失败,退 cache: {e}")
+            _LOGGER().warning(f"read migration attempts 失败,退 cache: {e}")
     return dict(_MIGRATION_ATTEMPTS_CACHE)
 
 def _write_migration_attempts(data: dict) -> bool:
-    from server import _safe_write_text, log
     """返 bool:文件写成功 True,失败时把数据存进 module cache 仍返 False。
     下次 startup 重启会丢 cache,但同 process 内连续 startup hook 仍能 gate 住。
     """
@@ -340,14 +407,13 @@ def _write_migration_attempts(data: dict) -> bool:
     p = _migration_attempts_path()
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        _safe_write_text(p, json.dumps(data, indent=2, ensure_ascii=False))
+        _SAFE_WRITE_TEXT(p, json.dumps(data, indent=2, ensure_ascii=False))
         return True
     except Exception as e:
-        log.warning(f"write migration attempts 持久化失败,只在 module cache 中: {e}")
+        _LOGGER().warning(f"write migration attempts 持久化失败,只在 module cache 中: {e}")
         return False
 
 async def _run_schema_migration_if_needed():
-    from server import VAULT_DIR, _SCHEMA_MIGRATION_PROMPT, _VAULT_REFERENCE_TARGETS, _classify_eval_err, _ensure_schema_version_header, _get_evolve_lock, _get_schema_version, _migration_llm_call, _push_notification, _report_silent_failure, _safe_write_text, _validate_migration_output, date, get_client, get_profile, log, vault_git
     """async 后台跑:bundle schema-version > vault 时,**安全**升级 vault 文件。
 
     重设默认行为(#2 #6 数据安全铁律):
@@ -368,7 +434,8 @@ async def _run_schema_migration_if_needed():
 
     import hashlib
 
-    for key, cfg in _VAULT_REFERENCE_TARGETS.items():
+    vault_dir = _VAULT_DIR()
+    for key, cfg in _REFERENCE_TARGETS().items():
         if cfg["evolve_target"] is None:
             continue
         bundle_path = bundle_dir / cfg["bundled_name"]
@@ -380,8 +447,8 @@ async def _run_schema_migration_if_needed():
             vault_text = vault_path.read_text(encoding="utf-8")
         except Exception:
             continue
-        bundle_v = _get_schema_version(bundle_text)
-        vault_v = _get_schema_version(vault_text)
+        bundle_v = _GET_SCHEMA_VERSION(bundle_text)
+        vault_v = _GET_SCHEMA_VERSION(vault_text)
         if bundle_v <= vault_v:
             continue
 
@@ -399,29 +466,29 @@ async def _run_schema_migration_if_needed():
             # attempts gate 单独看 marker 子 key(R7):marker IO 失败不污染 LLM path 计数
             a_marker = attempts.get(marker_key, {})
             if a_marker.get("count", 0) >= 3 and (now_ts - a_marker.get("last_ts", 0) < 86400):
-                log.info(f"schema marker-only {key}: 24h 内已失败 3 次,跳过")
+                _LOGGER().info(f"schema marker-only {key}: 24h 内已失败 3 次,跳过")
                 continue
             try:
-                with _get_evolve_lock(evolve_target):
+                with _GET_EVOLVE_LOCK(evolve_target):
                     # 锁内重新 read,sha256 再比一次(R1)
                     vault_text_recheck = vault_path.read_text(encoding="utf-8")
                     if hashlib.sha256(vault_text_recheck.encode("utf-8")).hexdigest() != vault_hash:
-                        log.info(f"schema marker-only {key}: 锁内 vault 已变,改走 LLM path")
+                        _LOGGER().info(f"schema marker-only {key}: 锁内 vault 已变,改走 LLM path")
                         # 让下面的 LLM path 接手(继续走下去)
                     else:
-                        new_text = _ensure_schema_version_header(vault_text_recheck, bundle_v)
-                        _safe_write_text(vault_path, new_text, rotate=True)
+                        new_text = _ENSURE_SCHEMA_HEADER(vault_text_recheck, bundle_v)
+                        _SAFE_WRITE_TEXT(vault_path, new_text, rotate=True)
                         try:
-                            if vault_path.resolve().is_relative_to(VAULT_DIR.resolve()):
-                                vault_git.commit_after_write(
-                                    VAULT_DIR,
+                            if vault_path.resolve().is_relative_to(vault_dir.resolve()):
+                                _VAULT_GIT().commit_after_write(
+                                    vault_dir,
                                     f"schema bump {cfg['bundled_name']} v{vault_v}→v{bundle_v} (marker only)",
                                     author="system",
                                     paths=[vault_path],
                                 )
                         except Exception:
                             pass
-                        _push_notification(
+                        _PUSH_NOTIFICATION(
                             "vault-schema-bumped",
                             f"vault {cfg['bundled_name']} 内容跟新版完全一致,直接升级到 schema v{bundle_v}",
                             {"target": key, "old_version": vault_v, "new_version": bundle_v, "kind": "marker-only"},
@@ -431,7 +498,7 @@ async def _run_schema_migration_if_needed():
                         attempts_changed = True
                         continue
             except Exception as e:
-                log.warning(f"schema marker-only bump {key} 失败: {e}")
+                _LOGGER().warning(f"schema marker-only bump {key} 失败: {e}")
                 a_marker["count"] = a_marker.get("count", 0) + 1
                 a_marker["last_ts"] = now_ts
                 a_marker["last_err"] = f"marker-only: {type(e).__name__}: {e}"
@@ -448,53 +515,55 @@ async def _run_schema_migration_if_needed():
         # attempts gate 单独看 llm 子 key(R7)
         a_llm = attempts.get(llm_key, {})
         if a_llm.get("count", 0) >= 3 and (now_ts - a_llm.get("last_ts", 0) < 86400):
-            log.info(f"schema llm {key}: 24h 内已失败 3 次,跳过")
+            _LOGGER().info(f"schema llm {key}: 24h 内已失败 3 次,跳过")
             continue
 
-        migration_prompt = _SCHEMA_MIGRATION_PROMPT.format(
+        migration_prompt = _SCHEMA_MIGRATION_PROMPT().format(
             name=cfg["bundled_name"],
             old_version=vault_v,
             new_version=bundle_v,
             bundle_reference=bundle_text,
             vault_current=vault_text,
-            today=date.today().isoformat(),
+            today=_DATE().today().isoformat(),
         )
         try:
-            profile = get_profile("deepseek-v4-pro") or get_profile()
+            profile = _GET_PROFILE("deepseek-v4-pro") or _GET_PROFILE()
             if not profile:
                 raise Exception("deepseek 主模型未配置")
-            client = get_client(profile)
+            client = _GET_CLIENT(profile)
             if client is None:
                 raise Exception("deepseek client 起不来")
-            new_text = await asyncio.to_thread(_migration_llm_call, client, profile, migration_prompt)
-            ok_msg = _validate_migration_output(new_text, vault_text, bundle_v)
+            new_text = await asyncio.to_thread(
+                _MIGRATION_LLM_CALL, client, profile, migration_prompt
+            )
+            ok_msg = _VALIDATE_MIGRATION_OUTPUT(new_text, vault_text, bundle_v)
             if ok_msg:
                 raise Exception(ok_msg)
             # 直接覆盖 vault 真源 — rotate=True 保 5 份 .bak.{1..5} 兜底
-            with _get_evolve_lock(cfg["evolve_target"]):
+            with _GET_EVOLVE_LOCK(cfg["evolve_target"]):
                 # 锁内重读 sha256,user 在 LLM 跑期间手编了就跳过(防覆盖手编)
                 current = vault_path.read_text(encoding="utf-8")
                 import hashlib as _h_in
                 if _h_in.sha256(current.encode("utf-8")).hexdigest() != vault_hash:
-                    log.warning(f"schema migration {key}: 锁内 vault 已改,跳过本次 merge")
-                    _push_notification(
+                    _LOGGER().warning(f"schema migration {key}: 锁内 vault 已改,跳过本次 merge")
+                    _PUSH_NOTIFICATION(
                         "vault-schema-migration-skip-external-edit",
                         f"vault {cfg['bundled_name']} 升级期间被外部编辑,跳过 merge 保留你的手编(下次启动再试)",
                         {"target": key, "old_version": vault_v, "new_version": bundle_v},
                     )
                     continue
-                _safe_write_text(vault_path, new_text, rotate=True)
+                _SAFE_WRITE_TEXT(vault_path, new_text, rotate=True)
                 try:
-                    if vault_path.resolve().is_relative_to(VAULT_DIR.resolve()):
-                        vault_git.commit_after_write(
-                            VAULT_DIR,
+                    if vault_path.resolve().is_relative_to(vault_dir.resolve()):
+                        _VAULT_GIT().commit_after_write(
+                            vault_dir,
                             f"schema migrate {cfg['bundled_name']} v{vault_v}→v{bundle_v} (LLM auto-merge)",
                             author="ai",
                             paths=[vault_path],
                         )
                 except Exception:
                     pass
-            _push_notification(
+            _PUSH_NOTIFICATION(
                 "vault-schema-migrated",
                 f"vault {cfg['bundled_name']} 已自动升级到 schema v{bundle_v}(LLM 按新结构重组,5 份 bak 兜底)",
                 {"target": key, "old_version": vault_v, "new_version": bundle_v,
@@ -503,13 +572,13 @@ async def _run_schema_migration_if_needed():
             attempts.pop(llm_key, None)
             attempts_changed = True
         except Exception as e:
-            log.warning(f"schema migration {key} failed: {e}")
+            _LOGGER().warning(f"schema migration {key} failed: {e}")
             a_llm["count"] = a_llm.get("count", 0) + 1
             a_llm["last_ts"] = now_ts
             a_llm["last_err"] = f"{type(e).__name__}: {e}"
             attempts[llm_key] = a_llm
             attempts_changed = True
-            _push_notification(
+            _PUSH_NOTIFICATION(
                 "vault-schema-migration-failed",
                 f"vault {cfg['bundled_name']} 自动升级失败(已重试 {a_llm['count']} 次,真源未动)",
                 {"target": key, "error": str(e), "attempts": a_llm["count"]},
@@ -517,12 +586,12 @@ async def _run_schema_migration_if_needed():
             # B-#1: schema migration 是 startup hook,用户不可见;3 次失败 + 24h cooldown
             # 后 LLM migration channel 彻底停摆。失败必须进 silent-failure 通道,否则
             # 内测期 deepseek quota / 401 / timeout 这种根因丢失。
-            err_class = _classify_eval_err(e) if "_classify_eval_err" in globals() else "eval_call_failed"
+            err_class = _CLASSIFY_EVAL_ERR(e)
             err_type = err_class.replace("eval_call_", "schema_migration_").replace(
                 "eval_response_format_unsupported", "schema_migration_format_invalid"
             )
             try:
-                _report_silent_failure(
+                _REPORT_FAILURE(
                     err_type,
                     f"{type(e).__name__}: {str(e)[:120]}",
                     context={"attempt": a_llm["count"], "err_class": err_class,

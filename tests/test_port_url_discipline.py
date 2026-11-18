@@ -14,6 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import server  # noqa: E402
+import vision_tools  # noqa: E402
 
 
 # host[:port] 形如 http(s)://(localhost|127.0.0.1)[:NNNN]
@@ -25,7 +26,7 @@ ALLOW_PROD_HOST = re.compile(r'101\.42\.108\.30')
 
 def _grep_lines(path: Path, *, skip_comment_prefix=("#", "//", "/*", "*")):
     """yield (line_no, line) 不含注释行。"""
-    for i, line in enumerate(path.read_text().splitlines(), 1):
+    for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         s = line.lstrip()
         if any(s.startswith(p) for p in skip_comment_prefix):
             continue
@@ -38,6 +39,23 @@ def test_abs_local_url_regex_self_check():
     assert ABS_LOCAL_URL.search("http://localhost:4321/x")
     assert ABS_LOCAL_URL.search("https://127.0.0.1:18080")
     assert ABS_LOCAL_URL.search("http://localhost/api")  # 不带端口也算
+
+
+def test_system_routes_reject_non_http_and_set_no_cache():
+    from fastapi.testclient import TestClient
+
+    client = TestClient(server.app)
+    rejected = client.post(
+        "/api/open-external",
+        json={"url": "file:///etc/passwd"},
+    )
+    root = client.get("/")
+
+    assert rejected.status_code == 400
+    assert root.status_code == 200
+    assert root.headers["cache-control"] == (
+        "no-cache, no-store, must-revalidate"
+    )
     assert not ABS_LOCAL_URL.search("/attachments/2026/x.jpg")
     assert not ABS_LOCAL_URL.search("file:///tmp/x")
 
@@ -99,7 +117,7 @@ def test_tauri_stub_no_hardcoded_port():
     f = ROOT / "tauri-stub" / "index.html"
     if not f.exists():
         pytest.skip("tauri-stub 不在")
-    txt = f.read_text()
+    txt = f.read_text(encoding="utf-8")
     assert ":4321" not in txt, (
         "tauri-stub/index.html 提到 :4321 — 误导新用户;改成不带端口的中性提示"
     )
@@ -112,7 +130,7 @@ def test_upload_image_returns_relative_url():
     避免任何"为了 dev 方便加了 http://localhost:NNNN"的回归。
     """
     # upload-image 路由 6.24 抽到 chat_routes.py(@router.post);源码级断言跟去那
-    src = (ROOT / "chat_routes.py").read_text()
+    src = (ROOT / "chat_routes.py").read_text(encoding="utf-8")
     # 抓 upload-image 路由的整个函数体到下个 @router 装饰器(或文件尾)之前
     m = re.search(
         r'@router\.post\("/api/chat/upload-image"\).*?(?=@router\.|\Z)',
@@ -135,7 +153,7 @@ def test_curator_tool_description_forbids_absolute_url():
     """模型曾把相对 URL 自动补上 http://localhost:18080 — 这是 prompt discipline 的事。
     description 必须明令"原样照抄,不要加 host/port 前缀"。
     """
-    src = (ROOT / "tool_specs.py").read_text()  # TOOLS schema 6.25 抽到 tool_specs.py
+    src = (ROOT / "tool_specs.py").read_text(encoding="utf-8")  # TOOLS schema 6.25 抽到 tool_specs.py
     # 抓 ask_photo_curator 那个 tool 的 description 字段(可能跨多行字符串拼接)
     m = re.search(
         r'"name"\s*:\s*"ask_photo_curator"\s*,\s*\n\s*"description"\s*:\s*\((.+?)\)\s*,',
@@ -203,7 +221,7 @@ def test_curator_items_url_normalized_relative(monkeypatch, tmp_path):
     sys_file.write_text("profile placeholder")
     monkeypatch.setattr(server, "CURATOR_SYSTEM_PATH", sys_file)
 
-    out = server.tool_ask_photo_curator({"query": "找我家狗的照片"})
+    out = vision_tools.tool_ask_photo_curator({"query": "找我家狗的照片"})
     assert "items" in out, f"curator 返回缺 items 字段: {out}"
     assert out["items"], f"curator items 空: {out}"
     for it in out["items"]:

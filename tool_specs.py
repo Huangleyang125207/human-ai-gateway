@@ -2,33 +2,109 @@
 
 Extract Module(ctrl-c-v § 9):TOOLS schema 列表(纯数据 leaf,零依赖)从 server.py 抽出。
 server `from tool_specs import TOOLS` re-export;消费者 _active_tools(server)+ 名字映射 TOOL_IMPL/
-TOOL_GROUPS 留 server。characterization:tests/test_tool_specs.py。
+effect 由 action_policy.py 统一定义。characterization:tests/test_tool_specs.py。
 """
+_WIDGET_SPEC_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["schema_version", "id", "title", "slot", "data", "view"],
+    "properties": {
+        "schema_version": {"type": "string", "enum": ["1.0"]},
+        "id": {
+            "type": "string",
+            "description": "kebab-case stable widget id, max 64 chars",
+        },
+        "title": {"type": "string", "description": "user-facing title"},
+        "slot": {"type": "string", "enum": ["care"]},
+        "data": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["capability", "params"],
+            "properties": {
+                "capability": {
+                    "type": "string",
+                    "enum": [
+                        "daily_tasks.completion_summary",
+                        "memo.overview",
+                    ],
+                },
+                "params": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "days": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 30,
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 8,
+                        },
+                    },
+                },
+            },
+        },
+        "view": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["type"],
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": ["metric_sparkline", "memo_list"],
+                },
+                "metric": {
+                    "type": "object",
+                    "description": (
+                        'Use exactly {"path":"summary.rate",'
+                        '"format":"percent"}.'
+                    ),
+                },
+                "caption": {
+                    "type": "object",
+                    "description": 'Use exactly {"path":"summary.caption"}.',
+                },
+                "series": {
+                    "type": "object",
+                    "description": (
+                        'Use exactly {"path":"days","value":"rate"}.'
+                    ),
+                },
+                "items": {
+                    "type": "object",
+                    "description": 'For memo_list use exactly {"path":"items"}.',
+                },
+                "empty_text": {"type": "string"},
+                "add_label": {"type": "string"},
+            },
+        },
+    },
+}
+
+
 TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "list_widgets",
-            "description": "List all widget folders under gateway/widgets/ and which are currently active in .user-widgets.json.",
+            "description": "List the merged system and AI-authored widget inventory, including visibility, editability, source, and WidgetSpec revision when available.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
     {
         "type": "function",
         "function": {
-            "name": "add_widget",
-            "description": "Create a new widget under widgets/<name>/ + activate it in .user-widgets.json.",
+            "name": "set_widget_enabled",
+            "description": "Show or hide a system or AI-authored widget without changing its implementation.",
             "parameters": {
                 "type": "object",
-                "required": ["name", "title", "audience", "slot", "manifest_json", "widget_html", "widget_js"],
+                "additionalProperties": False,
+                "required": ["id", "enabled"],
                 "properties": {
-                    "name": {"type": "string", "description": "folder name, kebab-case"},
-                    "title": {"type": "string", "description": "user-facing title"},
-                    "audience": {"type": "string", "description": "who this widget is for"},
-                    "slot": {"type": "string", "enum": ["top-strip", "sidebar"], "description": "which slot it mounts to"},
-                    "manifest_json": {"type": "string", "description": "full JSON content for manifest.json"},
-                    "widget_html": {"type": "string", "description": "full HTML+inline style for widget.html"},
-                    "widget_js": {"type": "string", "description": "full JS for widget.js (use IIFE + window.gatewayToast for feedback)"},
+                    "id": {"type": "string", "description": "Widget id returned by list_widgets."},
+                    "enabled": {"type": "boolean"},
                 },
             },
         },
@@ -36,15 +112,223 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "patch_widget",
-            "description": "Modify an existing widget's manifest/HTML/JS in place.",
+            "name": "remove_widget",
+            "description": "Remove an AI-authored widget. System widgets cannot be removed; disable them instead.",
             "parameters": {
                 "type": "object",
-                "required": ["name", "file", "new_content"],
+                "additionalProperties": False,
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "AI-authored widget id."}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_widget_capabilities",
+            "description": (
+                "List the semantic, least-privilege data capabilities available "
+                "to WidgetSpec. Call this before designing a widget."
+            ),
+            "parameters": {
+                "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
-                    "file": {"type": "string", "enum": ["manifest.json", "widget.html", "widget.js"]},
-                    "new_content": {"type": "string", "description": "full new file content (replaces existing)"},
+                    "query": {
+                        "type": "string",
+                        "description": "optional capability name/description filter",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_widget_spec",
+            "description": (
+                "Validate a declarative WidgetSpec without installing it. "
+                "Generated HTML, JavaScript and unknown fields are rejected."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["spec"],
+                "properties": {"spec": _WIDGET_SPEC_SCHEMA},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "install_widget_spec",
+            "description": (
+                "Install a new or replace an existing AI-authored WidgetSpec after "
+                "validation. Replacing must keep the existing id and preserves its "
+                "enabled state. Only call when the user explicitly asked to add, "
+                "install, modify, adjust, or replace the widget. System widgets "
+                "cannot be replaced."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["spec"],
+                "properties": {"spec": _WIDGET_SPEC_SCHEMA},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_memos",
+            "description": (
+                "读取 AI 管理的当前备忘录 occurrence。逾期是即时推导状态；"
+                "不会创建或修改数据。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20,
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_memo",
+            "description": (
+                "根据用户自然语言或已确认的 OCR 文本创建备忘录。due_at 必须是"
+                "带时区的 ISO 时间；GUI 与 AI 共用此状态转换。"
+            ),
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["text", "due_at", "schedule"],
+                "properties": {
+                    "text": {"type": "string", "maxLength": 200},
+                    "due_at": {
+                        "type": "string",
+                        "description": "ISO 8601 datetime with timezone",
+                    },
+                    "schedule": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["kind"],
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "enum": [
+                                    "once", "daily", "weekdays",
+                                    "weekly", "monthly",
+                                ],
+                            },
+                            "weekdays": {
+                                "type": "array",
+                                "items": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 7,
+                                },
+                            },
+                        },
+                    },
+                    "notification_enabled": {"type": "boolean"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_memo",
+            "description": (
+                "修改一条待处理备忘录的内容、到期时间、频率和提醒开关。"
+                "GUI 与 AI 共用此状态转换；必须先用 list_memos 取得 IDs。"
+            ),
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "series_id", "occurrence_id", "text", "due_at", "schedule",
+                ],
+                "properties": {
+                    "series_id": {"type": "string"},
+                    "occurrence_id": {"type": "string"},
+                    "text": {"type": "string", "maxLength": 200},
+                    "due_at": {
+                        "type": "string",
+                        "description": "ISO 8601 datetime with timezone",
+                    },
+                    "schedule": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["kind"],
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "enum": [
+                                    "once", "daily", "weekdays",
+                                    "weekly", "monthly",
+                                ],
+                            },
+                            "weekdays": {
+                                "type": "array",
+                                "items": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 7,
+                                },
+                            },
+                        },
+                    },
+                    "notification_enabled": {"type": "boolean"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "act_on_memo",
+            "description": (
+                "完成、跳过或推迟一次备忘录 occurrence。完成会先写入日记，"
+                "成功后才更新 occurrence；周期任务随后生成下一次。"
+            ),
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["occurrence_id", "action"],
+                "properties": {
+                    "occurrence_id": {"type": "string"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["complete", "skip", "snooze"],
+                    },
+                    "snooze_until": {
+                        "type": "string",
+                        "description": "snooze 时必填，带时区 ISO 时间",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_memo_series",
+            "description": "暂停、恢复或归档一个备忘录系列；不会删除历史。",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["series_id", "action"],
+                "properties": {
+                    "series_id": {"type": "string"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["pause", "resume", "archive"],
+                    },
                 },
             },
         },
@@ -61,6 +345,7 @@ TOOLS = [
                     "time": {"type": "string", "description": "块时间,格式为 HH:MM(例如 14:30)。从提示信息中获取"},
                     "new_md": {"type": "string", "description": "时间块中 H1 之下的完整内容(包含标题和正文)。内容应包含结果和意义(发生了什么、为什么重要),不应包含冗长的过程描述。格式例:`## #标签 标题` 加上正文段落。"},
                     "allow_h2_rename": {"type": "boolean", "description": "当用户明确要求修改标题时设为 true,默认为 false 以防止意外覆盖"},
+                    "date": {"type": "string", "description": "日期,格式为 YYYY-MM-DD。如果不提供,默认为今天"},
                 },
             },
         },
@@ -95,7 +380,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "insert_journal_block",
-            "description": "向时间块添加新条目(需同时提供标题和正文)。新条目会追加到现有内容之后(不会覆盖)。AI 调用此工具时会自动添加 @ai 标记。",
+            "description": "向时间块添加新条目(正文必填，标题可选)。新条目会追加到现有内容之后(不会覆盖)。AI 调用此工具时会自动添加 @ai 标记。",
             "parameters": {
                 "type": "object",
                 "required": ["tag", "body"],
@@ -143,12 +428,12 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "set_daily_task_image",
-            "description": "为日常任务设置打卡图标(系统会自动去除背景)。注意:task_name 必须精确匹配 markdown 文件顶部的任务列表项。",
+            "description": "为日常任务设置打卡图标(系统会自动去除背景)。task_name 支持唯一的模糊匹配；有多个候选时先读取任务列表确认。",
             "parameters": {
                 "type": "object",
                 "required": ["task_name", "attachment_url"],
                 "properties": {
-                    "task_name": {"type": "string", "description": "任务名称,必须精确匹配 markdown 文件中的任务项(包括中文括号等)。例如:'维生素'"},
+                    "task_name": {"type": "string", "description": "任务名称或可唯一定位它的子串。例如:'维生素'"},
                     "attachment_url": {"type": "string", "description": "图片的存储路径,格式为 /attachments/YYYY-MM-DD/xxx"},
                 },
             },
@@ -174,12 +459,12 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "check_daily_task",
-            "description": "标记任务为完成(打卡)。注意:task_name 必须精确匹配,包括空格和中文括号等。",
+            "description": "标记任务为完成(打卡)。task_name 支持唯一的模糊匹配；有多个候选时先读取任务列表确认。",
             "parameters": {
                 "type": "object",
                 "required": ["task_name", "checked"],
                 "properties": {
-                    "task_name": {"type": "string", "description": "完整的任务名称,例如:'维生素'"},
+                    "task_name": {"type": "string", "description": "任务名称或可唯一定位它的子串,例如:'维生素'"},
                     "checked": {"type": "boolean", "description": "true 表示标记为已完成,false 表示标记为未完成"},
                 },
             },
@@ -208,8 +493,29 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "record_image_observation",
+            "description": "当本轮用户消息包含图片且你已经直接看见图片内容时调用。每张新图调用一次，把内容描述写入可检索附件索引；这不是日记写入，也不会修改图片。不得臆测看不见的历史图片。",
+            "parameters": {
+                "type": "object",
+                "required": ["attachment_url", "kind", "description"],
+                "properties": {
+                    "attachment_url": {"type": "string", "description": "本轮 context 中的图片路径(/attachments/YYYY-MM-DD/xxx)"},
+                    "kind": {"type": "string", "description": "简短内容分类，如 photo、exercise、food、supplement、document"},
+                    "description": {"type": "string", "description": "适合日后检索的客观中文描述"},
+                    "brand": {"type": "string", "description": "明确可见的品牌；不确定则省略"},
+                    "pill_count": {"type": "integer", "description": "明确可见的药片/胶囊数量；不适用则省略"},
+                    "ocr_likely": {"type": "boolean", "description": "图片是否包含值得读取的文字"},
+                    "ocr_text": {"type": "string", "description": "直接看清的关键文字；只记录确定内容"},
+                    "suggested_action": {"type": "string", "description": "可选的后续用途短语"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "vision_classify",
-            "description": "对图片运行结构化视觉分类,返回分类结果(类型、品牌、描述、颗粒数、文字识别概率等)。注意:通常无需主动调用本工具 — 服务器在用户上传时已自动分类并缓存,分类提示会在对话中注入。仅在需要重新分类或回退处理的特殊情况下使用。",
+            "description": "兼容性视觉重分类工具。主对话模型已可直接看本轮图片，通常应调用 record_image_observation 写入索引；只有需要对历史附件重新识别或回答额外视觉问题时才调用本工具。",
             "parameters": {
                 "type": "object",
                 "required": ["attachment_url"],
@@ -278,14 +584,32 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "search_journal",
-            "description": "全文搜索用户的日记库中所有 markdown 文件(包括日间日记、标签聚合、PULSE 进度、知识库和其他文档),不区分大小写。多个关键词用空格分隔表示逻辑与(全部要命中)。返回搜索结果包括文件名、所在行号、前后各 2 行的上下文,按文件修改时间倒序排列。",
+            "name": "search_text",
+            "description": "像 grep 一样直接搜索当前知识库中的 Markdown 文本；无索引、无缓存。query 按字面量匹配，返回文件、行号和附近上下文。",
             "parameters": {
                 "type": "object",
                 "required": ["query"],
                 "properties": {
-                    "query": {"type": "string", "description": "搜索关键词,支持中英文。多个关键词用空格分隔,表示全部关键词都要在搜索结果中出现(逻辑与)。"},
-                    "limit": {"type": "integer", "description": "最多返回多少条结果,默认值为 20"},
+                    "query": {"type": "string", "description": "要查找的原始文本；按字面量而不是正则表达式匹配"},
+                    "case_sensitive": {"type": "boolean", "description": "是否区分大小写，默认 false"},
+                    "context_lines": {"type": "integer", "description": "命中行前后各返回几行，默认 2，范围 0-5"},
+                    "limit": {"type": "integer", "description": "最多返回多少条结果，默认 20，范围 1-100"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_text",
+            "description": "读取 search_text 返回的 Markdown 文件，可按行分页。只能读取知识库内可见的 .md 文件。",
+            "parameters": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                    "file": {"type": "string", "description": "search_text 返回的相对文件路径"},
+                    "start_line": {"type": "integer", "description": "从第几行开始，1 起算，默认 1"},
+                    "line_count": {"type": "integer", "description": "最多读取多少行，默认 80，范围 1-200"},
                 },
             },
         },
@@ -360,6 +684,31 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "search_skills",
+            "description": "Search available Gateway Skills by workflow, description, or tool name. Returns metadata only; call load_skill for the selected workflow.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"query": {"type": "string", "description": "Optional workflow or tool search text."}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "load_skill",
+            "description": "Load one Gateway Skill's workflow and explicit live references. This guides work but does not grant mutation permission.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name"],
+                "properties": {"name": {"type": "string", "description": "Exact Skill name returned by search_skills."}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "load_protocol",
             "description": "加载特定协议的详细规则文档(目前支持 'schedule' 协议)。建议在编辑日记条目前调用一次以了解规则,普通对话中通常不需要调用。",
             "parameters": {
@@ -374,19 +723,78 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "load_tool_group",
-            "description": "按需加载一组相关工具。初始启动时仅加载读取和元数据工具。在执行以下操作前需加载对应的工具组:编辑日记时加载 write_journal,处理图片时加载 images,修改 widget 或任务配置时加载 widgets_and_tasks。单次会话中只需加载一次。",
+            "name": "read_skill_resource",
+            "description": "Read one declared Skill reference in bounded chunks. Continue with next_cursor until eof=true; loading a resource does not authorize side effects.",
             "parameters": {
                 "type": "object",
-                "required": ["group_name"],
+                "additionalProperties": False,
+                "required": ["name", "path"],
                 "properties": {
-                    "group_name": {
-                        "type": "string",
-                        "enum": ["write_journal", "images", "widgets_and_tasks"],
-                        "description": "工具组选项:\n- write_journal:用于编辑日记块和管理日常任务的勾选\n- images:用于上传图片、删除图片和为任务设置配图\n- widgets_and_tasks:用于创建、删除、修改 widget 以及更改任务配置和名称",
-                    },
+                    "name": {"type": "string", "description": "Exact loaded Skill name."},
+                    "path": {"type": "string", "description": "Exact reference path returned by load_skill."},
+                    "cursor": {"type": "integer", "minimum": 0, "description": "Start offset; use the previous next_cursor."},
+                    "limit": {"type": "integer", "minimum": 256, "maximum": 3500, "description": "Maximum characters for this chunk; default 3000."},
                 },
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_tag_aggregate",
+            "description": "List registered aggregate tags, register a parent tag and immediately backfill it, or refresh all aggregate rows from journal Markdown.",
+            "parameters": {"type": "object", "additionalProperties": False, "required": ["action"], "properties": {
+                "action": {"type": "string", "enum": ["list", "register", "refresh"]},
+                "tag": {"type": "string"}, "description": {"type": "string"}, "with_sub": {"type": "boolean"},
+            }},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_daily_care_state",
+            "description": "Read one day's care checklist, water progress, inventory metadata, and recent per-task completion history.",
+            "parameters": {"type": "object", "additionalProperties": False, "properties": {
+                "date": {"type": "string", "description": "YYYY-MM-DD; default today."},
+                "history_days": {"type": "integer", "minimum": 1, "maximum": 30},
+            }},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_scrapbook",
+            "description": "List, update, or explicitly remove a scrapbook sticker without changing its source attachment.",
+            "parameters": {"type": "object", "additionalProperties": False, "required": ["action", "date"], "properties": {
+                "action": {"type": "string", "enum": ["list", "update", "remove"]},
+                "date": {"type": "string"}, "id": {"type": "string"},
+                "patch": {"type": "object", "additionalProperties": False, "properties": {
+                    "anchor_time": {"type": "string"}, "x_pct": {"type": "number"}, "y_px": {"type": "number"},
+                    "size_pct": {"type": "number"}, "rotation": {"type": "number"}, "z": {"type": "number"},
+                }},
+            }},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_journal_entry",
+            "description": "Delete exactly one H2 entry from a time block while preserving sibling entries. Requires explicit user deletion intent.",
+            "parameters": {"type": "object", "additionalProperties": False, "required": ["time", "entry_index"], "properties": {
+                "date": {"type": "string"}, "time": {"type": "string"},
+                "entry_index": {"type": "integer", "minimum": 0},
+            }},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_mood",
+            "description": "Read, set, or clear the dated mood value shared with the mood GUI.",
+            "parameters": {"type": "object", "additionalProperties": False, "required": ["action"], "properties": {
+                "action": {"type": "string", "enum": ["get", "set", "clear"]},
+                "date": {"type": "string"}, "value": {"type": "string", "maxLength": 32},
+            }},
         },
     },
 ]

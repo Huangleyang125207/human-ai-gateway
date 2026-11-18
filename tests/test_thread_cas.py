@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+from thread_cas import _thread_history_mtime_ms as _thread_history_mtime_ms_for_path  # noqa: E402
 
 
 # ─── T1 boundary · base_mtime None(旧 client 没回传)→ 放行 ───────────
@@ -56,6 +57,14 @@ def test_garbage_base_not_stale():
 def test_string_int_base_compares():
     assert server._thread_save_is_stale("222", 222) is False   # 相等
     assert server._thread_save_is_stale("111", 222) is True    # 不等 → 拒
+
+
+def test_mtime_helper_accepts_explicit_path(tmp_path):
+    """窄接口契约：leaf 只接收 path，不反向查询 server composition root。"""
+    f = tmp_path / "thread-history.json"
+    assert _thread_history_mtime_ms_for_path(f) == 0
+    f.write_text("[]", encoding="utf-8")
+    assert _thread_history_mtime_ms_for_path(f) > 0
 
 
 # ─── T7 effect · stale save 走 endpoint 不动文件 ─────────────────────
@@ -109,4 +118,4 @@ def test_fresh_save_writes(tmp_path, monkeypatch):
     assert r.status_code == 200
     assert r.json()["count"] == 2
     after = json.loads(f.read_text(encoding="utf-8"))
-    assert after == new_hist
+    assert after == {"v": 2, "history": new_hist, "compact": None}

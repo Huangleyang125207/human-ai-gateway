@@ -90,6 +90,9 @@
       try { localStorage.removeItem(LS_PREFIX + todayKey()); } catch {}
     }
 
+    // ★ 7.10 审计 M9:切日竞态守卫。多次 await 回来后,用户可能已切到别的日(_viewDate 变了)
+    //   → 本次 dateISO 的 tasks/water 不得盖当前显示日。轮询(POLL_MS)也走这条路径,一并防。
+    if (_viewDate !== dateISO) return;
     care.classList.toggle("care-readonly", !_viewWritable);
     const state = { cups: intakeFromMd, readonly: !_viewWritable };
     render(care, state);
@@ -215,7 +218,7 @@
         window.gateway.thread?.addRef({
           kind: "想追个",
           label: "新追踪 · ?",
-          payload: "用户想加一个新的日常追踪 widget。可能是: 咖啡 / 阅读页数 / 步数 / 心情 / 冥想 / 创业指标 / 客户对话频度 / ... 你应该问她想追什么，然后用 add_widget 工具给她做一个，挂在 sidebar slot。",
+          payload: "用户想加一个新的日常追踪 widget。先问清想追什么；再用 search_widget_capabilities 选择可用数据源，生成 WidgetSpec 并 validate_widget_spec。展示预期后，只有用户明确同意安装才调用 install_widget_spec。禁止生成 HTML/JavaScript。",
         });
         window.gateway.thread?.open();
         // prefilled hint

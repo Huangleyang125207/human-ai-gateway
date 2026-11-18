@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gateway.local/contracts/widget-spec.v1.schema.json",
+  "title": "Gateway WidgetSpec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "title", "slot", "data", "view"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "maxLength": 64
+    },
+    "title": {"type": "string", "minLength": 1, "maxLength": 40},
+    "slot": {"const": "care"},
+    "data": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["capability", "params"],
+          "properties": {
+            "capability": {"const": "daily_tasks.completion_summary"},
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["days"],
+              "properties": {
+                "days": {"type": "integer", "minimum": 1, "maximum": 30}
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["capability", "params"],
+          "properties": {
+            "capability": {"const": "memo.overview"},
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["limit"],
+              "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 8}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "view": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "metric", "caption", "series"],
+          "properties": {
+            "type": {"const": "metric_sparkline"},
+            "metric": {
+              "const": {"path": "summary.rate", "format": "percent"}
+            },
+            "caption": {"const": {"path": "summary.caption"}},
+            "series": {"const": {"path": "days", "value": "rate"}}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type", "items", "caption", "empty_text", "add_label"
+          ],
+          "properties": {
+            "type": {"const": "memo_list"},
+            "items": {"const": {"path": "items"}},
+            "caption": {"const": {"path": "caption"}},
+            "empty_text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "add_label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20
+            }
+          }
+        }
+      ]
+    }
+  }
+}

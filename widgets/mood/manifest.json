@@ -4,17 +4,14 @@
   "description": "5 档心情 enum + 颜色映射。每日选一档，频度成 9 日色带。",
   "audience": "想跟踪情绪节律的人（默认不装）",
   "category": "diary-core",
-  "status": "wip",
+  "status": "ready",
   "default_loaded": false,
   "slot": "sidebar",
   "script": true,
   "data_source": {
-    "type": "frontmatter",
-    "field": "mood",
+    "type": "app-state",
+    "field": "mood/<date>",
     "values": ["糟", "差", "平", "好", "棒"]
   },
-  "writeback": {
-    "v0.3": "demo-only (toast)",
-    "v0.5_planned": "POST /api/frontmatter → patch md frontmatter"
-  }
+  "writeback": {"api": "POST /api/mood", "shared_with_ai_tool": "manage_mood"}
 }

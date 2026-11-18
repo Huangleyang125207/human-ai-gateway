@@ -568,6 +568,10 @@ strong {
   background: var(--paper-slip);
   position: relative;
 }
+/* 抠图的贴纸:主体已是透明 PNG → 去拍立得相框三件套(阴影 + 白边 + 相纸底),干净浮在纸上。
+   原图(cutout===false)不加 .cut,保留相框。box-shadow 是用户说的"一圈阴影";border+bg 一并去 —
+   否则透明区被白边/纸色矩形填充,比不改更糟。旋转保留(贴纸手感)。 */
+.sticker.cut { box-shadow: none; border: 0; background: transparent; }
 .sticker img, .sticker .sticker-ph { display: block; width: 100%; }
 .sticker .sticker-ph {
   aspect-ratio: 4 / 3;

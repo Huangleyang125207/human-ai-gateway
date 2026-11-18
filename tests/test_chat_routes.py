@@ -4,11 +4,12 @@
 # TESTED IN: gateway chat_routes extraction (2026-06-24), § T7 characterization
 #
 # § T7 GREEN-LOCK:monolith 上先全绿,chat_routes.py 抽出后 STAY GREEN。
-# 关键手法:_stream_final_reply / _chat_stream_generator 收 client/messages/loaded_groups/quota
+# 关键手法:_stream_final_reply / _chat_stream_generator 收 client/messages/action_context/quota
 # 当参数 → 可*直接*喂 fake streaming client 驱动,不需起 app。SSE = "data: {json}\n\n"。
 # ★ = cannot-break(非协商)。配合现有 test_claim_audit.py + test_attachment_dedup.py(re-export tripwire)。
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +19,21 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
 import chat_routes as cr  # noqa: E402  — moved 后这些符号住 chat_routes(patch-where-used)
+
+
+def test_chat_routes_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import chat_routes; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=Path(__file__).resolve().parent.parent,
+        check=False,
+    )
+    assert result.returncode == 0
+
 
 # U+FF5C 全角竖线 —— DSML 命名空间的字节,正则脆弱点,测试必须用真字节
 BAR = "｜"
@@ -38,9 +54,11 @@ class _StreamClient:
         self.rounds = list(rounds)
         self.raise_on = raise_on  # 第 N 次 create 抛异常
         self._i = 0
+        self.calls = []
         self.chat = SimpleNamespace(completions=self)
 
     def create(self, **kw):
+        self.calls.append(kw)
         i = self._i
         self._i += 1
         if self.raise_on is not None and i == self.raise_on:
@@ -118,6 +136,71 @@ def test_stream_reasoning_content_threaded_to_done():
     assert ev[-1].get("reasoning_content") == "思考中"
 
 
+def test_stream_requests_explicit_thinking_high_without_logging_cot(monkeypatch):
+    logs = []
+    monkeypatch.setattr(cr, "_LOGGER", lambda: SimpleNamespace(
+        info=lambda message, *args: logs.append(message % args if args else message)
+    ))
+    client = _StreamClient([[("回复", "PRIVATE-COT")]])
+
+    _events(cr._stream_final_reply(client, "deepseek-v4-flash", [], set(), {}, []))
+
+    assert client.calls[0]["reasoning_effort"] == "high"
+    assert client.calls[0]["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert any("received=true" in row and "chars=11" in row for row in logs)
+    assert all("PRIVATE-COT" not in row for row in logs)
+
+
+def test_current_image_is_materialized_only_in_wire_message(tmp_path, monkeypatch):
+    root = tmp_path / "attachments"
+    day = root / "2026-08-23"
+    day.mkdir(parents=True)
+    (day / "run.jpg").write_bytes(b"image")
+    monkeypatch.setattr(cr, "_ATTACHMENTS_DIR", lambda: root)
+    monkeypatch.setattr(cr, "_IMAGE_DATA_URL", lambda path: "data:image/jpeg;base64,TRANSIENT")
+    text = "stable model content"
+
+    content = cr._multimodal_user_content(text, [{
+        "kind": "image", "payload": {"url": "/attachments/2026-08-23/run.jpg"},
+    }])
+
+    assert content[0] == {"type": "text", "text": text}
+    assert content[1]["image_url"]["url"].endswith("TRANSIENT")
+    assert "base64" not in text
+
+
+def test_thinking_private_parameters_are_not_sent_to_other_providers():
+    assert cr._thinking_request_kwargs("some-openai-compatible-model") == {}
+
+
+def test_stream_keeps_usage_and_exact_model_messages(monkeypatch):
+    seen = []
+    monkeypatch.setattr(cr, "_LOG_CACHE_USAGE", lambda obj, source: seen.append((obj.usage, source)))
+    usage = SimpleNamespace(prompt_cache_hit_tokens=7296, prompt_cache_miss_tokens=136)
+    client = _StreamClient([["完成"]])
+    original_create = client.create
+    def create(**kw):
+        chunks = list(original_create(**kw))
+        chunks.append(SimpleNamespace(choices=[], usage=usage))
+        return iter(chunks)
+    client.create = create
+
+    ev = _events(cr._stream_final_reply(client, "m", [], set(), {}, []))
+    assert client.calls[0]["stream_options"] == {"include_usage": True}
+    assert seen == [(usage, "chat/stream-final")]
+    assert ev[-1]["model_messages"] == [{"role": "assistant", "content": "完成"}]
+
+
+def test_stream_generator_discloses_canonical_user_content_first():
+    gen = cr._chat_stream_generator(
+        _StreamClient([["完成"]]), "m", [{"role": "user", "content": "EXACT"}], set(), {},
+        model_content="EXACT",
+    )
+    first = _events(iter([next(gen)]))[0]
+    gen.close()
+    assert first == {"type": "request_meta", "model_content": "EXACT"}
+
+
 def test_stream_llm_error_emits_error_event_no_done(monkeypatch):
     rung = []
     monkeypatch.setattr(server, "_report_silent_failure",
@@ -139,29 +222,23 @@ def test_stream_claim_disclaimer_when_claim_and_no_actions():
 
 def test_claim_audit_helper_and_stream_share_disclaimer():
     # helper 版:claim + 空 actions → 加;有 action → 不加
-    assert server._audit_unauthorized_claim("已写入了", []).endswith(cr._CLAIM_DISCLAIMER)
-    assert server._audit_unauthorized_claim("已写入了", [{"name": "x"}]) == "已写入了"
-    assert server._audit_unauthorized_claim("普通回复", []) == "普通回复"
+    assert cr._audit_unauthorized_claim("已写入了", []).endswith(cr._CLAIM_DISCLAIMER)
+    assert cr._audit_unauthorized_claim("已写入了", [{"name": "x"}]) == "已写入了"
+    assert cr._audit_unauthorized_claim("普通回复", []) == "普通回复"
 
 
-# ══ ★ 可变状态 identity:loaded_groups 跨 round 同一对象 ═══════════════
+# ══ ★ 不可变 ActionPolicy context 跨 round 共享 ═══════════════
 
-def test_mutable_state_loaded_groups_threads_by_identity(monkeypatch):
-    """_chat_stream_generator 用传入的 SAME loaded_groups;load_tool_group 真改它,
-    下一轮 _active_tools 看得见。复制 = load 静默 no-op(AI 写不了日记)。"""
+def test_action_context_threads_by_identity(monkeypatch):
+    """每轮 dispatch 都拿同一份宿主授权上下文，tool result 不能扩大它。"""
     monkeypatch.setattr(server, "_log_cache_usage", lambda *a, **k: None)
     seen_ids = []
-    real_dispatch = server._dispatch_tool
-
-    def spy_dispatch(fn, args, lg, qu):
-        seen_ids.append(id(lg))
-        if fn == "load_tool_group":
-            lg.add(args.get("name"))      # 模拟 load_tool_group in-place mutate
-            return {"ok": True, "loaded": args.get("name")}
+    def spy_dispatch(fn, args, action_context, qu):
+        seen_ids.append(id(action_context))
         return {"ok": True}
     monkeypatch.setattr(server, "_dispatch_tool", spy_dispatch)
 
-    # round0: 非流,model 调 load_tool_group;round1: 非流,无 tool → 进 _stream_final_reply;stream: 文本
+    # round0: 非流工具;round1: 无 tool → 进 _stream_final_reply;stream: 文本
     def _tc(name, args):
         return SimpleNamespace(id="c1", type="function",
                                function=SimpleNamespace(name=name, arguments=json.dumps(args)))
@@ -180,13 +257,13 @@ def test_mutable_state_loaded_groups_threads_by_identity(monkeypatch):
             if kw.get("stream"):
                 return iter([_chunk(content="完成")])
             if i == 0:
-                return SimpleNamespace(choices=[SimpleNamespace(message=_NS("", [_tc("load_tool_group", {"name": "write_journal"})]))])
+                return SimpleNamespace(choices=[SimpleNamespace(message=_NS("", [_tc("read_today_schedule", {})]))])
             return SimpleNamespace(choices=[SimpleNamespace(message=_NS("", None))])
 
-    my_groups = set()
-    ev = _events(cr._chat_stream_generator(_Mixed(), "m", [{"role": "user", "content": "记一下"}], my_groups, {}))
-    assert "write_journal" in my_groups                 # 传入的同一 set 被真改了
-    assert len(set(seen_ids)) == 1                       # 每轮 dispatch 拿的都是同一个 id
+    action_context = {"origin": "user", "user_text": "看看今天"}
+    ev = _events(cr._chat_stream_generator(_Mixed(), "m", [{"role": "user", "content": "看看今天"}], action_context, {}))
+    assert action_context == {"origin": "user", "user_text": "看看今天"}
+    assert len(set(seen_ids)) == 1
     assert ev[-1]["type"] == "done"
 
 
@@ -249,7 +326,7 @@ def chat_client(monkeypatch):
     monkeypatch.setattr(server, "get_profile", lambda *a, **k: {"model": "m"})
     monkeypatch.setattr(server, "get_model", lambda *a, **k: "m")
     monkeypatch.setattr(server, "build_system_prompt", lambda *a, **k: "SYS")
-    monkeypatch.setattr(server, "_initial_groups", lambda *a, **k: set())
+    monkeypatch.setattr(server, "build_action_context", lambda *a, **k: {"user_text": ""})
     monkeypatch.setattr(server, "_active_tools", lambda lg: [])
     monkeypatch.setattr(server, "_log_cache_usage", lambda *a, **k: None)
     from fastapi.testclient import TestClient
@@ -277,3 +354,114 @@ def test_chat_nonstream_plain_text_reply(chat_client, monkeypatch):
     d = chat_client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}], "stream": False}).json()
     assert d["reply"] == "你好"          # <think> 剥掉
     assert d["actions"] == []
+
+
+def test_canonical_history_bypasses_legacy_rewriters(chat_client, monkeypatch):
+    captured = []
+    monkeypatch.setattr(cr, "_STRIP_OCR_HISTORY", lambda content: "MUTATED:" + content)
+    msg = SimpleNamespace(content="ok", tool_calls=None, reasoning_content=None)
+    msg.model_dump = lambda exclude_none=True: {"content": "ok", "role": "assistant"}
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+        create=lambda **kw: captured.append(kw) or SimpleNamespace(choices=[SimpleNamespace(message=msg)]))))
+    monkeypatch.setattr(server, "get_client", lambda *a, **k: client)
+
+    chat_client.post("/api/chat", json={
+        "message": "next", "stream": False,
+        "history": [
+            {"role": "user", "content": "EXACT-USER", "_canonical": True},
+            {"role": "assistant", "content": "EXACT-ASST", "reasoning_content": "R", "_canonical": True},
+        ],
+    })
+    sent = captured[0]["messages"]
+    assert sent[1] == {"role": "user", "content": "EXACT-USER"}
+    assert sent[2] == {"role": "assistant", "content": "EXACT-ASST", "reasoning_content": "R"}
+
+
+def test_v4_drops_legacy_tool_protocol_without_reasoning_content(chat_client, monkeypatch):
+    captured = []
+    monkeypatch.setattr(server, "get_model", lambda *a, **k: "deepseek-v4-flash")
+    msg = SimpleNamespace(content="ok", tool_calls=None, reasoning_content="safe")
+    msg.model_dump = lambda exclude_none=True: {
+        "content": "ok", "role": "assistant", "reasoning_content": "safe"
+    }
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+        create=lambda **kw: captured.append(kw) or SimpleNamespace(choices=[SimpleNamespace(message=msg)]))))
+    monkeypatch.setattr(server, "get_client", lambda *a, **k: client)
+
+    chat_client.post("/api/chat", json={
+        "message": "next", "stream": False,
+        "history": [
+            {"role": "assistant", "content": "legacy", "tool_calls": [{
+                "id": "old", "type": "function",
+                "function": {"name": "insert_journal_block", "arguments": "{}"},
+            }]},
+            {"role": "tool", "tool_call_id": "old", "content": "{\"ok\":true}"},
+        ],
+    })
+
+    sent = captured[0]["messages"]
+    assert not any(m.get("role") == "tool" for m in sent)
+    assert not any(m.get("tool_calls") for m in sent)
+
+
+def test_multimodal_filters_entry_refs_and_replays_logical_image(monkeypatch, tmp_path):
+    adir = tmp_path / "attachments"
+    image = adir / "2026-08-23" / "safe.png"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"image")
+    monkeypatch.setattr(cr, "_ATTACHMENTS_DIR", lambda: adir)
+    monkeypatch.setattr(cr, "_IMAGE_DATA_URL", lambda p: "data:image/jpeg;base64,stable")
+    text = '<context>{"refs":[{"kind":"image","payload":{"url":"/attachments/2026-08-23/safe.png"}}]}</context>'
+    replay = cr._multimodal_history_content(text)
+    assert replay[0] == {"type": "text", "text": text}
+    assert replay[1]["image_url"]["url"] == "data:image/jpeg;base64,stable"
+    entry_only = cr._multimodal_user_content("entry", [{
+        "kind": "entry", "payload": {"url": "/attachments/2026-08-23/safe.png"},
+    }])
+    assert entry_only == "entry"
+    entry_history = '<context>{"refs":[{"kind":"entry","payload":{"url":"/attachments/2026-08-23/safe.png"}}]}</context>'
+    assert cr._multimodal_history_content(entry_history) == entry_history
+
+
+# ══ ★ A1 前缀稳定性契约(7.23):末轮 + bonus 收尾都不许删 tools 字段 ══════════
+
+def test_chat_nonstream_last_round_and_bonus_keep_tools_shape(chat_client, monkeypatch):
+    """MAX_ROUNDS 撞顶且末轮仍带 tool_calls(model 未收敛)→ 落 bonus 收尾分支。
+    两处调用(末轮 kwargs、bonus kwargs)都必须同形传 tools + tool_choice="none" ——
+    删整段 tools 字段会把请求前缀从 tools 起打废(KV 缓存失效,7.23 审计 A1)。
+    这条测试直接会抓住"漏了某个调用点"的回归(比如本审计抓到的 bonus 调用漏网)。
+    """
+    monkeypatch.setattr(server, "_active_tools", lambda lg: [{"type": "function",
+                         "function": {"name": "noop", "parameters": {}}}])
+    monkeypatch.setattr(server, "get_model", lambda *a, **k: "deepseek-v4-flash")
+
+    def _tc(name="noop", args=None):
+        return SimpleNamespace(id="c1", type="function",
+                               function=SimpleNamespace(name=name, arguments=json.dumps(args or {})))
+
+    calls = []
+
+    class _AlwaysToolClient:
+        def __init__(self):
+            self.chat = SimpleNamespace(completions=self)
+
+        def create(self, **kw):
+            calls.append(kw)
+            msg = SimpleNamespace(content="", tool_calls=[_tc()], reasoning_content=None)
+            msg.model_dump = lambda exclude_none=True: {"content": "", "role": "assistant"}
+            return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+    monkeypatch.setattr(server, "get_client", lambda *a, **k: _AlwaysToolClient())
+    monkeypatch.setattr(server, "_dispatch_tool", lambda *a, **k: {"ok": True})
+    d = chat_client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}], "stream": False}).json()
+
+    # 至少两次调用:round 0..9 的主 loop(10 次)+ bonus 收尾(1 次)
+    assert len(calls) >= 11
+    last_round_kw = calls[9]     # round_idx == MAX_ROUNDS-1 == 9
+    bonus_kw = calls[-1]
+    for label, kw in (("last_round", last_round_kw), ("bonus", bonus_kw)):
+        assert kw.get("tools"), f"{label} 调用漏了 tools 字段(A1 回归)"
+        assert kw.get("tool_choice") == "none", f"{label} 调用 tool_choice 不是 none(A1 回归):{kw.get('tool_choice')!r}"
+        assert kw.get("reasoning_effort") == "high", f"{label} 未显式使用 high 推理强度"
+        assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}, f"{label} 未显式开启思考模式"
+    assert d["actions"]  # bonus 分支确实走到了(tool result 收尾)

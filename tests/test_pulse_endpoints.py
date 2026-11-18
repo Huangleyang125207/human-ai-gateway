@@ -16,6 +16,7 @@
 #   POST /api/pulse/compact-summary       — 200 字摘要
 #   POST /api/pulse/refresh-mirror        — vault PULSE → app-state mirror
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -23,6 +24,20 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+
+
+def test_pulse_routes_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import pulse_routes; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=Path(__file__).resolve().parent.parent,
+        check=False,
+    )
+    assert result.returncode == 0
 
 
 # ── T1: dashboard GET /api/pulse ─────────────────────────────────────
@@ -192,14 +207,26 @@ def test_compact_summary_empty_short_circuits(client):
 
 # ── T1: POST /api/pulse/refresh-mirror ───────────────────────────────
 
-def test_refresh_mirror_returns_shape(client, isolated_pulse_paths, stubbed_llm):
-    """返 scanned/updated/files 三字段"""
+def test_refresh_mirror_returns_shape(client, isolated_pulse_paths, stubbed_llm, isolated_home):
+    source = isolated_home / "agents创作平台" / "agents" / "fixture" / "PULSE.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("# Fixture project\n", encoding="utf-8")
+
     r = client.post("/api/pulse/refresh-mirror")
     assert r.status_code == 200
     data = r.json()
-    for k in ("scanned", "updated", "files"):
-        assert k in data
-    assert isinstance(data["files"], list)
+    assert data["scanned"] == 1
+    assert data["updated"] == 1
+    assert data["files"] == ["fixture"]
+
+
+def test_refresh_mirror_without_sources_does_not_write(
+    client, isolated_pulse_paths, stubbed_llm, isolated_home,
+):
+    r = client.post("/api/pulse/refresh-mirror")
+    assert r.status_code == 200
+    assert r.json() == {"scanned": 0, "updated": 0, "warning": "no source PULSE.md found"}
+    stubbed_llm.vault_git.assert_not_called()
 
 
 # ── T6: e2e 全 PULSE 流转 ─────────────────────────────────────────────

@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# CI/local contract suite. Keep release workflows on this single source so async
+# tests cannot be silently collected without their runner plugin.
+pytest==9.0.3
+pytest-asyncio==1.4.0

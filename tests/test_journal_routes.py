@@ -10,6 +10,7 @@
 # test_patch_h2_rename/test_insert_block_body 在 helper 层覆盖。本文件只锁 *handler 层 HTTP 契约*:
 # date 路由(不传 date 才 today)、HTTP=user-trust(author='user')、400/404、dedup、vault_git。
 
+import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -19,6 +20,23 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+
+
+def test_journal_modules_do_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import journal_read_service, journal_read_routes, "
+            "journal_write_service, journal_write_routes, "
+            "tag_aggregate_service, tag_aggregate_routes; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=Path(__file__).resolve().parent.parent,
+        check=False,
+    )
+
+    assert result.returncode == 0
 
 JOURNAL_MD = """# 9：00
 
@@ -195,3 +213,33 @@ def test_tag_aggregate_get_sections(client, jn):
     jn.write_aggregate("# 标签聚合\n\n## #yanpai\n\n| 日期 | 时间 | 链接 | 内容 |\n|--|--|--|--|\n\n---\n")
     d = client.get("/api/tag-aggregate").json()
     assert any(s["tag"] == "yanpai" for s in d["sections"])
+
+
+def test_journal_writes_reconcile_registered_tag_rows(client, jn):
+    jn.write_day("# 9：00\n\n##\n")
+    jn.write_aggregate(
+        "# 标签聚合\n\n## #项目\n\n"
+        "| 日期 | 时间 | 链接 | 内容 |\n"
+        "|------|------|------|------|\n\n---\n"
+    )
+
+    inserted = client.post(
+        "/api/journal/insert-block",
+        json={"time": "9:00", "tag": "项目", "title": "第一版", "body": "正文"},
+    )
+    assert inserted.status_code == 200
+    assert "第一版" in (jn.vault / "标签聚合.md").read_text(encoding="utf-8")
+
+    patched = client.post(
+        "/api/journal/patch",
+        json={"time": "9:00", "new_md": "## #项目 第二版 @user\n正文"},
+    )
+    assert patched.status_code == 200
+    aggregate = (jn.vault / "标签聚合.md").read_text(encoding="utf-8")
+    assert "第一版" not in aggregate
+    assert "第二版" in aggregate
+
+    deleted = client.post("/api/journal/delete-block", json={"time": "9:00"})
+    assert deleted.status_code == 200
+    aggregate = (jn.vault / "标签聚合.md").read_text(encoding="utf-8")
+    assert "第二版" not in aggregate

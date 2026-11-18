@@ -13,6 +13,7 @@
 #       T9 是 tripwire:验它们没被误移(误移 = _audit_vault + chat dispatch 崩)。
 
 import json
+import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -22,6 +23,70 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import journal_task_tools  # noqa: E402
+import tool_registry  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_daily_task_store_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import daily_task_store; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=ROOT,
+        check=False,
+    )
+
+    assert result.returncode == 0
+
+
+def test_daily_tasks_routes_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import daily_tasks_routes; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=ROOT,
+        check=False,
+    )
+
+    assert result.returncode == 0
+
+
+def test_journal_task_tools_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import journal_task_tools; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=ROOT,
+        check=False,
+    )
+
+    assert result.returncode == 0
+
+
+def test_vault_audit_routes_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import vault_audit_routes; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=ROOT,
+        check=False,
+    )
+
+    assert result.returncode == 0
 
 
 @pytest.fixture
@@ -289,14 +354,17 @@ def test_backfill_progress_idempotent(client, dt):
 # ── T9: LLM tool 仍 wired tripwire(抽出后这些 *留* server.py)─────────
 
 def test_llm_tool_check_stays_wired(client, dt):
-    # 结构:dispatch 表 + 双 group 成员(不许 dedupe)
-    assert server.TOOL_IMPL["check_daily_task"] is server.tool_check_daily_task
-    assert "check_daily_task" in server.TOOL_GROUPS["write_journal"]
-    assert "check_daily_task" in server.TOOL_GROUPS["images"]  # 故意双挂
+    # 结构:dispatch 表 + 宿主 effect policy
+    assert server.TOOL_IMPL["check_daily_task"] is journal_task_tools.tool_check_daily_task
+    assert tool_registry.authorize_tool(
+        "check_daily_task", {}, {"user_text": "给鱼油打卡"},
+    ) is None
 
     # 功能:模糊名解析 + 勾 md(走 _resolve_task_name/_safe_write_text,都留 server)
     dt.write_day(["鱼油（Swisse）"])
-    out = server.tool_check_daily_task({"task_name": "鱼油", "checked": True})
+    out = journal_task_tools.tool_check_daily_task(
+        {"task_name": "鱼油", "checked": True}
+    )
     assert out.get("ok") is True
     assert out["task_name"] == "鱼油（Swisse）"
     assert out.get("resolved_from") == "鱼油"
@@ -379,13 +447,17 @@ def test_template_task_add_edit_double_write_target(client, dt):
 def test_manage_daily_task_wired_and_migrates_keys(client, dt):
     """5 个 daily-task LLM tool T9 只验 check;manage 是第 3 个 _apply_task_op caller
     且写两个 io-map(_migrate_task_keys)。误移任一 → 改名时 intake/图标变孤儿,9 条不 RED。"""
-    assert server.TOOL_IMPL["manage_daily_task"] is server.tool_manage_daily_task
-    assert "manage_daily_task" in server.TOOL_GROUPS["widgets_and_tasks"]
+    assert server.TOOL_IMPL["manage_daily_task"] is journal_task_tools.tool_manage_daily_task
+    assert tool_registry.authorize_tool(
+        "manage_daily_task", {"action": "edit"}, {"user_text": "修改鱼油任务"},
+    ) is None
     dt.write_template(["鱼油"]); dt.write_day(["鱼油"])
     dt.write_meta({"鱼油": {"daily_dose": 2, "intake_log": {_today(): 1}}})
     dt.write_images({"鱼油": "data/daily-task-images/yuyou.png"})
 
-    out = server.tool_manage_daily_task({"action": "edit", "old_text": "鱼油", "text": "鱼油B"})
+    out = journal_task_tools.tool_manage_daily_task(
+        {"action": "edit", "old_text": "鱼油", "text": "鱼油B"}
+    )
     assert out["ok"] is True
     assert out["side_effects"]["meta_migrated"] is True
     assert out["side_effects"]["image_migrated"] is True

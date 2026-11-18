@@ -218,8 +218,8 @@ def baidu_ocr_image(file_path: Path | str, api_key: str, secret_key: str) -> str
 
 # ── dispatcher 层 ─ 从 server.py 抽出(行为零变化) ──────────────────
 # 上层 file_path → 端侧链(macOS Vision + rapidocr ONNX)→ 百度兜底 → 空串。
-# 跟 server.py 解耦:load_config 走函数体内 lazy import 避循环;silent-failure
-# 走本模块的 _emit_failure(server 启动时已注入 sink)。
+# 配置读取通过窄参数注入；silent-failure 走本模块的
+# _emit_failure(server 启动时已注入 sink)。
 
 _OCR_BLOCK_RE = re.compile(r'<图片 OCR 识别结果>.*?</图片 OCR 识别结果>', re.DOTALL)
 _OCR_FILENAME_RE = re.compile(r'图片 \[([^\]]+)\]:')
@@ -232,7 +232,7 @@ _PILL_COUNT_RE = re.compile(
 )
 
 
-def _ocr_text(file_path: Path) -> str:
+def _ocr_text(file_path: Path, *, load_config) -> str:
     """统一 OCR 出口:端侧优先(macOS Vision / rapidocr ONNX),失败兜底百度云。
 
     返恒非 None 的字符串(空 = 没识别出 / 全失败)。3 个 caller 共用,
@@ -243,7 +243,6 @@ def _ocr_text(file_path: Path) -> str:
          rapidocr ONNX fallback)。返 str = 成功(可能空),None = 端侧不可用
       2. 端侧 None → 走 baidu(若 config 有 key);无 key → 返 ""
     """
-    from server import load_config
     try:
         from ocr_local import ocr_local
         local_result = ocr_local(file_path)

@@ -91,7 +91,7 @@ def _run_git(args: list[str], cwd: Path, timeout: float = 30.0) -> str:
     # quotepath=false 让中文路径不被 \nnn 转义(给 outcome_tracker / 跨模块一致)
     p = subprocess.run(
         ["git", "-C", str(cwd), "-c", "core.quotepath=false"] + args,
-        capture_output=True, text=True, timeout=timeout, check=False,
+        capture_output=True, encoding="utf-8", timeout=timeout, check=False,
     )
     if p.returncode != 0:
         return ""
@@ -158,7 +158,12 @@ def load_thread(path: Path) -> list[dict]:
     if not path.exists():
         return []
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict) and data.get("v") == 2 and isinstance(data.get("history"), list):
+            return data["history"]
+        return []
     except Exception:
         return []
 

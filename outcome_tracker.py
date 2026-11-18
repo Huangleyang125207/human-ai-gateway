@@ -67,7 +67,7 @@ def _run_git(args: list[str], cwd: Path, timeout: float = 30.0) -> str:
     # quotepath=false 让中文路径不被 \nnn 转义;否则下游 file_history 查不到
     p = subprocess.run(
         ["git", "-C", str(cwd), "-c", "core.quotepath=false"] + args,
-        capture_output=True, text=True, timeout=timeout, check=False,
+        capture_output=True, encoding="utf-8", timeout=timeout, check=False,
     )
     return p.stdout if p.returncode == 0 else ""
 

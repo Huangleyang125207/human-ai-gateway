@@ -11,27 +11,28 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import pulse_io  # noqa: E402
 
 
 # ── 基本守门 ─────────────────────────────────────────────────────────
 
 def test_over_budget_rejects():
     text = "<!-- ts:2026-06-18 -->\n" + "x" * 100
-    ok, err = server._pulse_validate(text, budget=80)
+    ok, err = pulse_io._pulse_validate(text, budget=80)
     assert not ok
     assert "budget" in err.lower()
 
 
 def test_no_ts_marker_rejects():
     text = "# 全是散文,没 ts 注释\n这一段长但缺标记。"
-    ok, err = server._pulse_validate(text, budget=200)
+    ok, err = pulse_io._pulse_validate(text, budget=200)
     assert not ok
     assert "ts" in err.lower()
 
 
 def test_bad_ts_format_rejects():
     text = "<!-- ts:2026/06/18 -->\n# 用斜杠不是横线"
-    ok, err = server._pulse_validate(text, budget=200)
+    ok, err = pulse_io._pulse_validate(text, budget=200)
     # 这格式不被 _TS_RE 抓 → 等同于没找到任何 ts
     assert not ok
 
@@ -39,14 +40,14 @@ def test_bad_ts_format_rejects():
 def test_invalid_calendar_date_rejects():
     # 格式对但日期非法(2 月 30 日)
     text = "<!-- ts:2026-02-30 -->\n# 日期非法"
-    ok, err = server._pulse_validate(text, budget=200)
+    ok, err = pulse_io._pulse_validate(text, budget=200)
     assert not ok
     assert "ts" in err.lower() or "合法" in err
 
 
 def test_happy_path():
     text = "<!-- ts:2026-06-18 -->\n# 段落\n内容。"
-    ok, err = server._pulse_validate(text, budget=200)
+    ok, err = pulse_io._pulse_validate(text, budget=200)
     assert ok, f"应过,但 err={err}"
 
 
@@ -56,7 +57,7 @@ def test_strict_ts_halved_rejects():
     # old 有 10 个 ts,new 只剩 4 个(< 50%) → 拒
     old = "\n".join(f"<!-- ts:2026-06-1{i % 10} -->\n# H{i}\n内容\n" for i in range(10))
     new = "<!-- ts:2026-06-18 -->\n# 仅一段\n内容\n" + "<!-- ts:2026-06-18 -->\n## 二\n" * 3
-    ok, err = server._pulse_validate(new, budget=20000, old_text=old, strict=True)
+    ok, err = pulse_io._pulse_validate(new, budget=20000, old_text=old, strict=True)
     assert not ok
     assert "ts" in err.lower() and "腰斩" in err
 
@@ -68,7 +69,7 @@ def test_strict_h2_halved_rejects():
     old = old_ts + "\n" + old_h2
     new_ts = "\n".join(f"<!-- ts:2026-06-{i:02d} -->" for i in range(1, 11))  # ts 没腰斩
     new = new_ts + "\n## H2-1\n短\n## H2-2\n短\n"  # H2 从 10 → 2
-    ok, err = server._pulse_validate(new, budget=20000, old_text=old, strict=True)
+    ok, err = pulse_io._pulse_validate(new, budget=20000, old_text=old, strict=True)
     assert not ok
     assert "H2" in err and "腰斩" in err
 
@@ -79,7 +80,7 @@ def test_frozen_byte_equal_required():
     frozen = "<!-- frozen-start -->\n协议手册原文\n<!-- frozen-end -->"
     old = f"<!-- ts:2026-06-18 -->\n# 头\n{frozen}\n## 用户区\n旧"
     new = f"<!-- ts:2026-06-18 -->\n# 头\n<!-- frozen-start -->\n协议被改了\n<!-- frozen-end -->\n## 用户区\n新"
-    ok, err = server._pulse_validate(new, budget=20000, old_text=old)
+    ok, err = pulse_io._pulse_validate(new, budget=20000, old_text=old)
     assert not ok
     assert "frozen" in err.lower()
 
@@ -88,7 +89,7 @@ def test_frozen_unchanged_passes():
     frozen = "<!-- frozen-start -->\n手册\n<!-- frozen-end -->"
     old = f"<!-- ts:2026-06-18 -->\n{frozen}\n## 用户区\n旧"
     new = f"<!-- ts:2026-06-18 -->\n{frozen}\n## 用户区\n新内容"
-    ok, err = server._pulse_validate(new, budget=20000, old_text=old)
+    ok, err = pulse_io._pulse_validate(new, budget=20000, old_text=old)
     assert ok, f"frozen 字节相等应过,err={err}"
 
 
@@ -98,6 +99,6 @@ def test_placeholder_eaten_rejects():
     old = ("<!-- ts:2026-06-18 -->\n"
            "<!-- placeholder: 槽 A -->\n<!-- placeholder: 槽 B -->\n")
     new = "<!-- ts:2026-06-18 -->\n<!-- placeholder: 槽 A -->\n"  # 吃了 B
-    ok, err = server._pulse_validate(new, budget=20000, old_text=old)
+    ok, err = pulse_io._pulse_validate(new, budget=20000, old_text=old)
     assert not ok
     assert "placeholder" in err.lower()

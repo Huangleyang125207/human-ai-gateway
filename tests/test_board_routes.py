@@ -11,6 +11,7 @@
 # _eval_build_messages(pulse_eval)里,端点只需"调它" → spy 验路径到达(Cannot-break)。
 
 import json
+import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -20,6 +21,20 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+
+
+def test_board_routes_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import board_routes; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=Path(__file__).resolve().parent.parent,
+        check=False,
+    )
+    assert result.returncode == 0
 
 
 # ── 最简 LLM fake(eval _call_json 取 choices[0].message.content 再 json.loads)──

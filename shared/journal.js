@@ -97,6 +97,10 @@
 
   function render(data) {
     if (activeEditEl) return;
+    // ★ 7.10 审计 M9:切日竞态守卫。day-pill 点击先把 currentDate 设成目标日再 fetchJournal;
+    //   连点两天时先点那天的慢响应后到,data.date 已非当前选中日 → 丢弃,别盖当前日。
+    //   (首屏 currentDate 尚为 null 时放行。)
+    if (currentDate && data.date && data.date !== currentDate) return;
 
     const sig = data.file + "::" + data.blocks.length + "::" +
       data.blocks.map(b => b.time + "|" + (b.h2 || []).map(h =>

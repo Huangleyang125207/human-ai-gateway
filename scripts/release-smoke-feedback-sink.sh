@@ -73,7 +73,12 @@ done
 }
 
 say "smoke 3: 确认 sidecar /api/health"
-curl -sS -m 5 http://localhost:4321/api/health >/dev/null && \
+# 端口读法同 launchd/gw-cron.sh:Tauri 壳动态端口(bind :0),不能硬编 4321
+PORT_FILE="$HOME/.human-ai/.gateway-port"
+[ -f "$PORT_FILE" ] || fail "$PORT_FILE 不存在 — sidecar 没写端口文件?"
+PORT="$(tr -dc '0-9' < "$PORT_FILE")"
+[ -n "$PORT" ] || fail "$PORT_FILE 内容不是端口号"
+curl -sS -m 5 "http://localhost:${PORT}/api/health" >/dev/null && \
   echo "  ${GREEN}✓ sidecar /api/health OK${RESET}" || \
   fail "sidecar 起来但 /api/health 不通"
 

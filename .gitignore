@@ -39,3 +39,6 @@ mobile/plugins/*/android/build/
 
 # 设计草稿 — 本地 scratch,含大图,不入版本控制(7.6 整顿定)
 design/2607-fable-mobile/
+
+# 交互测试截图(旁证,不入仓)
+mobile/parity/interaction/screenshots/

@@ -48,7 +48,7 @@
       <div class="consent-panel">
         <header class="consent-head">
           <h2>云端数据收集说明</h2>
-          <p class="consent-sub">Gateway 默认收集两类匿名诊断数据,帮我们改进软件。同意后两类全开,后续可在设置中随时撤回。</p>
+          <p class="consent-sub">配置个人 API Key 后，对话、照片索引和留言等 AI 功能会将所需上下文或图片直接发给 DeepSeek。以下两个选项涉及桌面匿名诊断，可在设置中随时撤回。</p>
         </header>
 
         <section class="consent-item">

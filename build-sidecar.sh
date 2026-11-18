@@ -18,11 +18,12 @@ echo "-> sidecar target triple: $TRIPLE"
 [ -d "$VENV" ] || { echo "X 没有 .venv-build(先跑过 build-mac-pyinstaller.sh)"; exit 1; }
 
 ADDS=(
-  --add-data "index.html:." --add-data "day.html:." --add-data "reset.html:."
+  --add-data "index.html:." --add-data "reset.html:."
   --add-data "history.html:." --add-data "consent.html:."
   --add-data "day-paper.html:." --add-data "index-paper.html:."
   --add-data "shared:shared" --add-data "widgets:widgets" --add-data "vendor:vendor"
-  --add-data "brand:brand" --add-data "protocols:protocols"
+  --add-data "brand:brand" --add-data "protocols:protocols" --add-data "prompts:prompts"
+  --add-data "skills:skills" --add-data "docs/ARCHITECTURE_LEDGER.md:docs"
   --add-data ".gateway-config.example.json:."
   --add-data "vault_config.py:." --add-data "vault_git.py:."
   --add-data "history_exporter.py:." --add-data "outcome_tracker.py:."

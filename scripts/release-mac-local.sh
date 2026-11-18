@@ -24,7 +24,7 @@
 #   6. quit + 替换 /Applications/Gateway.app + 启动
 #   7. --push 时: rsync 推 yanpai (Tauri updater 自动分发)
 
-set -e
+set -euo pipefail
 cd "$(dirname "$0")/.."
 
 GREEN=$'\033[32m'

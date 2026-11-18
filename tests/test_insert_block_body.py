@@ -12,6 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import journal_task_tools  # noqa: E402
 
 
 TEMPLATE = """# 9：00
@@ -66,22 +67,22 @@ def test_insert_without_body_still_works(journal):
 
 def test_tool_handler_nags_on_missing_body(journal, monkeypatch):
     monkeypatch.setattr(server, "find_today_journal", lambda *a, **k: journal)
-    out = server.tool_insert_journal_block({"tag": "饮食", "title": "没正文", "time": "9:30"})
+    out = journal_task_tools.tool_insert_journal_block(
+        {"tag": "饮食", "title": "没正文", "time": "9:30"}
+    )
     assert out["ok"] is True
     assert "warning" in out and "正文" in out["warning"], "漏 body 应在 tool result 落钉子"
 
 
 def test_tool_handler_no_nag_with_body(journal, monkeypatch):
     monkeypatch.setattr(server, "find_today_journal", lambda *a, **k: journal)
-    out = server.tool_insert_journal_block(
+    out = journal_task_tools.tool_insert_journal_block(
         {"tag": "探索", "title": "带正文", "time": "9:00", "body": "完整的散文。"})
     assert out["ok"] is True
     assert "warning" not in out
 
 
 def test_schema_requires_body():
-    import json
-    schemas = json.dumps(server.TOOLS, ensure_ascii=False) if hasattr(server, "TOOLS") else ""
     # TOOLS schema 6.25 抽到 tool_specs.py;直接在那源里验 schema
     src = (Path(server.__file__).parent / "tool_specs.py").read_text(encoding="utf-8")
     i = src.find('"name": "insert_journal_block"')

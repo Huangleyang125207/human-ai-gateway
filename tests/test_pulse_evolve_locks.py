@@ -11,6 +11,7 @@
 #   - 测后 cleanup _EVOLVE_LOCKS(原版会累积污染)
 #   - target key 用 uuid 防 session 内重跑撞
 
+import subprocess
 import sys
 import threading
 import uuid
@@ -20,6 +21,24 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import pulse_evolve  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_pulse_evolve_module_does_not_import_server():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import pulse_evolve; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=ROOT,
+        check=False,
+    )
+
+    assert result.returncode == 0
 
 
 @pytest.fixture
@@ -28,8 +47,8 @@ def fresh_lock_target():
     target = f"test_target_{uuid.uuid4().hex[:8]}"
     yield target
     # cleanup:从 _EVOLVE_LOCKS 字典移除,防 session 累积
-    with server._EVOLVE_LOCKS_GUARD:
-        server._EVOLVE_LOCKS.pop(target, None)
+    with pulse_evolve._EVOLVE_LOCKS_GUARD:
+        pulse_evolve._EVOLVE_LOCKS.pop(target, None)
 
 
 def test_same_target_returns_same_lock_instance():

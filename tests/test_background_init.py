@@ -15,6 +15,43 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import notification_routes  # noqa: E402
+import startup_hooks  # noqa: E402
+
+
+def test_startup_hooks_module_does_not_import_server():
+    import subprocess
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import startup_hooks; "
+            "raise SystemExit(1 if 'server' in sys.modules else 0)",
+        ],
+        cwd=Path(__file__).resolve().parent.parent,
+        check=False,
+    )
+    assert result.returncode == 0
+
+
+def test_notifications_route_reads_and_dismisses_shared_queue():
+    from fastapi.testclient import TestClient
+
+    server._PENDING_NOTIFICATIONS[:] = [
+        {"kind": "keep", "message": "a"},
+        {"kind": "drop", "message": "b"},
+    ]
+    try:
+        response = TestClient(server.app).get(
+            "/api/notifications?dismiss=drop"
+        )
+        assert response.status_code == 200
+        assert response.json()["notifications"] == [
+            {"kind": "keep", "message": "a"}
+        ]
+    finally:
+        server._PENDING_NOTIFICATIONS.clear()
 
 
 def _reset():
@@ -26,7 +63,7 @@ def _reset():
 
 def test_init_status_initial_not_ready():
     _reset()
-    s = server.api_init_status()
+    s = notification_routes.api_init_status()
     assert s["ready"] is False
     assert s["phase"] == "starting"
     # 返的是副本,外部改不动内部
@@ -39,7 +76,7 @@ def test_background_init_runs_steps_in_order_then_ready(monkeypatch):
     monkeypatch.setattr(server, "_vault_git_init_step", lambda: calls.append("git"))
     monkeypatch.setattr(server, "_vault_audit_step", lambda: calls.append("audit"))
     _reset()
-    server._background_vault_init()
+    startup_hooks._background_vault_init()
     assert calls == ["git", "audit"], "git 必须先于 audit(audit 依赖 repo 在)"
     assert server._INIT_STATE["ready"] is True
     assert server._INIT_STATE["phase"] == "ready"
@@ -52,7 +89,7 @@ def test_background_init_readies_even_if_step_crashes(monkeypatch):
     monkeypatch.setattr(server, "_vault_git_init_step", boom)
     monkeypatch.setattr(server, "_vault_audit_step", lambda: None)
     _reset()
-    server._background_vault_init()
+    startup_hooks._background_vault_init()
     # finally 兜底:崩了也 ready,否则前端初始化屏永远转圈
     assert server._INIT_STATE["ready"] is True
     assert server._INIT_STATE["error"] is not None

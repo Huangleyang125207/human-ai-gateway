@@ -1,58 +1,30 @@
 """web_tools — AI 工具层的 web_search / fetch_url 一对。
 从 server.py 抽出(2499-2746),行为零变化。
 
-外部依赖(注入式·函数体内 lazy import 避循环):
-  - server.load_config           — _resolve_dashscope_creds 找百炼 key
-  - server._report_silent_failure — _do_web_search 降级时上报
-  - server.log                   — _do_web_search 降级日志
+外部依赖由应用组装根注入:report_failure/logger 用于 _do_web_search 降级观测。
 
 其余依赖:requests/re/html/random/string/lxml/openai/ddgs — 全标准/三方库。
 """
 import re
 import html as _html_mod
+import logging
 import requests
 
-
-# ── web_search 后端:百炼 enable_search 为主,ddgs 兜底 ──────────────────
-# 为什么:ddgs 走 DuckDuckGo/Google,大陆被墙、无代理用不了(5.27 调研实测)。
-# 百炼 enable_search 在大陆直连、复用用户已配的 dashscope key、对 deepseek/qwen 都支持,
-# 是大陆 + 单 API 的正解。OpenAI 兼容接口拿不到结构化来源,但模型文字答里常带链接,够用。
-_BAILIAN_SEARCH_MODEL = "qwen-flash"   # 便宜+快;搜索-总结任务足够;百炼托管,带 enable_search
+_LOAD_CONFIG = None
+_REPORT_FAILURE = None
+_LOGGER = logging.getLogger("web_tools")
 
 
-def _resolve_dashscope_creds():
-    """找百炼(dashscope)的 (api_key, base_url)。优先 models[] 里 base 含 dashscope 的 profile
-    (这用户 key 在那,非顶层),再退顶层 dashscope_api_key。找不到返 (None, None)。"""
-    from server import load_config
-    cfg = load_config() or {}
-    for p in (cfg.get("models") or []):
-        if "dashscope" in (p.get("base_url") or "") and p.get("api_key"):
-            return p["api_key"], p["base_url"]
-    dk = cfg.get("dashscope_api_key", "")
-    if dk:
-        return dk, cfg.get("dashscope_base_url") or "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    return None, None
+def configure_effects(*, load_config, report_failure, logger) -> None:
+    global _LOAD_CONFIG, _REPORT_FAILURE, _LOGGER
+    _LOAD_CONFIG = load_config
+    _REPORT_FAILURE = report_failure
+    _LOGGER = logger
 
 
-def _bailian_web_search(query: str) -> str:
-    """百炼 enable_search:模型联网搜 + 总结。大陆直连。没 key / 失败 → 抛异常给调用方降级。"""
-    key, base = _resolve_dashscope_creds()
-    if not key:
-        raise RuntimeError("no dashscope key")
-    from openai import OpenAI
-    client = OpenAI(api_key=key, base_url=base)
-    r = client.chat.completions.create(
-        model=_BAILIAN_SEARCH_MODEL,
-        messages=[{"role": "user", "content":
-                   "联网搜索并回答下面的查询。列关键事实要点,能附来源链接就附。简洁,别废话。\n\n" + query}],
-        extra_body={"enable_search": True,
-                    "search_options": {"search_strategy": "turbo", "enable_source": True}},
-        timeout=40,
-    )
-    ans = (r.choices[0].message.content or "").strip()
-    if not ans:
-        raise RuntimeError("百炼 search 返空")
-    return ans
+def _report_failure(*args, **kwargs) -> None:
+    if _REPORT_FAILURE is not None:
+        _REPORT_FAILURE(*args, **kwargs)
 
 
 _WEB_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -149,42 +121,34 @@ def _do_web_search(query: str, max_results: int = 5, category: str = "general") 
     """web_search 后端,按 category 分流(都大陆直连):
       wechat   → 搜狗微信(公众号文章)
       bilibili → B站视频(JSON API,dormant)
-      general  → 360(主力,免费+真来源 URL) → 百炼兜底(360 挂时) → ddgs(海外兜底)
+      general  → 360(主力,免费+真来源 URL) → ddgs(海外兜底)
     """
-    from server import _report_silent_failure, log
     if category == "wechat":
         # 包 try:lxml 缺失 / parser 崩 不能逃出去变成 tool hard-error(无 fallback,至少干净返回)
         try:
             return _sogou_wechat_search(query, max_results)
         except Exception as e:
-            _report_silent_failure("web_search_wechat_exception",
+            _report_failure("web_search_wechat_exception",
                 f"{type(e).__name__}: {str(e)[:80]}")
             return f"[公众号搜索暂不可用:{type(e).__name__} — 稍后再试]"
     if category == "bilibili":
         return _bilibili_search(query, max_results)
-    # 通用:360 主力。失败/无结果 → 百炼兜底(大陆可靠) → ddgs(需代理)
+    # 通用:360 主力。失败/无结果 → ddgs(需代理)，不为搜索引入第二把用户密钥。
     # 包 try:防 lxml 缺失/parser 崩 等异常逃出 → 跳过整条 fallback 链 + 隐身(web_search 硬挂真因)
     try:
         r360 = _360_search(query, max_results)
     except Exception as e:
-        log.info(f"[web_search] 360 抛异常,降级百炼: {type(e).__name__}: {str(e)[:120]}")
-        _report_silent_failure("web_search_360_exception",
-            f"360 抛异常,降级百炼: {type(e).__name__}: {str(e)[:80]}")
+        _LOGGER.info(f"[web_search] 360 抛异常,降级 ddgs: {type(e).__name__}: {str(e)[:120]}")
+        _report_failure("web_search_360_exception",
+            f"360 抛异常,降级 ddgs: {type(e).__name__}: {str(e)[:80]}")
         # sentinel 字符串(非 None)—— 后续 .startswith/[:40] 不炸,且触发降级
         r360 = f"[360 异常:{type(e).__name__}]"
     if r360 and not r360.startswith("[360"):   # 有真结果
         return r360
-    log.info(f"[web_search] 360 无结果({r360[:40]}),试百炼兜底")
-    _report_silent_failure("web_search_360_degraded",
-        f"360 无结果,降级到百炼: {r360[:80]}")
-    try:
-        r = _bailian_web_search(query)
-        return r
-    except Exception as e:
-        log.info(f"[web_search] 百炼也降级 ddgs: {type(e).__name__}: {str(e)[:120]}")
-        _report_silent_failure("web_search_bailian_degraded",
-            f"360 + 百炼都没出货,降级到 ddgs: {type(e).__name__}")
-        return _ddgs_search(query, max_results)
+    _LOGGER.info(f"[web_search] 360 无结果({r360[:40]}),试 ddgs 兜底")
+    _report_failure("web_search_360_degraded",
+        f"360 无结果,降级到 ddgs: {r360[:80]}")
+    return _ddgs_search(query, max_results)
 
 
 def _ddgs_search(query: str, max_results: int = 5) -> str:

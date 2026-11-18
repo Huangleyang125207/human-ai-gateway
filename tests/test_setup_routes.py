@@ -1,25 +1,9 @@
-# TEST PATTERN: characterization — setup / config endpoints golden behavior
-# USE WHEN: 锁 /api/setup* + /api/models 现行行为,守 setup_routes 抽出(§ 9 refactor)
-# TESTED IN: gateway setup_routes extraction (2026-06-19), § T7 characterization
-#
-# § T7 GREEN-LOCK:这些测试在 monolith server.py 上先 GREEN,setup_routes.py 抽出后
-# STAY GREEN。任何 RED = 行为漂移 = revert。
-#
-# 10 endpoint:
-#   GET  /api/setup-status        — configured 三态判定
-#   GET  /api/setup/templates     — deepseek/bailian/templates 结构
-#   POST /api/setup/test          — 测 LLM profile(mock client)
-#   POST /api/setup/test-baidu    — 测百度 key(mock token)
-#   GET  /api/setup/current       — 返 config 字段 shape
-#   POST /api/setup/save-partial  — 部分更新 + 空值删字段
-#   POST /api/setup/save-gemini   — 存 gemini key
-#   POST /api/setup/test-gemini   — 测 gemini(mock requests)
-#   POST /api/setup/save          — 完整保存 + id 自动生成 + 占位符拒
-#   GET  /api/models              — profiles + default_id
-
+# TEST PATTERN: contract — DeepSeek BYOK setup and credential isolation
+# USE WHEN: changing desktop AI connection/onboarding boundaries
+# COPY THIS: change only the public setup fields and the expected profile shape
+import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -27,243 +11,153 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
 
 
-# ── 最简 LLM fake(setup/test 只取 choices[0].message.content[:80])──
-class _FakeChat:
-    def __init__(self, reply="pong"):
-        self.completions = self
-        self._reply = reply
-
-    def create(self, **kw):
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=self._reply))])
-
-
-class _FakeClient:
-    def __init__(self, reply="pong"):
-        self.chat = _FakeChat(reply)
-
-
 @pytest.fixture
 def mem_config(monkeypatch):
-    """in-memory config:load_config / _save_config / list_model_profiles 全走内存 dict。
-    handler 内 lazy `from server import load_config` → patch server.* 命中(G1 表第3行)。"""
-    store = {"cfg": None}
-
-    monkeypatch.setattr(server, "load_config",
-                        lambda: dict(store["cfg"]) if store["cfg"] else None)
-
-    def _save(cfg):
-        store["cfg"] = dict(cfg)
-    monkeypatch.setattr(server, "_save_config", _save)
+    store = {"cfg": None, "env_synced": []}
+    monkeypatch.setattr(server, "load_config", lambda: dict(store["cfg"]) if store["cfg"] else None)
+    monkeypatch.setattr(server, "_save_config", lambda cfg: store.__setitem__("cfg", dict(cfg)))
+    monkeypatch.setattr(server, "sync_env_secrets", lambda updates: store["env_synced"].append(dict(updates or {})))
     return store
 
 
 @pytest.fixture
 def client():
     from fastapi.testclient import TestClient
-    return TestClient(server.app)
+    return TestClient(server.app, base_url="http://127.0.0.1:4321", client=("127.0.0.1", 10000))
 
 
-# ── GET /api/setup-status — 三态 ─────────────────────────────────────
-
-def test_status_no_config(client, mem_config):
-    mem_config["cfg"] = None
-    r = client.get("/api/setup-status")
-    assert r.status_code == 200
-    d = r.json()
-    assert d["configured"] is False
-    assert "config" in d["reason"]
+def test_setup_routes_module_does_not_import_server():
+    result = subprocess.run(
+        [sys.executable, "-c", "import sys; import setup_routes; raise SystemExit(1 if 'server' in sys.modules else 0)"],
+        cwd=Path(__file__).resolve().parent.parent,
+        check=False,
+    )
+    assert result.returncode == 0
 
 
-def test_status_all_placeholder(client, mem_config):
-    mem_config["cfg"] = {"models": [{"id": "x", "api_key": "YOUR_KEY", "model": "m"}]}
-    r = client.get("/api/setup-status")
-    d = r.json()
-    assert d["configured"] is False
-    assert "占位符" in d["reason"]
+def test_cloud_only_settings_are_not_configured_and_reads_do_not_mutate(client, mem_config):
+    legacy = {"gateway_url": "https://edge.example", "gateway_device_token": "old-fake-token"}
+    mem_config["cfg"] = legacy.copy()
+    assert client.get("/api/setup-status").json()["configured"] is False
+    assert client.get("/api/config-status").json()["ok"] is False
+    assert client.get("/api/models").json() == {"models": [], "default_id": None}
+    assert server.get_profile() is None
+    assert "old-fake-token" not in client.get("/api/setup/current").text
+    assert mem_config["cfg"] == legacy
+    assert mem_config["env_synced"] == []
 
 
-def test_status_configured(client, mem_config):
-    mem_config["cfg"] = {"models": [
-        {"id": "x", "api_key": "sk-real", "model": "m"},
-        {"id": "y", "api_key": "YOUR_K", "model": "m2"},
-    ]}
-    r = client.get("/api/setup-status")
-    d = r.json()
-    assert d["configured"] is True
-    assert d["profile_count"] == 2
-
-
-# ── GET /api/setup/templates — 结构契约 ──────────────────────────────
-
-def test_templates_shape(client):
-    r = client.get("/api/setup/templates")
-    assert r.status_code == 200
-    d = r.json()
-    assert "deepseek" in d and "bailian" in d
-    assert "base_url" in d["deepseek"] and "models" in d["deepseek"]
-    assert isinstance(d["templates"], list)
-    # templates 由 DEEPSEEK_MODELS 派生,每条带 base_url + model
-    if d["templates"]:
-        assert "base_url" in d["templates"][0] and "model" in d["templates"][0]
-
-
-# ── POST /api/setup/test — LLM profile 测通 ──────────────────────────
-
-def test_setup_test_happy(client, monkeypatch):
-    monkeypatch.setattr(server, "get_client", lambda p: _FakeClient("pong-reply"))
-    r = client.post("/api/setup/test", json={
-        "api_key": "sk-real", "model": "deepseek-chat", "base_url": "https://x"})
-    d = r.json()
-    assert d["ok"] is True
-    assert d["reply"] == "pong-reply"
-    assert d["model"] == "deepseek-chat"
-
-
-def test_setup_test_placeholder_key_rejected(client):
-    r = client.post("/api/setup/test", json={
-        "api_key": "YOUR_KEY", "model": "m", "base_url": "https://x"})
-    d = r.json()
-    assert d["ok"] is False
-    assert "占位符" in d["reason"]
-
-
-def test_setup_test_missing_model_rejected(client):
-    r = client.post("/api/setup/test", json={"api_key": "sk-real", "base_url": "https://x"})
-    d = r.json()
-    assert d["ok"] is False
-
-
-# ── POST /api/setup/test-baidu ───────────────────────────────────────
-
-def test_test_baidu_happy(client, monkeypatch):
-    import ocr
-    monkeypatch.setattr(ocr, "_get_access_token", lambda a, s: "tok-123")
-    r = client.post("/api/setup/test-baidu", json={"api_key": "a", "secret_key": "b"})
-    assert r.json()["ok"] is True
-
-
-def test_test_baidu_no_token(client, monkeypatch):
-    import ocr
-    monkeypatch.setattr(ocr, "_get_access_token", lambda a, s: None)
-    r = client.post("/api/setup/test-baidu", json={"api_key": "a", "secret_key": "b"})
-    assert r.json()["ok"] is False
-
-
-# ── GET /api/setup/current — shape ───────────────────────────────────
-
-def test_current_shape(client, mem_config):
-    mem_config["cfg"] = {"models": [{"id": "x"}], "default_model_id": "x",
-                         "dashscope_api_key": "dk"}
-    r = client.get("/api/setup/current")
-    d = r.json()
-    for k in ("models", "default_model_id", "dashscope_api_key", "dashscope_base_url",
-              "dashscope_vision_model", "baidu_cutout_api_key", "baidu_cutout_secret_key"):
-        assert k in d
-    assert d["default_model_id"] == "x"
-    assert d["dashscope_api_key"] == "dk"
-
-
-# ── POST /api/setup/save-partial — 删字段 ────────────────────────────
-
-def test_save_partial_updates_and_clears(client, mem_config):
-    mem_config["cfg"] = {"models": [], "dashscope_api_key": "old"}
-    # 设 models + 清空 dashscope_api_key("" → pop)
-    r = client.post("/api/setup/save-partial", json={
-        "models": [{"id": "n"}], "dashscope_api_key": ""})
-    assert r.json()["ok"] is True
-    saved = mem_config["cfg"]
-    assert saved["models"] == [{"id": "n"}]
-    assert "dashscope_api_key" not in saved  # 空值被 pop
-
-
-# ── POST /api/setup/save-gemini ──────────────────────────────────────
-
-def test_save_gemini_happy(client, mem_config):
-    mem_config["cfg"] = {}
-    r = client.post("/api/setup/save-gemini", json={"api_key": "g-real"})
-    assert r.json()["ok"] is True
-    assert mem_config["cfg"]["gemini_api_key"] == "g-real"
-
-
-def test_save_gemini_placeholder_400(client, mem_config):
-    mem_config["cfg"] = {}
-    r = client.post("/api/setup/save-gemini", json={"api_key": "YOUR_K"})
-    assert r.status_code == 400
-
-
-# ── POST /api/setup/test-gemini ──────────────────────────────────────
-
-def test_test_gemini_happy(client, monkeypatch):
-    monkeypatch.setattr(server.requests, "post",
-                        lambda *a, **k: SimpleNamespace(status_code=200, text="pong"))
-    r = client.post("/api/setup/test-gemini", json={"api_key": "g-real"})
-    assert r.json()["ok"] is True
-
-
-def test_test_gemini_http_error(client, monkeypatch):
-    monkeypatch.setattr(server.requests, "post",
-                        lambda *a, **k: SimpleNamespace(status_code=403, text="forbidden"))
-    r = client.post("/api/setup/test-gemini", json={"api_key": "g-real"})
-    assert r.json()["ok"] is False
-
-
-# ── POST /api/setup/save — 核心:id 生成 + 占位符拒 + cfg 结构 ────────
-
-def test_save_rejects_empty_profiles(client, mem_config):
-    r = client.post("/api/setup/save", json={"models": []})
-    assert r.status_code == 400
-
-
-def test_save_rejects_all_placeholder(client, mem_config):
-    r = client.post("/api/setup/save", json={
-        "models": [{"id": "x", "api_key": "YOUR_K", "model": "m"}]})
-    assert r.status_code == 400
-
-
-def test_save_autogenerates_id_and_builds_cfg(client, mem_config):
-    r = client.post("/api/setup/save", json={
-        "models": [{"label": "DeepSeek Chat", "api_key": "sk-real",
-                    "model": "deepseek-chat", "base_url": "https://api.deepseek.com"}]})
-    assert r.json()["ok"] is True
-    cfg = mem_config["cfg"]
-    # id 从 label 自动生成
-    assert cfg["models"][0]["id"] == "deepseek-chat"
-    # default = 第一个 profile id
-    assert cfg["default_model_id"] == "deepseek-chat"
-    # 顶层 chat key/url/model 取 default profile
-    assert cfg["api_key"] == "sk-real"
-    assert cfg["base_url"] == "https://api.deepseek.com"
-    assert cfg["model"] == "deepseek-chat"
-
-
-def test_save_dashscope_and_baidu_passthrough(client, mem_config):
-    r = client.post("/api/setup/save", json={
-        "models": [{"id": "m1", "api_key": "sk-real", "model": "m"}],
-        "dashscope_api_key": "dk-real",
-        "baidu_cutout_api_key": "bd-real", "baidu_cutout_secret_key": "bs-real"})
-    assert r.json()["ok"] is True
-    cfg = mem_config["cfg"]
-    assert cfg["dashscope_api_key"] == "dk-real"
-    assert cfg["baidu_cutout_api_key"] == "bd-real"
-
-
-def test_save_skips_placeholder_dashscope(client, mem_config):
-    r = client.post("/api/setup/save", json={
-        "models": [{"id": "m1", "api_key": "sk-real", "model": "m"}],
-        "dashscope_api_key": "YOUR_DASH"})
-    assert r.json()["ok"] is True
-    assert "dashscope_api_key" not in mem_config["cfg"]
-
-
-# ── GET /api/models ──────────────────────────────────────────────────
-
-def test_models_default_id(client, mem_config):
+def test_save_migrates_cloud_config_without_exposing_byok(client, mem_config):
     mem_config["cfg"] = {
-        "models": [{"id": "a", "api_key": "sk-1", "model": "m1", "base_url": "u"},
-                   {"id": "b", "api_key": "sk-2", "model": "m2", "base_url": "u"}],
-        "default_model_id": "b"}
-    r = client.get("/api/models")
-    d = r.json()
-    assert d["default_id"] == "b"
-    assert len(d["models"]) == 2
+        "gateway_url": "https://edge.example", "gateway_device_token": "old-fake-token",
+        "another_setting": True,
+    }
+    key = "sk-fake-test-only"
+    assert client.post("/api/setup/save", json={}).status_code == 400
+    assert client.post("/api/setup/save", json={"api_key": key}).json()["ok"] is True
+    assert mem_config["cfg"]["api_key"] == key
+    assert mem_config["cfg"]["another_setting"] is True
+    assert "gateway_url" not in mem_config["cfg"]
+    assert "gateway_device_token" not in mem_config["cfg"]
+    assert mem_config["env_synced"] == [{"api_key": key, "base_url": "https://api.deepseek.com/v1"}]
+    assert client.get("/api/setup-status").json() == {"configured": True, "profile_count": 1}
+    assert client.get("/api/config-status").json() == {
+        "ok": True, "model": "deepseek-v4-flash-vision-exp", "provider": "https://api.deepseek.com/v1",
+    }
+    for path in ("/api/setup/current", "/api/setup/templates", "/api/models"):
+        assert key not in client.get(path).text
+    assert client.get("/api/setup/current").json()["has_deepseek_api_key"] is True
+
+
+@pytest.mark.parametrize("payload", [
+    {"api_key": "YOUR_DEEPSEEK_API_KEY"},
+    {"api_key": "key\nheader"},
+    {"api_key": "sk-fake-test-only", "base_url": "https://edge.example"},
+    {"gateway_url": "https://edge.example", "gateway_device_token": "old-fake-token"},
+    {"models": [{"api_key": "sk-fake-test-only"}]},
+])
+def test_setup_rejects_invalid_keys_and_legacy_transport_fields(client, mem_config, payload):
+    assert client.post("/api/setup/save-partial", json=payload).status_code == 400
+    assert mem_config["cfg"] is None
+
+
+def test_optional_settings_and_empty_save_keep_existing_key(client, mem_config):
+    mem_config["cfg"] = {"api_key": "sk-existing-test-key"}
+    response = client.post("/api/setup/save-partial", json={"baidu_cutout_api_key": "fake-cutout"})
+    assert response.json()["ok"] is True
+    assert client.post("/api/setup/save", json={}).json()["ok"] is True
+    assert mem_config["cfg"]["api_key"] == "sk-existing-test-key"
+    assert mem_config["cfg"]["baidu_cutout_api_key"] == "fake-cutout"
+
+
+def test_runtime_uses_direct_key_and_ignores_legacy_gateway(monkeypatch, mem_config):
+    mem_config["cfg"] = {
+        "api_key": "sk-explicit-test", "base_url": "https://unsafe.example/v1",
+        "gateway_url": "https://edge.example", "gateway_device_token": "old-fake-token",
+    }
+    calls = []
+    monkeypatch.setattr(server, "OpenAI", lambda **kwargs: calls.append(kwargs))
+    assert server.get_profile() is None
+    assert server.get_client() is None
+    assert calls == []
+    mem_config["cfg"]["base_url"] = "https://api.deepseek.com"
+    server.get_client()
+    assert calls[0]["api_key"] == "sk-explicit-test"
+    assert calls[0]["base_url"] == "https://api.deepseek.com/v1"
+    assert calls[0]["http_client"].follow_redirects is False
+    calls[0]["http_client"].close()
+    assert server.get_client({"api_key": "sk-explicit-test", "base_url": "https://api.deepseek.com.evil.example/v1"}) is None
+    assert len(calls) == 1
+    assert mem_config["env_synced"] == []
+
+
+def test_runtime_accepts_only_official_legacy_profiles_and_never_exchanges_tokens(monkeypatch, mem_config):
+    mem_config["cfg"] = {"models": [
+        {"base_url": "https://unsafe.example", "api_key": "sk-wrong-source"},
+        {"base_url": "https://api.deepseek.com", "api_key": "sk-correct-source"},
+    ]}
+    calls = []
+    monkeypatch.setattr(server, "OpenAI", lambda **kwargs: calls.append(kwargs))
+
+    def forbidden_exchange():
+        pytest.fail("legacy token exchange must not run")
+
+    server.get_client({
+        **server.get_profile(), "access_token_provider": forbidden_exchange,
+        "default_headers": {"Authorization": "Bearer should-not-override"},
+    })
+    assert calls[0]["api_key"] == "sk-correct-source"
+    assert "default_headers" not in calls[0]
+    calls[0]["http_client"].close()
+
+
+def test_setup_requires_loopback_host_peer_and_same_origin(client, mem_config):
+    from fastapi.testclient import TestClient
+    payload = {"api_key": "sk-fake-test-only"}
+    path = "/api/setup/save"
+    assert client.post(path, json=payload, headers={"Origin": "https://unrelated.example"}).status_code == 403
+    assert client.post(path, json=payload, headers={"Host": "unrelated.example"}).status_code == 403
+    remote = TestClient(server.app, base_url="http://127.0.0.1:4321", client=("192.0.2.1", 10000))
+    assert remote.post(path, json=payload).status_code == 403
+    assert mem_config["cfg"] is None
+    assert client.post(path, json=payload, headers={"Origin": "http://127.0.0.1:4321"}).status_code == 200
+
+
+def test_transport_does_not_forward_to_custom_hosts_or_expose_provider_error_text():
+    import httpx
+    from config_store import DeepSeekTransport
+
+    key = "sk-fake-echoed-test"
+    calls = []
+
+    def mock_provider(req):
+        calls.append(req)
+        return httpx.Response(401, json={"error": {"message": f"rejected {key}"}})
+
+    with httpx.Client(transport=DeepSeekTransport(httpx.MockTransport(mock_provider))) as http_client:
+        response = http_client.get("https://api.deepseek.com/v1/models", headers={"Authorization": f"Bearer {key}"})
+        assert response.status_code == 401
+        assert key not in response.text
+        with pytest.raises(httpx.ConnectError):
+            http_client.get("https://api.deepseek.com.evil.example", headers={"Authorization": f"Bearer {key}"})
+    assert len(calls) == 1

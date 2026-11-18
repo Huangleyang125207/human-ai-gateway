@@ -15,6 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
+import pulse_io  # noqa: E402
 
 
 # ── skip-if-absent 行为契约 ───────────────────────────────────────────
@@ -78,7 +79,7 @@ def test_unknown_target_raises_400():
 
 def test_self_evolve_targets_config_unchanged():
     """三 target 配置项:create_if_absent / budget / prompt_template 都不能漂"""
-    cfg = server._SELF_EVOLVE_TARGETS
+    cfg = pulse_io._SELF_EVOLVE_TARGETS
     assert set(cfg.keys()) == {"user_pulse", "project_pulse", "agent_context"}
     # 只有 user_pulse 允许 create_if_absent(6.17 教训)
     assert cfg["user_pulse"].get("create_if_absent") is True

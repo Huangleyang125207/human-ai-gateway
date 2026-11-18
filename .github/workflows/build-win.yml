@@ -6,9 +6,9 @@ name: Build Windows (Tauri + auto-update)
 # 之前 PyInstaller standalone 模式留在 git history (commit b7dfae0),要复原直接看老 yml。
 #
 # ✓ Win 发版同步路径(详 RELEASE.md "A · CI 主路径")。
-#   push main + 路径含 .py/.html/shared 时自动跑,跟 Mac 那侧 build-mac.yml (tag v*) 并行。
-#   所以发版要 push main + push tag v* 两步:第一步触发本 CI,第二步触发 Mac CI。
-#   单独 push tag 不触发 Win — 必须同时 push main 才能让 Win 跟上。
+#   main 的运行时改动会触发验证构建；tag v* 会与 Mac workflow 一起触发正式
+#   Win 构建、COS updater 上传和 GH Release 资产发布。GitHub 不对 tag push
+#   计算 paths 过滤，因此同一 tag 是双平台发布闸。
 #   6.17 教训:把"只发 Mac"当默认导致 Win 落后 5 天没人发现。
 
 on:
@@ -22,9 +22,19 @@ on:
       - 'vendor/**'
       - 'brand/**'
       - 'protocols/**'
+      - 'prompts/**'
+      - 'skills/**'
+      - 'scripts/**'
+      - 'tests/**'
       - 'tools/**'
+      - 'docs/contracts/**'
+      - 'docs/ARCHITECTURE_LEDGER.md'
+      - 'PRIVACY.md'
+      - 'README.md'
+      - 'LICENSE'
       - 'src-tauri/**'
       - 'requirements.txt'
+      - 'requirements-test.txt'
       - '.github/workflows/build-win.yml'
     tags: ['v*']
   workflow_dispatch:
@@ -46,12 +56,27 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Install Python deps + PyInstaller
         shell: cmd
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-test.txt
           pip install rapidocr-onnxruntime rembg==2.0.61 pyinstaller
+
+      - name: Test runtime + generated contract freshness
+        shell: pwsh
+        run: |
+          python -m pytest -q
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem tests\frontend\*.mjs | ForEach-Object {
+            node --test $_.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
       - name: Install Rust + tauri-cli
         # Win runner 自带 rustup,只需加 target + 装 tauri-cli
@@ -74,7 +99,6 @@ jobs:
             --distpath dist-sidecar ^
             --workpath build-sidecar ^
             --add-data "index.html;." ^
-            --add-data "day.html;." ^
             --add-data "reset.html;." ^
             --add-data "history.html;." ^
             --add-data "consent.html;." ^
@@ -85,6 +109,9 @@ jobs:
             --add-data "vendor;vendor" ^
             --add-data "brand;brand" ^
             --add-data "protocols;protocols" ^
+            --add-data "prompts;prompts" ^
+            --add-data "skills;skills" ^
+            --add-data "docs/ARCHITECTURE_LEDGER.md;docs" ^
             --add-data ".gateway-config.example.json;." ^
             --add-data "vault_config.py;." ^
             --add-data "vault_git.py;." ^

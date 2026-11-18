@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "capabilities": [
+    {
+      "name": "daily_tasks.completion_summary",
+      "mode": "read",
+      "description": "Aggregate top-section daily task completion over a bounded recent-day window.",
+      "params": {
+        "days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "default": 7
+        }
+      },
+      "returns": {
+        "days": "Array<{date, completed, total, rate}>",
+        "summary": "{completed, total, rate, caption}"
+      }
+    },
+    {
+      "name": "memo.overview",
+      "mode": "read",
+      "description": "List current AI-managed memo occurrences. Widget interactions return to AI and cannot mutate state directly.",
+      "params": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 4
+        }
+      },
+      "returns": {
+        "items": "Array<{occurrence_id,series_id,text,due_at,state,overdue,schedule_label}>",
+        "caption": "string"
+      }
+    }
+  ]
+}

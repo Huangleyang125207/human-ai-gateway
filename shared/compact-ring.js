@@ -5,8 +5,8 @@
  * 颜色:< 80%  绿
  *      80-99% 黄
  *      ≥ 100% 朱红
- * 数据:localStorage 里的 thread.history.v1。content + _actions 累计字符。
- *      compact 后被动条会回弹。
+ * 数据:完整 History 由 thread.js 永久保留；这里只更新 Compact checkpoint，
+ *      模型上下文由“摘要 + 最近原始轮次”派生，圆环按派生上下文回弹。
  */
 (function () {
   const THREAD_KEY = "gateway.thread.history.v1";
@@ -24,23 +24,60 @@
 
   let ring = null;
 
-  function getHistoryChars() {
-    try {
-      const arr = JSON.parse(localStorage.getItem(THREAD_KEY) || "[]");
-      let sum = 0;
-      for (const m of arr) {
-        sum += (m.content || "").length;
-        if (m._actions && Array.isArray(m._actions)) {
-          for (const a of m._actions) {
-            sum += JSON.stringify(a.result || "").length + JSON.stringify(a.args || "").length;
+  function historyChars(arr) {
+    let sum = 0;
+    for (const m of arr) {
+      sum += (m.content || "").length;
+      if (m.model_messages && Array.isArray(m.model_messages)) {
+        for (const replay of m.model_messages) {
+          if (replay?.role === "tool") sum += (replay.content || "").length;
+          if (replay?.role === "assistant") {
+            sum += (replay.reasoning_content || "").length;
+            if (replay.tool_calls && Array.isArray(replay.tool_calls)) {
+              sum += JSON.stringify(replay.tool_calls).length;
+            }
           }
         }
-        if (m.reasoning_content) sum += m.reasoning_content.length;
+      } else if (m._actions && Array.isArray(m._actions)) {
+        for (const a of m._actions) {
+          sum += JSON.stringify(a.result || "").length + JSON.stringify(a.args || "").length;
+        }
       }
-      return sum;
+      if ((!m.model_messages || !Array.isArray(m.model_messages)) && m.reasoning_content) {
+        sum += m.reasoning_content.length;
+      }
+    }
+    return sum;
+  }
+
+  function getHistoryChars() {
+    try {
+      const context = window.gateway?.thread?.modelContext?.()
+        || JSON.parse(localStorage.getItem(THREAD_KEY) || "[]");
+      return historyChars(context);
     } catch (e) {
       return 0;
     }
+  }
+
+  // 一轮从 user 消息开始,包含其后的 assistant 消息。少于 5 轮时原样保留。
+  function recentConversationStart(snapshot, keepTurns) {
+    const userIndexes = [];
+    for (let i = 0; i < snapshot.length; i++) {
+      if (snapshot[i]?.role === "user") userIndexes.push(i);
+    }
+    if (userIndexes.length <= keepTurns) return 0;
+    return userIndexes[userIndexes.length - keepTurns];
+  }
+
+  function createCompactCheckpoint(snapshot, summary, at) {
+    summary = String(summary || "").trim();
+    if (!summary) return null;
+    return {
+      summary,
+      through: recentConversationStart(snapshot, 5),
+      at: at || new Date().toISOString(),
+    };
   }
 
   function injectRing() {
@@ -79,12 +116,13 @@
       window.gatewayToast?.("对话还空,先聊点东西再整理。");
       return;
     }
-    // 拿 history 快照 + 记 cutoff index — 30-90s LLM 跑期间用户可能继续聊新消息,
+    // 拿 history 快照 — 30-90s LLM 跑期间用户可能继续聊新消息,
     // clear 时只清 cutoff 内的旧消息(#12)
-    const arrSnapshot = JSON.parse(localStorage.getItem(THREAD_KEY) || "[]");
-    const cutoffIndex = arrSnapshot.length;
+    const arrSnapshot = window.gateway?.thread?.history?.()
+      || JSON.parse(localStorage.getItem(THREAD_KEY) || "[]");
+    const contextSnapshot = window.gateway?.thread?.modelContext?.() || arrSnapshot;
     // tail-truncate conversation 80K 字符防 deepseek context 爆(#28)
-    let conversation = arrSnapshot.map(m => {
+    let conversation = contextSnapshot.map(m => {
       const role = m.role === "user" ? "用户" : "AI";
       return `[${role}] ${(m.content || "").trim()}`;
     }).join("\n\n");
@@ -102,7 +140,7 @@
         `  · 个人快照 — 你的当下状态\n` +
         `  · 项目快照 — 项目进展\n` +
         `  · 协作约定 — 团队规则\n\n` +
-        `完成后对话历史会重置，旧摘要会自动备份。`
+        `完成后完整历史仍可回看，AI 上下文会切换为摘要加最近 5 轮。`
       );
       if (!ok) return;
     }
@@ -135,8 +173,8 @@
 
     const ok_count = results.filter(r => r.ok).length;
     if (ok_count === targets.length) {
-      // 全成功 — 让 server LLM 产 200 字 summary,清 thread 同时保留最后 5 轮 + summary
-      // 防 AI 突然失忆(用户视角:刚整理完发新消息,AI 还有上下文不冷启)
+      // 全成功 — 让 server LLM 产 200 字 summary，只推进模型上下文 checkpoint。
+      // 完整 History 永不改写；最近 5 个 user-led 轮次继续逐字重放。
       let summary = "";
       try {
         const r = await fetch("/api/pulse/compact-summary", {
@@ -153,39 +191,25 @@
       }
 
       try {
-        const arrNow = JSON.parse(localStorage.getItem(THREAD_KEY) || "[]");
-        // 保留 cutoff 之后的新消息(LLM 跑期间用户发的)
-        const newAfterCutoff = arrNow.slice(cutoffIndex);
-        // 旧消息保留最后 5 条(cutoffIndex 之前的最后 5 条)
-        const lastFromOld = arrSnapshot.slice(Math.max(0, cutoffIndex - 5));
-        // 组合:[summary 占位] + 最后 5 轮旧 + 新消息
-        const composed = [];
-        if (summary) {
-          composed.push({
-            role: "assistant",
-            content: `_(整理摘要)_\n\n${summary}`,
-            ts: new Date(+new Date()).toISOString().replace("Z", "+08:00"),
-            _isCompactSummary: true,
-          });
+        const checkpoint = createCompactCheckpoint(arrSnapshot, summary);
+        if (!checkpoint) {
+          if (opts.auto) {
+            const fails = readFailCount() + 1;
+            writeFailCount(fails);
+            if (fails >= 2) localStorage.setItem(AUTO_COMPACT_KEY, "off");
+          }
+          window.gatewayToast?.("整理未完成 — 摘要生成失败,对话历史未动。");
+          return;
         }
-        composed.push(...lastFromOld);
-        composed.push(...newAfterCutoff);
 
-        // workflow #13 闭合:走 replaceHistory 单一 API(内部 saveHistory CAS),
-        // 不再直写 localStorage 绕过 thread.js 的 base_mtime 防护。
-        if (composed.length === 0) {
-          window.gateway?.thread?.clear?.();
-        } else if (window.gateway?.thread?.replaceHistory) {
-          window.gateway.thread.replaceHistory(composed);
-        } else {
-          // 极端 fallback(thread.js 没 expose replaceHistory)— 不发生,但兜底
-          localStorage.setItem(THREAD_KEY, JSON.stringify(composed));
-          window.dispatchEvent(new StorageEvent("storage", { key: THREAD_KEY }));
+        if (!await window.gateway?.thread?.setCompactCheckpoint?.(checkpoint)) {
+          window.gatewayToast?.("整理摘要生成了，但 checkpoint 保存失败；完整历史没动。");
+          return;
         }
       } catch {}
       writeFailCount(0);
       update();
-      window.gatewayToast?.(`整理完成 — 已生成摘要并保留最近 5 轮对话。`);
+      window.gatewayToast?.(`整理完成 — 完整历史保留，AI 上下文已压缩。`);
     } else if (ok_count > 0) {
       const failed = results.filter(r => !r.ok).map(r => `${r.name}(${r.status || r.error || "?"})`);
       if (opts.auto) {
@@ -278,5 +302,5 @@
   }
 
   window.gateway = window.gateway || {};
-  window.gateway.compactRing = { update };
+  window.gateway.compactRing = { update, historyChars, createCompactCheckpoint };
 })();

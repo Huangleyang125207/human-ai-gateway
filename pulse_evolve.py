@@ -17,8 +17,7 @@ PULSE.md Cannot break 红线(P0+ 40 测试守):
   pulse_evolve 通过模块属性查找仍命中)
 - 顶层 from pulse_io import _SELF_EVOLVE_TARGETS / _TS_RE / _pulse_validate /
   _get_schema_version / _ensure_schema_version_header(P2 已抽)
-- 函数体内 lazy:server.get_profile / get_client / VAULT_DIR / _safe_write_text /
-  _push_notification / _report_silent_failure / log
+- get_profile/get_client/vault/write/notify/report/logger 由组装根窄参数注入
 """
 import re
 import threading
@@ -124,18 +123,23 @@ def _get_evolve_lock(target: str) -> threading.Lock:
         return lk
 
 
-def _self_evolve_run(target: str, conversation: str) -> dict:
+def _self_evolve_run(
+    target: str,
+    conversation: str,
+    *,
+    get_profile,
+    get_client,
+    vault_dir,
+    write_text,
+    push_notification,
+    report_failure,
+    logger,
+) -> dict:
     """通用 self-evolve:LLM 重写真源 md。USER_PULSE / 项目 PULSE / AGENT_CONTEXT 都走这一条路。
     锁保护 read→LLM→write 整段(防 #5 race);atomic write + rotate backup(#11 #13);
     mtime guard 防用户外部编辑被覆盖(#21);schema-version 保留(#8);
     len/H1/H2 sanity 防 LLM 大量删内容(#6);写入 VAULT_DIR 走 vault_git(#14 #17)。
     """
-    # lazy import:test 的 monkeypatch.setattr(server, X) 仍生效(每次 call 重读)
-    from server import (
-        get_profile, get_client, VAULT_DIR, _safe_write_text,
-        _push_notification, _report_silent_failure, log,
-    )
-
     cfg = _SELF_EVOLVE_TARGETS.get(target)
     if not cfg:
         raise HTTPException(400, f"未知 target: {target}")
@@ -253,7 +257,7 @@ def _self_evolve_run(target: str, conversation: str) -> dict:
                 err_type = "self_evolve_call_timeout"
             else:
                 err_type = "self_evolve_llm_call_failed"
-            _report_silent_failure(err_type, last_err[:150],
+            report_failure(err_type, last_err[:150],
                 context={"target": target, "model": profile.get("model"), "attempts": 2})
             raise HTTPException(500, f"{cfg['name']} 更新失败: {last_err}")
 
@@ -264,7 +268,7 @@ def _self_evolve_run(target: str, conversation: str) -> dict:
             current = path.read_text(encoding="utf-8")
             current_sha = _hashlib_se.sha256(current.encode("utf-8")).hexdigest()
             if current_sha != old_sha:
-                _push_notification(
+                push_notification(
                     "pulse-skip-external-edit",
                     f"{cfg['name']} 在 LLM 重写期间被外部编辑,跳过写入保留你手编内容(LLM 结果丢弃)",
                     {"target": target},
@@ -279,7 +283,7 @@ def _self_evolve_run(target: str, conversation: str) -> dict:
         except FileNotFoundError:
             # creating 模式:文件本就不存在,这是预期 — 继续写首版,不当"被删"。
             if not creating:
-                _push_notification(
+                push_notification(
                     "pulse-skip-external-edit",
                     f"{cfg['name']} 在 LLM 重写期间被删除,跳过写入",
                     {"target": target},
@@ -294,7 +298,7 @@ def _self_evolve_run(target: str, conversation: str) -> dict:
 
         # atomic write + 5 份 rotate backup(#11 #13)
         try:
-            _safe_write_text(path, new_text, rotate=True)
+            write_text(path, new_text, rotate=True)
         except Exception as e:
             raise HTTPException(500, f"{cfg['name']} 写盘失败: {e}")
 
@@ -303,15 +307,15 @@ def _self_evolve_run(target: str, conversation: str) -> dict:
         # monkeypatch.setattr(server.vault_git, "commit_after_write", spy) 仍命中
         # (server.vault_git 跟我们 import vault_git 是同一个 module 对象)
         try:
-            if path.resolve().is_relative_to(VAULT_DIR.resolve()):
+            if path.resolve().is_relative_to(vault_dir.resolve()):
                 vault_git.commit_after_write(
-                    VAULT_DIR,
+                    vault_dir,
                     f"self-evolve {cfg['name']} ({len(old)}→{len(new_text)} chars)",
                     author="ai",
                     paths=[path],
                 )
         except Exception as e:
-            log.warning(f"vault_git commit_after_write {cfg['name']} 失败: {e}")
+            logger.warning(f"vault_git commit_after_write {cfg['name']} 失败: {e}")
 
         return {
             "ok": True,
