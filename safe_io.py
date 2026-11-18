@@ -89,7 +89,7 @@ def _pretty_rel(p: Path, roots=None) -> str:
     p = Path(p)
     for base in roots or (APP_STATE_DIR, DATA_HOME, CODE_ROOT):
         try:
-            return str(p.relative_to(base))
+            return p.relative_to(base).as_posix()
         except ValueError:
             continue
     return str(p)

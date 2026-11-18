@@ -91,6 +91,15 @@ def fake_chat():
 
 
 @pytest.fixture
+def isolated_home(monkeypatch, tmp_path):
+    """Make pathlib resolve a synthetic home on Unix and Windows."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    return home
+
+
+@pytest.fixture
 def isolated_pulse_paths(monkeypatch, tmp_path):
     """所有 PULSE 真源路径 + mirror 路径 + EVAL_LOG_DIR 都隔离到 tmp。
 

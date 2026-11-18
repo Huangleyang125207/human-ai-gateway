@@ -26,7 +26,7 @@ ALLOW_PROD_HOST = re.compile(r'101\.42\.108\.30')
 
 def _grep_lines(path: Path, *, skip_comment_prefix=("#", "//", "/*", "*")):
     """yield (line_no, line) 不含注释行。"""
-    for i, line in enumerate(path.read_text().splitlines(), 1):
+    for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         s = line.lstrip()
         if any(s.startswith(p) for p in skip_comment_prefix):
             continue
@@ -117,7 +117,7 @@ def test_tauri_stub_no_hardcoded_port():
     f = ROOT / "tauri-stub" / "index.html"
     if not f.exists():
         pytest.skip("tauri-stub 不在")
-    txt = f.read_text()
+    txt = f.read_text(encoding="utf-8")
     assert ":4321" not in txt, (
         "tauri-stub/index.html 提到 :4321 — 误导新用户;改成不带端口的中性提示"
     )
@@ -130,7 +130,7 @@ def test_upload_image_returns_relative_url():
     避免任何"为了 dev 方便加了 http://localhost:NNNN"的回归。
     """
     # upload-image 路由 6.24 抽到 chat_routes.py(@router.post);源码级断言跟去那
-    src = (ROOT / "chat_routes.py").read_text()
+    src = (ROOT / "chat_routes.py").read_text(encoding="utf-8")
     # 抓 upload-image 路由的整个函数体到下个 @router 装饰器(或文件尾)之前
     m = re.search(
         r'@router\.post\("/api/chat/upload-image"\).*?(?=@router\.|\Z)',
@@ -153,7 +153,7 @@ def test_curator_tool_description_forbids_absolute_url():
     """模型曾把相对 URL 自动补上 http://localhost:18080 — 这是 prompt discipline 的事。
     description 必须明令"原样照抄,不要加 host/port 前缀"。
     """
-    src = (ROOT / "tool_specs.py").read_text()  # TOOLS schema 6.25 抽到 tool_specs.py
+    src = (ROOT / "tool_specs.py").read_text(encoding="utf-8")  # TOOLS schema 6.25 抽到 tool_specs.py
     # 抓 ask_photo_curator 那个 tool 的 description 字段(可能跨多行字符串拼接)
     m = re.search(
         r'"name"\s*:\s*"ask_photo_curator"\s*,\s*\n\s*"description"\s*:\s*\((.+?)\)\s*,',

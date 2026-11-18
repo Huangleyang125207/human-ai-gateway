@@ -207,14 +207,26 @@ def test_compact_summary_empty_short_circuits(client):
 
 # ── T1: POST /api/pulse/refresh-mirror ───────────────────────────────
 
-def test_refresh_mirror_returns_shape(client, isolated_pulse_paths, stubbed_llm):
-    """返 scanned/updated/files 三字段"""
+def test_refresh_mirror_returns_shape(client, isolated_pulse_paths, stubbed_llm, isolated_home):
+    source = isolated_home / "agents创作平台" / "agents" / "fixture" / "PULSE.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("# Fixture project\n", encoding="utf-8")
+
     r = client.post("/api/pulse/refresh-mirror")
     assert r.status_code == 200
     data = r.json()
-    for k in ("scanned", "updated", "files"):
-        assert k in data
-    assert isinstance(data["files"], list)
+    assert data["scanned"] == 1
+    assert data["updated"] == 1
+    assert data["files"] == ["fixture"]
+
+
+def test_refresh_mirror_without_sources_does_not_write(
+    client, isolated_pulse_paths, stubbed_llm, isolated_home,
+):
+    r = client.post("/api/pulse/refresh-mirror")
+    assert r.status_code == 200
+    assert r.json() == {"scanned": 0, "updated": 0, "warning": "no source PULSE.md found"}
+    stubbed_llm.vault_git.assert_not_called()
 
 
 # ── T6: e2e 全 PULSE 流转 ─────────────────────────────────────────────

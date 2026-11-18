@@ -109,7 +109,7 @@ def test_self_evolve_skips_vault_git_when_path_outside_vault(
 # ── refresh-mirror 真路径调 vault_git ─────────────────────────────────
 
 def test_refresh_mirror_calls_vault_git_when_files_updated(
-    monkeypatch, stubbed_llm, isolated_pulse_paths, client, tmp_path
+    stubbed_llm, isolated_pulse_paths, client, isolated_home
 ):
     """有 updated 文件 → vault_git.commit_after_write 调一次,signature 契约。
 
@@ -119,13 +119,10 @@ def test_refresh_mirror_calls_vault_git_when_files_updated(
       kwargs['author'] == "system"  (注意:不是 'ai',跟 _self_evolve_run 区分)
       kwargs['paths'] = 非空 list,每项是 PULSE_DIR/<name>.md
     """
-    # 把 Path.home() 指向 tmp_path,让 refresh-mirror 扫到我们造的源
-    monkeypatch.setenv("HOME", str(tmp_path))
-    # sanity
-    assert Path.home() == tmp_path, "HOME env 没生效,Path.home() 不是 tmp"
+    assert Path.home() == isolated_home
 
     # 造一份源 PULSE
-    src_dir = tmp_path / "agents创作平台" / "agents" / "proj1"
+    src_dir = isolated_home / "agents创作平台" / "agents" / "proj1"
     src_dir.mkdir(parents=True)
     src_content = "<!-- ts:2026-06-18 -->\n# proj1\n内容 X\n"
     (src_dir / "PULSE.md").write_text(src_content, encoding="utf-8")

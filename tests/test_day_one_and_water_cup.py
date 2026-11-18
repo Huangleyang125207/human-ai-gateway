@@ -130,7 +130,7 @@ def test_set_water_cup_image_dispatcher_wired():
 
 def test_set_water_cup_image_tool_schema_minimum():
     """OpenAI tool spec 必含 name + description + parameters.required[attachment_url]"""
-    src = (ROOT / "tool_specs.py").read_text()  # TOOLS schema 6.25 抽到 tool_specs.py
+    src = (ROOT / "tool_specs.py").read_text(encoding="utf-8")  # TOOLS schema 6.25 抽到 tool_specs.py
     # 抓 set_water_cup_image 这个 function spec 的 properties 段
     m = re.search(
         r'"name":\s*"set_water_cup_image".*?"required":\s*\[(.*?)\]',
@@ -152,9 +152,9 @@ def test_workflow_hint_includes_water_cup_path():
     # workflow hint 6.24 随 chat() 抽到 chat_routes.py;7.22 文案再抽到 prompts/vision_workflow.md
     # (Extract Module,渲染逻辑留 chat_routes._build_vision_workflow_block)— 源码级断言读三处合并
     src = (
-        (ROOT / "server.py").read_text()
-        + (ROOT / "chat_routes.py").read_text()
-        + (ROOT / "prompts" / "vision_workflow.md").read_text()
+        (ROOT / "server.py").read_text(encoding="utf-8")
+        + (ROOT / "chat_routes.py").read_text(encoding="utf-8")
+        + (ROOT / "prompts" / "vision_workflow.md").read_text(encoding="utf-8")
     )
     # 关键字三连击:'水杯' + 'set_water_cup_image' + 触发词列表
     assert "水杯" in src, "源码必有'水杯'字 — 它在 workflow hint 里"
